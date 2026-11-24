@@ -159,13 +159,19 @@ def test_typed_refused(temp_site, case: str) -> None:
 
 SIZED: Final[Dict[str, Tuple[str, str, Any]]] = {
     'evict-600': ('server.evict', '600', 600),
-    'evict-half': ('server.evict', '0.5', 0.5),
+    'evict-10.5': ('server.evict', '10.5', 10.5),
     'evict-10m': ('server.evict', '10m', '10m'),
     'memory-16G': ('client.memory', '16G', '16G'),
-    'evict-inf': ('server.evict', 'inf', 'inf'),
-    'evict-True': ('server.evict', 'True', 'True'),
-    'evict-null': ('server.evict', 'null', 'null'),
 }
+
+SIZED_REFUSED: Final[Dict[str, Tuple[str, str]]] = {
+    'evict-half': ('server.evict', '0.5'),
+    'evict-inf': ('server.evict', 'inf'),
+    'evict-True': ('server.evict', 'True'),
+    'evict-null': ('server.evict', 'null'),
+    'memory-x': ('client.memory', 'x'),
+}
+"""A duration or size key's value out of its range or not of its kind (each written as text before 2.9.0)."""
 
 
 @mark.integration
@@ -177,6 +183,19 @@ def test_duration_size(temp_site, case: str) -> None:
     rc, stderr = config_set(site, path, value)
     assert rc == exit_status.success, stderr
     assert same(written(site / 'config.toml', path), expected)
+
+
+@mark.integration
+@mark.parametrize('case', list(SIZED_REFUSED))
+def test_duration_size_refused(temp_site, case: str) -> None:
+    """A duration or size outside its key's range, or not of its kind, exits 2 naming the key and writes nothing."""
+    site = Path(str(temp_site))
+    path, value = SIZED_REFUSED[case]
+    (site / 'config.toml').write_text(SEED)
+    rc, stderr = config_set(site, path, value)
+    assert rc == exit_status.bad_argument, stderr
+    assert f'{path}: expected a ' in stderr and repr(value) in stderr, stderr
+    assert (site / 'config.toml').read_text() == SEED
 
 
 UNTYPED: Final[Dict[str, Tuple[str, str, Any]]] = {

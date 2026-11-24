@@ -1,9 +1,8 @@
 # bounded-inputs: guard tests that must pass on the base build AND after every phase (what must not change).
 # Run from the repository root:
 #   sh spec/submit-input-checks/drive/run_list.sh spec/bounded-inputs/drive/guards.txt 1200
-# `pg:` lines run only with HS_TEST_POSTGRES set (sandbox off). New tests of in-range values (R2) join this
-# list in P1 once written: tests/test_bounded_options.py::test_option_in_range_unchanged and
-# tests/test_bounded_config.py::test_file_value_in_range_unchanged.
+# `pg:` lines run only with HS_TEST_POSTGRES set (sandbox off). The new tests of in-range values (R2), written
+# in P1, are at the end.
 
 # R2: the duration, size and delay forms keep their meaning and rounding.
 tests/test_duration_options.py::test_delay_accepted
@@ -51,3 +50,8 @@ tests/test_group_integer.py::test_submit_json_accepts_integer_group
 tests/test_memory_column.py::test_sqlite_column_unchanged
 tests/test_memory_column.py::test_large_memory_sqlite
 pg:tests/test_memory_column.py::test_postgres_column_bigint
+
+# R2: the new in-range tests (P1): each bound inside its range is taken and read as today.
+tests/test_bounded_options.py::test_option_in_range_unchanged
+tests/test_bounded_options.py::test_option_in_range_stored
+tests/test_bounded_config.py::test_file_value_in_range_unchanged

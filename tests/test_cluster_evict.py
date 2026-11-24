@@ -17,7 +17,6 @@ from typing import Any, Dict, Final, List
 import sys
 import json
 from pathlib import Path
-from datetime import timedelta
 from subprocess import run, DEVNULL
 
 # External libs
@@ -66,6 +65,9 @@ def recorded(site: Path, mode: str, **variables: Any) -> Dict[str, Any]:
     result = run([sys.executable, '-c', EVICT_RECORDED, *argv], cwd=site, env=child_env(site, **variables),
                  stdin=DEVNULL, capture_output=True, text=True, timeout=DEADLINE)
     lines = result.stdout.strip().splitlines()
+    if result.returncode != 0 and not lines:
+        # Refused as the configuration loads, before `hs` runs: nothing was recorded.
+        return {'status': result.returncode, 'steps': [], 'evict': [], 'stderr': result.stderr}
     assert result.returncode == 0 and lines, result.stderr
     return {**json.loads(lines[-1]), 'stderr': result.stderr}
 
@@ -112,28 +114,25 @@ def test_cluster_evict_default(temp_site, mode: str) -> None:
     assert seen['evict'] == [600], seen['stderr']
 
 
-EVICT_CAP: Final[int] = timedelta.max.days * 86_400
-"""Longest period the heartbeat monitor's intervals hold, in whole days of seconds."""
+EVICT_CAP: Final[int] = 2**31 - 1
+"""Longest eviction period, in seconds: the ceiling of every duration (`task.timeout`'s column)."""
 
 WIDE: Final[str] = '1' + '0' * 400
 """A whole number of seconds wider than a float."""
 
+EVICT_REFUSAL: Final[str] = 'server.evict: expected a duration from 10 s to 2,147,483,647 s, given '
+"""The refusal of a `server.evict` value, before the value shown."""
+
 REFUSALS: Final[Dict[str, Any]] = {
-    'abc': ('env', 'abc', exit_status.bad_config, "server.evict: Duration 'abc' is not valid"),
-    'under-floor': ('env', '5', exit_status.runtime_error, 'Evict period must be greater than 10 seconds: given 5'),
-    'fraction-under': ('env', '9.5s', exit_status.runtime_error,
-                       'Evict period must be greater than 10 seconds: given 9.5'),
-    'file-under-floor': ('file', '5', exit_status.runtime_error,
-                         'Evict period must be greater than 10 seconds: given 5'),
-    'over-cap': ('env', str(EVICT_CAP + 1), exit_status.runtime_error,
-                 f'Evict period must be at most {EVICT_CAP} seconds: given {EVICT_CAP + 1}'),
-    'file-float-huge': ('toml', '1e300', exit_status.runtime_error,
-                        f'Evict period must be at most {EVICT_CAP} seconds: given 1e+300'),
-    'int-huge': ('env', WIDE, exit_status.runtime_error, f'Evict period must be at most {EVICT_CAP} seconds: given {WIDE}'),
-    'file-int-huge': ('file', WIDE, exit_status.runtime_error,
-                      f'Evict period must be at most {EVICT_CAP} seconds: given {WIDE}'),
-    'days-huge': ('env', f'{WIDE}d', exit_status.runtime_error,
-                  f'Evict period must be at most {EVICT_CAP} seconds: given {int(WIDE) * 86_400}'),
+    'abc': ('env', 'abc', exit_status.bad_config, f"{EVICT_REFUSAL}'abc' (from: HYPERSHELL_SERVER_EVICT)"),
+    'under-floor': ('env', '5', exit_status.bad_config, f"{EVICT_REFUSAL}'5' (from: HYPERSHELL_SERVER_EVICT)"),
+    'fraction-under': ('env', '9.5s', exit_status.bad_config, f"{EVICT_REFUSAL}'9.5s' (from: HYPERSHELL_SERVER_EVICT)"),
+    'file-under-floor': ('file', '5', exit_status.bad_config, f'{EVICT_REFUSAL}5 (from: '),
+    'over-cap': ('env', str(EVICT_CAP + 1), exit_status.bad_config, f"{EVICT_REFUSAL}'{EVICT_CAP + 1}' (from: "),
+    'file-float-huge': ('toml', '1e300', exit_status.bad_config, f'{EVICT_REFUSAL}1e+300 (from: '),
+    'int-huge': ('env', WIDE, exit_status.bad_config, f"{EVICT_REFUSAL}'1000"),
+    'file-int-huge': ('file', WIDE, exit_status.bad_config, f'{EVICT_REFUSAL}1'),
+    'days-huge': ('env', f'{WIDE}d', exit_status.bad_config, f"{EVICT_REFUSAL}'1000"),
 }
 """A value `hs server` refuses: its layer, value, exit status and message."""
 
@@ -175,22 +174,22 @@ def test_cluster_evict_floor_cli(temp_site) -> None:
     env = child_env(site, HYPERSHELL_SERVER_EVICT='5')
     code, _, stderr = run_bounded(site, ['hs', 'cluster', 't.in', '--no-db', '--no-tls', '-H', '127.0.0.1',
                                          '-p', str(free_port())], env, bound=60)
-    assert code == exit_status.runtime_error, stderr
-    assert 'Evict period must be greater than 10 seconds: given 5' in stderr, stderr
+    assert code == exit_status.bad_config, stderr
+    assert f"{EVICT_REFUSAL}'5' (from: HYPERSHELL_SERVER_EVICT)" in stderr, stderr
     assert 'Server listening' not in stderr, stderr
 
 
 @mark.integration
 @mark.parametrize('command', ['server', 'cluster'])
 def test_evict_over_cap_cli(temp_site, command: str) -> None:
-    """A file's `evict = 1e300` stops a real `hs server` or `hs cluster` with exit 5 and the refusal,
+    """A file's `evict = 1e300` stops a real `hs server` or `hs cluster` with exit 3 and the refusal,
     no traceback written, never listening."""
     site = Path(str(temp_site))
     create_taskfile(site, ['echo hi'], 't.in')
     env = child_env(site, HYPERSHELL_SERVER_AUTH=KEY, **evict_layer(site, 'toml', '1e300'))
     code, _, stderr = run_bounded(site, ['hs', command, 't.in', '--no-db', '--no-tls', '-H', '127.0.0.1',
                                          '-p', str(free_port())], env, bound=60)
-    assert code == exit_status.runtime_error, stderr
-    assert f'Evict period must be at most {EVICT_CAP} seconds: given 1e+300' in stderr, stderr
+    assert code == exit_status.bad_config, stderr
+    assert f'{EVICT_REFUSAL}1e+300 (from: ' in stderr, stderr
     assert 'Server listening' not in stderr and 'Traceback' not in stderr, stderr
     assert not list(site.rglob('exception-*.log')), stderr

@@ -72,8 +72,9 @@ tests/test_bounded_tags.py::test_stream_tag_line_refused
 # R11: on PostgreSQL the largest values are stored (2**63-1 bytes is 2**63 through today's parser).
 pg:tests/test_bounded_tags.py::test_largest_values_stored[postgres]
 
-# R13: past an advisory limit, one WARNING and the run goes on.
+# R13: past an advisory limit, one WARNING and the run goes on. The tags' summary is tested with the tags (P4),
+# so that P3's run of the advisory file selects only what P3 lands (id fixed in P1).
 tests/test_bounded_advisory.py::test_option_advised_once[client-num-threads-1025]
 tests/test_bounded_advisory.py::test_option_advised_once[cluster-factor-101]
 tests/test_bounded_advisory.py::test_file_value_advised_once[server-attempts-101]
-tests/test_bounded_advisory.py::test_tags_advised_once_per_submission[sqlite]
+tests/test_bounded_tags.py::test_tags_advised_once_per_submission[sqlite]

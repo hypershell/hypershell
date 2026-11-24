@@ -146,9 +146,9 @@ def test_memory_tag_validation_names_forms(value: str) -> None:
 @mark.unit
 def test_memory_unchecked_value_refused_by_task() -> None:
     """A memory value that skipped tag validation is still refused, as a one-line RuntimeError."""
-    with raises(RuntimeError, match=r"Memory size '16X' is not valid"):
+    with raises(RuntimeError, match=r"task\.memory: expected a size .*given '16X'"):
         Task.new(args='echo a', memory='16X')
-    with raises(RuntimeError, match=r"Memory size '16X' is not valid"):
+    with raises(RuntimeError, match=r"task\.memory: expected a size .*given '16X'"):
         Task.new(args='echo a # HYPERSHELL: naked memory:16X')  # Tags after a naked tag are not checked.
 
 

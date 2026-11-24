@@ -197,10 +197,13 @@ def parsed_rate(app: Type[Application], word: str) -> Any:
 
 RATE_APPS: Final[Dict[str, Type[Application]]] = {'client': ClientApp, 'cluster': ClusterApp}
 
+RATE_RANGE: Final[str] = 'expected a number from 0.000001 to 1,000,000,000 tasks per second, or 0 (no limit), given '
+"""The range a refused rate is refused in favour of, as the refusal gives it."""
+
 
 @mark.unit
 @mark.parametrize('app', list(RATE_APPS))
-@mark.parametrize('word, rate', [('0.5', 0.5), ('2.5', 2.5), ('1e-3', 0.001), ('5', 5), ('0', 0), ('-1', -1),
+@mark.parametrize('word, rate', [('0.5', 0.5), ('2.5', 2.5), ('1e-3', 0.001), ('5', 5), ('0', 0),
                                  ('1e-6', 1e-06)])
 def test_rate_option_takes_number(app: str, word: str, rate: Any) -> None:
     """`-R` takes a whole or decimal number on both commands; a whole word stays an integer."""
@@ -210,7 +213,7 @@ def test_rate_option_takes_number(app: str, word: str, rate: Any) -> None:
 
 @mark.unit
 @mark.parametrize('app', list(RATE_APPS))
-@mark.parametrize('word', ['abc', 'inf', 'nan', '1e400', ''])
+@mark.parametrize('word', ['abc', 'inf', 'nan', '1e400', '', '-1'])
 def test_rate_option_refused(app: str, word: str) -> None:
     """`-R` refuses what is not a finite number, as a usage error naming the option."""
     value = parsed_rate(RATE_APPS[app], word)
@@ -224,7 +227,7 @@ def test_rate_option_under_floor_refused(app: str, word: str) -> None:
     """`-R` refuses a rate other than 0 under the floor, as a usage error naming the option."""
     value = parsed_rate(RATE_APPS[app], word)
     assert isinstance(value, str) and value.startswith('error: ') and '-R/--ratelimit' in value, value
-    assert 'at least 0.000001 tasks per second' in value, value
+    assert RATE_RANGE in value, value
 
 
 LAUNCH_ARGS: Final[Dict[str, Any]] = {
@@ -323,12 +326,9 @@ def test_rate_option_over_key(temp_site) -> None:
 
 
 RATE_REFUSED: Final[Dict[str, Tuple[str, Dict[str, str], str]]] = {
-    'file-inf': ('[client]\nratelimit = inf\n', {},
-                 'client.ratelimit: Rate inf is not valid: expected a finite number'),
-    'file-nan': ('[client]\nratelimit = nan\n', {},
-                 'client.ratelimit: Rate nan is not valid: expected a finite number'),
-    'file-minus-inf': ('[client]\nratelimit = -inf\n', {},
-                       'client.ratelimit: Rate -inf is not valid: expected a finite number'),
+    'file-inf': ('[client]\nratelimit = inf\n', {}, f'client.ratelimit: {RATE_RANGE}inf (from: '),
+    'file-nan': ('[client]\nratelimit = nan\n', {}, f'client.ratelimit: {RATE_RANGE}nan (from: '),
+    'file-minus-inf': ('[client]\nratelimit = -inf\n', {}, f'client.ratelimit: {RATE_RANGE}-inf (from: '),
 }
 """A file's `client.ratelimit` that is a TOML number but not finite: the file text, its variables and the message."""
 
@@ -359,12 +359,12 @@ def run_rate_cluster(site: Path, mode: str, text: str, variables: Dict[str, str]
 @mark.parametrize('mode', ['local', 'launcher'])
 @mark.parametrize('case', list(RATE_REFUSED))
 def test_cluster_rate_not_finite_refused(temp_site, case: str, mode: str) -> None:
-    """A file's `client.ratelimit` that is a number but not finite stops `hs cluster` with exit 2 before anything
-    is launched, naming the key and the file, as `-R` refuses it."""
+    """A file's `client.ratelimit` that is a number but not finite stops `hs cluster` as the configuration loads,
+    exit 3, before anything is launched, naming the key and the file."""
     site = Path(str(temp_site))
     text, variables, message = RATE_REFUSED[case]
     status, stdout, stderr, marker = run_rate_cluster(site, mode, text, variables)
-    assert status == exit_status.bad_argument, stderr
+    assert status == exit_status.bad_config, stderr
     assert message in stderr and 'config.toml' in stderr, stderr
     assert 'Server listening' not in stderr and stdout == '' and not marker.exists(), stderr
     assert 'Traceback' not in stderr and not list(site.rglob('exception-*.log')), stderr
@@ -374,29 +374,30 @@ def test_cluster_rate_not_finite_refused(temp_site, case: str, mode: str) -> Non
 @mark.parametrize('mode', ['local', 'launcher'])
 @mark.parametrize('case', list(RATE_TEXT_REFUSED))
 def test_cluster_rate_text_not_finite_refused(temp_site, case: str, mode: str) -> None:
-    """A `client.ratelimit` given as text that is no finite number, from any source, is refused by `-R` itself,
-    exit 2, before anything is launched."""
+    """A `client.ratelimit` given as text that is no finite number, from any source, is refused as the
+    configuration loads, exit 3, naming the key, before anything is launched."""
     site = Path(str(temp_site))
     text, variables = RATE_TEXT_REFUSED[case]
     status, stdout, stderr, marker = run_rate_cluster(site, mode, text, variables)
-    assert status == exit_status.bad_argument, stderr
-    assert 'is not valid: expected a number' in stderr, stderr
+    assert status == exit_status.bad_config, stderr
+    assert f'client.ratelimit: {RATE_RANGE}' in stderr, stderr
     assert 'Server listening' not in stderr and stdout == '' and not marker.exists(), stderr
     assert 'Traceback' not in stderr and not list(site.rglob('exception-*.log')), stderr
 
 
 @mark.integration
 def test_cluster_rate_option_over_not_finite_key(temp_site) -> None:
-    """`-R` given on the command line is used, and a file's non-finite `client.ratelimit` is not read."""
+    """A file's non-finite `client.ratelimit` stops the command even with `-R` given: the whole configuration
+    is checked as it loads, for every command (exit 3)."""
     site = Path(str(temp_site))
     rc, rates, stderr = read_rates(site, ['-R', '0.5'], **file_layer(site, '[client]\nratelimit = inf\n'))
-    assert rc == exit_status.success, stderr
-    assert rates == [0.5, 0.5]
+    assert rc == exit_status.bad_config, stderr
     create_taskfile(site, ['echo hi'], 't.in')
     argv = ['hs', 'cluster', 't.in', '--no-db', '--no-tls', '-H', '127.0.0.1', '-p', str(free_port()), '-R', '50']
     variables = file_layer(site, '[client]\nratelimit = inf\n')
     status, stdout, stderr = run_bounded(site, argv, child_env(site, **variables))
-    assert status == exit_status.success and stdout == 'hi', stderr
+    assert status == exit_status.bad_config and stdout == '', stderr
+    assert f'client.ratelimit: {RATE_RANGE}inf (from: ' in stderr, stderr
 
 
 @mark.integration
@@ -415,12 +416,12 @@ def test_cluster_rate_file_text(temp_site, text: str, rate: float) -> None:
 @mark.integration
 @mark.parametrize('mode', ['local', 'launcher'])
 def test_cluster_rate_under_floor_refused(temp_site, mode: str) -> None:
-    """A file's `client.ratelimit` under the floor stops `hs cluster` with exit 2 before anything is launched,
-    naming the key and the file, as `-R` refuses it."""
+    """A file's `client.ratelimit` under the floor stops `hs cluster` as the configuration loads, exit 3, before
+    anything is launched, naming the key and the file."""
     site = Path(str(temp_site))
     status, stdout, stderr, marker = run_rate_cluster(site, mode, '[client]\nratelimit = 1e-300\n', {})
-    assert status == exit_status.bad_argument, stderr
-    assert 'client.ratelimit: Rate 1e-300 is not valid: expected 0 (no limit)' in stderr, stderr
+    assert status == exit_status.bad_config, stderr
+    assert f'client.ratelimit: {RATE_RANGE}1e-300 (from: ' in stderr, stderr
     assert 'config.toml' in stderr, stderr
     assert 'Server listening' not in stderr and stdout == '' and not marker.exists(), stderr
     assert 'Traceback' not in stderr and not list(site.rglob('exception-*.log')), stderr

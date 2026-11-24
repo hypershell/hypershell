@@ -6,19 +6,19 @@ appetite: big
 status: in_progress
 branch: fix/bounded-inputs
 base: develop
-current_phase: P1
+current_phase: P2
 last_updated: '2026-11-24'
 phases:
 - id: P1
   name: 'Tests first: merge develop; the nine test files, the flipped tests, the red
     list on 8548053b and the guards'
-  status: pending
+  status: done
   satisfies:
   - R11
   depends_on: []
   parallel: false
   hammerable: false
-  hill: uphill
+  hill: downhill
   verify: test -n "$HS_TEST_POSTGRES" && git merge-base --is-ancestor d132d45c HEAD
     && RED_LIST=spec/bounded-inputs/drive/red.txt RED_BASE_REV=8548053b python3 spec/submit-input-checks/drive/bounded.py
     2700 sh spec/relay-hardening/drive/red_check.sh && sh spec/submit-input-checks/drive/run_list.sh
@@ -183,64 +183,70 @@ Advisory limits (R13), as the GOAL's *Advisory limits*: threads above 1,024; `se
 new test exists, collects on the base, and either fails there for what it checks (the red list) or
 passes there (the guards).
 
-- [ ] Merge develop into the branch (signed merge commit); at plan time `d132d45c`. If
+- [x] Merge develop into the branch (signed merge commit); at plan time `d132d45c`. If
       `update-group-and-legacy-filters` has landed, it comes with it; its `change_value` calls
       `parse_group`, which this cycle keeps (PLAN § 2.6).
-- [ ] Shared helpers reused, not copied: `tests/input_checks.py` (`bounded`, `db_site`, `rows`),
+- [x] Shared helpers reused, not copied: `tests/input_checks.py` (`bounded`, `db_site`, `rows`),
       `tests/test_config_unread.py` (`file_layer`, `child_env`, `run_bounded`). A small
       `tests/bounded_checks.py` (not collected) for the R4 message regex and one CLI runner.
-- [ ] `tests/test_bounded_table.py` (R1, R6, R13): `SETTINGS` keys = numeric `KEYS` + `relay.zone.*`
+- [x] `tests/test_bounded_table.py` (R1, R6, R13): `SETTINGS` keys = numeric `KEYS` + `relay.zone.*`
       zone keys + the `option.*` entries, by set equality; `SETTINGS` kinds match `KEYS`; every default
       leaf of `core/config.py` `default` parses into range and is inside its advisory limit
       (`database.port` skipped); every option that takes a value, walked over
       `HyperShellApp.commands` and each `interface._actions`, is a `RangedOption` naming an entry, or
       is in `TEXT_OPTIONS` (set equality); `test_no_plain_numeric_option_type` (no `type` is `int` or
       `float`; RED on the base by assertion); each `RangedOption`'s default in range.
-- [ ] `tests/test_bounded_parsers.py` (R2–R4, unit): per kind and entry, each bound, one past each
+- [x] `tests/test_bounded_parsers.py` (R2–R4, unit): per kind and entry, each bound, one past each
       bound, `x`, `nan`, `inf`, `-inf`, a 4,300-digit and a 5,000-digit integer (text and `int`),
       `True`, a float for a whole kind, text for a numeric key; the message form; `shown` never raises
       and cuts; the duration and size forms and rounding as today; `parse_bytes('9223372036854775807')`
       exact; the period's `0.5` → 1; the delay's random form.
-- [ ] `tests/test_bounded_options.py` (R2–R4, R6): `test_option_refused[...]` per `drive/red.txt` and
+- [x] `tests/test_bounded_options.py` (R2–R4, R6): `test_option_refused[...]` per `drive/red.txt` and
       one per kind for every command, exit 2, the R4 line naming the option as defined, no traceback,
       nothing started (no database file created, nothing bound); `test_option_in_range_unchanged`
       (each upper bound accepted and stored or used, joins the guards); the task-command aliases.
-- [ ] `tests/test_bounded_config.py` (R3–R6, R10): file and variable refusals exit 3 with
+- [x] `tests/test_bounded_config.py` (R3–R6, R10): file and variable refusals exit 3 with
       ` (from: …)` for every command family, before work; `_env`/`_eval` checked; `hs config get` and
       `hs config set` run with a bad file value, and a bad variable still refuses; `attempts = "3"`
       runs three attempts; the C1 status changes (period, ratelimit, evict → 3); gate (a)
       `test_loaded_numeric_keys_checked`; an API default from configuration (`ServerThread`'s
       `max_retries`) reads the checked value; `test_file_value_in_range_unchanged` (joins the guards).
-- [ ] `tests/test_bounded_config_set.py` (R7): numeric and zone keys refused per entry, untyped
+- [x] `tests/test_bounded_config_set.py` (R7): numeric and zone keys refused per entry, untyped
       integers outside 64 bits, a 4,300-digit value; exit 2, the key named, the file byte-identical.
-- [ ] `tests/test_bounded_backstop.py` (R8): a child patches a start check, then an argument parse, to
+- [x] `tests/test_bounded_backstop.py` (R8): a child patches a start check, then an argument parse, to
       raise `OverflowError`/`ValueError`; exit 3/2, one line, no traceback; a `ValueError` after work
       starts keeps today's path.
-- [ ] `tests/test_bounded_tags.py` (R9, R11): `-t cores:100000`/`memory:8388608TB`/`timeout:2147483648`
+- [x] `tests/test_bounded_tags.py` (R9, R11): `-t cores:100000`/`memory:8388608TB`/`timeout:2147483648`
       exit 2; a file, stdin and `--from-json` refused whole (exit 5, nothing inserted, the value and line
       or record named) over `db_site`; a stream refuses only the line; on PostgreSQL the largest
       `cores` (32,767), `memory` (2⁶³−1), `timeout` (2³¹−1) and `attempt` (32,767, written through
       the engine and read back) are stored.
-- [ ] `tests/test_bounded_advisory.py` (R13): for each advisory limit, just past it through an option,
+- [x] `tests/test_bounded_advisory.py` (R13): for each advisory limit, just past it through an option,
       a file key and (for cores) a tag: one WARNING naming the setting, value and limit, the run goes
       on, exit 0 where the command completes; at the limit, no warning; twice in one process, one
       warning; many tag lines past the limit, one summary with the count and the first line.
-- [ ] `tests/test_bounded_docs.py` (R12, R13): each help snippet gives each ranged option's range and
+- [x] `tests/test_bounded_docs.py` (R12, R13): each help snippet gives each ranged option's range and
       any advisory limit (`rst_entry`, `MARKER` from `tests/test_client_host_default.py`); each
       `config_param_ref.rst` entry gives its key's range and advisory limit (`parse_reference`); the
       environment page, API pages, `AGENTS.md` § Configuration and the review rubric name the table.
-- [ ] Flip the tests PLAN § 5.5 lists (research 05 § 5): `test_cluster_evict.py` (`REFUSALS` → exit 3,
+- [x] Flip the tests PLAN § 5.5 lists (research 05 § 5): `test_cluster_evict.py` (`REFUSALS` → exit 3,
       cap 2³¹−1, message), `test_period_floor.py::test_period_key_refused` (→ 3),
       `test_config_unread.py`'s three rate refusals (→ 3) and
       `test_cluster_rate_option_over_not_finite_key` (→ 3, C2), `test_config_set_types.py` `SIZED`
       evict cases (→ refused), the four message regexes.
-- [ ] `drive/bounds_drive.sh` (modes `options`, `config`, `set`, `tags`, `advise`), in a `temp_site`;
+- [x] `drive/bounds_drive.sh` (modes `options`, `config`, `set`, `tags`, `advise`), in a `temp_site`;
       a plan dry run shows each mode fails on the base.
-- [ ] Name tests so each phase's `verify:` selects what it lands: option tests carry `option`,
+- [x] Name tests so each phase's `verify:` selects what it lands: option tests carry `option`,
       help-page tests `help`, parser tests `parse`; the agent-docs test is
       `test_agents_and_rubric_name_table` (P4 only).
-- [ ] Make every id in `drive/red.txt` and `drive/guards.txt` exist; amend the lists only to fix an id,
+- [x] Make every id in `drive/red.txt` and `drive/guards.txt` exist; amend the lists only to fix an id,
       never to drop a requirement. Add the two new in-range tests to the guards.
+- **Built (P1 notes):** the resource tags' advisory summary test and the task-input docs test live in
+  `tests/test_bounded_tags.py` (`test_tags_advised_once_per_submission`, `test_tag_docs_give_ranges`), not in
+  the advisory and docs files, so that P3's run of `test_bounded_advisory.py` and of `test_bounded_docs.py -k
+  "not agents"` selects only what P3 lands; the red list's id is fixed to match. A third in-range guard,
+  `test_option_in_range_stored`, joins the guards. `test_rate_option_takes_number` (a guard) drops `-1`, which
+  the GOAL refuses (release note 1); it joins `test_rate_option_refused`.
 - **Verify:** red list RED on `8548053b` (PostgreSQL lines included), guards green, all new files
   collect.
 - **Touches:** `tests/`, `spec/bounded-inputs/drive/`.

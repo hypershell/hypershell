@@ -71,8 +71,8 @@ def test_config_seconds(case: str) -> None:
 def test_config_seconds_refused(value: str) -> None:
     """Text that is not a duration is refused, naming the key, the variable and the forms."""
     from hypershell.core.config import config_seconds, ConfigurationError
-    with pytest.raises(ConfigurationError, match=r'server\.evict: Duration .* is not valid: expected .*'
-                                                 r'\(from: HYPERSHELL_SERVER_EVICT\)'):
+    with pytest.raises(ConfigurationError, match=r'server\.evict: expected a duration .*from 10 s to 2,147,483,647 s, '
+                                                 r'given .* \(from: HYPERSHELL_SERVER_EVICT\)'):
         config_seconds('server', 'evict', base=layered(evict=value))
 
 
