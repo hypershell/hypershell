@@ -25,3 +25,10 @@
 - **Skill cause:** As `spec/update-client-retry/META.md` F3.
 - **Recommended fix:** As there.
 - **Confidence:** high · **Effort:** small
+
+## F3 — The tests-first red-list tooling and the verify bound live in other cycles' spec folders, unnamed by the skill · seen again
+`origin=hs-plan:step6 severity=low category=missing-guidance status=open target=.claude/skills/hs-plan/SKILL.md`
+- **What happened:** As `spec/update-client-retry/META.md` F5 and F6: this plan's verifies run `spec/relay-hardening/drive/red_check.sh`, `spec/contended-writes/drive/rest_green.sh` and `spec/update-client-retry/drive/bound.sh`, found by reading a previous cycle's `TECH.md`.
+- **Skill cause:** As recorded there.
+- **Recommended fix:** As recorded there.
+- **Confidence:** high · **Effort:** small
