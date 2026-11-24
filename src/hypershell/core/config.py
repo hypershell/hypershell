@@ -418,8 +418,9 @@ def check_settings(base: Configuration, exempt_files: bool = False) -> Configura
     durations and sizes as given, into the layer that gave them under the plain key, so `which` and
     `blame` still name the file or variable. A value past an advisory limit is warned of once. A
     value the entry refuses raises :class:`SettingRefused`, in the one form and naming its source;
-    with `exempt_files` (`hs config`), a file's refused value gives way to the built-in default
-    instead, while the environment's is still refused, and nothing is warned of. `base` itself is
+    with `exempt_files` (`hs config`), a file's refused value, or a file's `_env`/`_eval` that cannot
+    resolve, gives way to the built-in default instead, while the environment's is still refused,
+    and nothing is warned of. `base` itself is
     left as it was. A refused variable's value is shown, and read, as its text.
     """
     layers = {label: copy.deepcopy(dict(layer)) for label, layer in base.namespaces.items()}
@@ -442,7 +443,14 @@ def check_settings(base: Configuration, exempt_files: bool = False) -> Configura
         key = '.'.join(varpath)
         setting = setting_for(key)
         source = _source_of(base, *section, form)
-        value = _resolved(table, name, form, key, base, section)
+        try:
+            value = _resolved(table, name, form, key, base, section)
+        except ConfigurationError:
+            if exempt_files and label in FILE_LAYERS:  # Unresolvable in a file: as a refused file value
+                for file_label in FILE_LAYERS:
+                    _forget(layers.get(file_label), section, name)
+                continue
+            raise
         given = value
         if label == 'env' and form == name and (variable := ENV_VARIABLES.get(tuple(varpath))) in os.environ:
             given = os.environ[variable]

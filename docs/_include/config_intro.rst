@@ -81,6 +81,18 @@ but also as a means to obfuscate sensitive information, such as database connect
         user = "me"
         password_eval = "pass hypershell/database/password"  # Decrypt using GNU Pass
 
+A numeric key given by ``_env`` or ``_eval`` is resolved once, as the configuration loads, for
+every command. One that cannot resolve (a variable that is not set, a command that fails) stops the
+command before it starts, naming the key and the file or variable that gave it (exit status 3).
+``hs config`` still runs on a file holding one, as on a file holding a value out of range, so the
+file can be shown and edited; such a variable still stops it.
+
+.. only:: html
+
+    .. versionchanged:: 2.9.0
+       A numeric key's ``_env`` or ``_eval`` form is resolved as the configuration loads; ``hs config``
+       runs on a file whose form cannot resolve.
+
 The `edit` command makes it easy to open the correct configuration file path for your platform
 using the default editor. Set the ``EDITOR`` environment variable (or ``VISUAL`` on `Windows`).
 

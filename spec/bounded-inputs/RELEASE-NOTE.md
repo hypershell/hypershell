@@ -20,8 +20,10 @@ Behaviour changes:
   above 32,767, any duration over 2,147,483,647 seconds (about 68 years), `-m` of 2^63 bytes or
   more, a negative rate, and a factor of 0, below 0, `nan` or `inf`.
 - The whole configuration is checked when it loads, for every command, so a bad value anywhere in
-  a file stops `hs list` as well as `hs server`. `hs config` still runs on a file holding a bad
-  value, so it can be shown and set right; a bad variable still stops it.
+  a file stops `hs list` as well as `hs server`. A numeric key's `_env` or `_eval` form that cannot
+  resolve (a variable that is not set, a command that fails) stops every command the same way.
+  `hs config` still runs on a file holding a bad value or such a form, so it can be shown and set
+  right; a bad variable still stops it.
 - `server.evict` has a lower cap, 2,147,483,647 seconds instead of 86,399,999,913,600, and a
   refused evict period exits 3 instead of 5. The same cap now applies to `evict_after` given to
   the Python API's heartbeat monitor.

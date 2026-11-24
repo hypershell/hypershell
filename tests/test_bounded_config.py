@@ -111,6 +111,47 @@ def test_config_command_runs_with_bad_file(temp_site: Path) -> None:
     assert_one_refusal(rc, stderr, exit_status.bad_config, 'server.queuesize', source='HYPERSHELL_SERVER_QUEUESIZE')
 
 
+UNRESOLVED: Final[List[Tuple[str, str, str]]] = [
+    ('env-not-set', '[client]\nratelimit_env = "HS_TEST_NOT_SET"\n', 'client.ratelimit'),
+    ('eval-fails', '[server]\nbundlesize_eval = "exit 1"\n', 'server.bundlesize'),
+]
+"""A file's `_env` or `_eval` form that cannot resolve, by test id: the file and the key."""
+
+
+@mark.integration
+@mark.parametrize('text, key', [pytest.param(text, key, id=case) for case, text, key in UNRESOLVED])
+def test_config_command_runs_with_unresolved_file(temp_site: Path, text: str, key: str) -> None:
+    """`hs config` runs on a file whose `_env`/`_eval` cannot resolve, as on a bad file value; other commands exit 3."""
+    path, variables = write_config(temp_site, text)
+    form = text.split('\n')[1].split(' = ')[0]
+    given = f'{key.rsplit(".", 1)[0]}.{form}'
+    rc, stdout, stderr = hs_cli(temp_site, ['hs', 'config', 'get', given], HS_TEST_NOT_SET=None, **variables)
+    assert rc == exit_status.success, stderr[-4000:]
+    assert stdout.strip() == text.split(' = ')[1].strip().strip('"'), stdout
+    rc, stdout, stderr = hs_cli(temp_site, ['hs', 'config', 'which', given], HS_TEST_NOT_SET=None, **variables)
+    assert rc == exit_status.success, stderr[-4000:]
+    assert str(path) in stdout, stdout
+    rc, _, stderr = hs_cli(temp_site, ['hs', 'config', 'edit', '--local'], EDITOR='true', HS_TEST_NOT_SET=None,
+                           **variables)
+    assert rc == exit_status.success, stderr[-4000:]
+    rc, _, stderr = hs_cli(temp_site, ['hs', 'list', '--count'], HS_TEST_NOT_SET=None, **variables)
+    assert rc == exit_status.bad_config and key in stderr and str(path) in stderr, stderr[-4000:]
+    assert 'Traceback' not in stderr, stderr[-4000:]
+    rc, _, stderr = hs_cli(temp_site, ['hs', 'config', 'set', key, '2', '--local'], HS_TEST_NOT_SET=None, **variables)
+    assert rc == exit_status.success, stderr[-4000:]
+    assert f'{key.rsplit(".", 1)[1]} = 2' in path.read_text(), path.read_text()
+
+
+@mark.integration
+def test_config_command_stops_on_unresolved_variable(temp_site: Path) -> None:
+    """A variable's `_env` form that cannot resolve still stops `hs config`, exit 3, naming the variable."""
+    rc, _, stderr = hs_cli(temp_site, ['hs', 'config', 'get', 'client.bundlesize'],
+                           HYPERSHELL_CLIENT_RATELIMIT_ENV='HS_TEST_NOT_SET', HS_TEST_NOT_SET=None)
+    assert rc == exit_status.bad_config, stderr[-4000:]
+    assert 'client.ratelimit' in stderr and 'HYPERSHELL_CLIENT_RATELIMIT_ENV' in stderr, stderr[-4000:]
+    assert 'Traceback' not in stderr, stderr[-4000:]
+
+
 @mark.integration
 def test_text_attempts_runs_three_attempts(temp_site: Path) -> None:
     """A file's `attempts = "3"` reads as 3: a failing task runs three times, instead of every command failing."""

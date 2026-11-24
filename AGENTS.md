@@ -575,8 +575,9 @@ preload > defaults**. `hs config set` writes to disk but **does not mutate the l
   (`check_settings` in `core/config.py`): a file's or variable's value, `_env`/`_eval` resolved
   once there, is read by its range entry and pinned in the layer that gave it, so later reads need
   no check of their own. A value outside its range exits 3 with one line naming the key, the range,
-  the value and its source. `hs config` still runs on a bad file value (it gives way to the
-  default) so the file can be repaired; a bad variable still stops it. `ENV_VARIABLES` records the variable that set each key, so
+  the value and its source. `hs config` still runs on a bad file value, or a file's `_env`/`_eval`
+  that cannot resolve (it gives way to the default), so the file can be repaired; a bad variable
+  still stops it. `ENV_VARIABLES` records the variable that set each key, so
   `blame`, `hs config which` and completion name it. **A new documented key gets its kind in `KEYS`
   and its entry in `docs/_include/config_param_ref.rst` in the same commit** —
   `tests/test_config_schema.py` fails otherwise. An empty variable for a key of `EMPTY_UNSET` is

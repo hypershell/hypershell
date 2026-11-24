@@ -247,8 +247,8 @@ subsystems.
   back into the layer that gave it (numbers as numbers, durations and sizes as given), so every
   later read, class bodies and API defaults included, sees a checked value. A refusal is one line
   (`SettingRefused`, no class prefix), exit 3, naming the key, range, value and source. Under
-  `hs config` (`CONFIG_COMMAND`) a file's refused value gives way to its default so the file can be
-  repaired; `hs config get`/`which` read `unchecked_config`. A new numeric key needs its `SETTINGS`
+  `hs config` (`CONFIG_COMMAND`) a file's refused value, or a file's `_env`/`_eval` that cannot
+  resolve, gives way to its default so the file can be repaired; `hs config get`/`which` read `unchecked_config`. A new numeric key needs its `SETTINGS`
   entry (`tests/test_bounded_table.py`).
 - Sentinels: `'<auto>'` (materialize), `'<none>'` (unset). The `X or None` idiom means **`0` =
   unlimited/auto** for many numeric knobs.
