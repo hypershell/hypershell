@@ -247,6 +247,16 @@ setup that relied on `bind` being dialled gets a fallback or a release note.
 `core/queue.py` (`QueueConfig.host`); blocks the RCAC user guide's tier 3*
 **Seed:** [`issues/client-host-default-from-bind.md`](issues/client-host-default-from-bind.md) · *status: unshaped*
 
+## `hs cluster` and `hs relay` ignore the `_env` and `_eval` forms of `advertise`
+
+Both read `advertise` with a plain `.get`, so a configuration giving `advertise_env` or
+`advertise_eval` is silently dropped, and launched clients are told the bind-rule address. The fix
+reads every form, through the same lookup the client-side host rule uses.
+
+*Target: 2.9.x · Horizon: near-term, small · Depends on: `client-host-default-from-bind` (shared
+lookup) · Refs: `cluster/__init__.py` and `relay/__init__.py` (`advertise_host`)*
+**Seed:** [`issues/advertise-env-forms-ignored.md`](issues/advertise-env-forms-ignored.md) · *status: unshaped*
+
 ## `hs update group=…` stores a non-integer group
 
 `hs update` accepts any value for `group` and stores it, so a text group reaches the scheduler even after submit-time validation (`submit-input-checks`) refuses one. Apply the submit-time integer rule to `hs update group=…`, refusing with exit 2 before anything is written.
