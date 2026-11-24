@@ -3,7 +3,7 @@ slug: client-host-default-from-bind
 title: hs client dials server.host when no -H is given
 kind: fix
 appetite: small
-status: in_review
+status: blocked
 branch: fix/client-host-default-from-bind
 base: develop
 current_phase: done
@@ -79,10 +79,10 @@ phases:
     sh spec/relay-advertise/drive/bound.sh 900 uv run --python 3.12 --group docs sphinx-build
     -W --keep-going -q -E -b html docs /tmp/claude-501/docs-html-host
 review:
-  last_reviewed_commit: ''
-  verdict: none
-  blocked_reason: ''
-  cycle: 0
+  last_reviewed_commit: 7ec82256
+  verdict: changes-requested
+  blocked_reason: 'F1 (LOW): .bind reference sentence misstates the fallback'
+  cycle: 1
 ---
 # TECH.md — `hs client` dials `server.host` when no `-H` is given
 
