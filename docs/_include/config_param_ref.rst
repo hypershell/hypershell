@@ -184,8 +184,8 @@
         to dial the bind address when it is one specific address, and this host's own name when
         it is *0.0.0.0*, unless ``.advertise`` names another.
 
-        A `client`, or ``submit --queue``, given no ``-H`` dials the bind address only when
-        neither ``.host`` nor ``.advertise`` is given and it is one specific address; otherwise
+        A `client`, or ``submit --queue``, given no ``-H`` dials ``.host``, else ``.advertise``.
+        When neither is given, it dials the bind address if it is one specific address, else
         *localhost*.
 
         .. only:: html
