@@ -538,6 +538,7 @@ function _hs_relay() {
         '(-N --size)'{-N,--size}'[Number of clients kept launched at the site (default: 1)]:count:' \
         '--launcher[Command prefix that launches each client]:launcher:_command_names -e' \
         '--launcher-args[Extra arguments for the launcher]:arguments:' \
+        '--remote-exe[Program site clients are launched as (default: this hs)]:program:_files' \
         '--bind[Bind address of relay-local server (default: 0.0.0.0)]:address:(0.0.0.0 localhost 127.0.0.1)' \
         '--advertise[Address site clients dial (default: by --bind)]:address:_hosts' \
         '--port[Port of relay-local server (default: 50002)]:port:_hs_ports' \

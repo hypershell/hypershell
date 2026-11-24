@@ -975,13 +975,31 @@
     ``.launcher``
         Command prefix used to launch each *client* at the site (default: none).
 
-        An empty value launches clients directly as ``hs client ...``.
+        An empty value launches clients directly as ``HS client ...``, where *HS* is the
+        relay's own program (see ``.remote_exe``).
         See also ``--launcher`` command-line option.
 
     ``.launcher_args``
         Extra arguments for the launcher (default: none).
 
         See also ``--launcher-args`` command-line option.
+
+    ``.remote_exe``
+        Program the *clients* at the site are launched as (default: the relay's own program).
+
+        .. only:: html
+
+            .. versionadded:: 2.9.0
+
+        By default it is the ``hs`` that runs the relay, by its full path and as the user ran it,
+        kept when the relay starts again to bind its database. The path assumes the site's nodes
+        see this installation where this host does; where they do not, name the program here. It
+        is one program, not a command line: a wrapper belongs in ``.launcher``. The value is
+        passed on as given, never resolved or checked. The ``--remote-exe`` option takes
+        precedence. Its environment form is ``HYPERSHELL_RELAY_REMOTE_EXE``; empty, it is not
+        given.
+
+        See also ``--remote-exe`` command-line option.
 
     ``.num_threads``
         Executor threads for each *client* at the site (default: `1`).

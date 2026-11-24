@@ -219,6 +219,7 @@ MATCHES: Dict[str, Tuple[Tuple[str, ...], Kind]] = {
     'HYPERSHELL_server_tls_min_version': (('server', 'tls', 'min_version'), Kind.TEXT),
     'HYPERSHELL_RELAY_LAUNCHER': (('relay', 'launcher'), Kind.TEXT),
     'HYPERSHELL_RELAY_LAUNCHER_ARGS': (('relay', 'launcher_args'), Kind.TEXT),
+    'HYPERSHELL_RELAY_REMOTE_EXE': (('relay', 'remote_exe'), Kind.TEXT),
     'HYPERSHELL_SERVER_AUTH_ENV': (('server', 'auth_env'), Kind.TEXT),
     'HYPERSHELL_Relay_Upstream_Auth_Eval': (('relay', 'upstream', 'auth_eval'), Kind.TEXT),
     'HYPERSHELL_DATABASE_PASSWORD_ENV': (('database', 'password_env'), Kind.TEXT),

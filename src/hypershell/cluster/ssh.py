@@ -38,9 +38,12 @@ __all__ = ['run_ssh', 'SSHCluster', 'NodeList', 'DEFAULT_REMOTE_EXE']
 log = Logger.with_name('hypershell.cluster')
 
 
-# NOTE: retain old name for remote executable (for now)
-DEFAULT_REMOTE_EXE: Final[str] = 'hyper-shell'
-"""Default remote executable name."""
+DEFAULT_REMOTE_EXE: Final[str] = 'hs'
+"""Default program remote clients are launched as (the `hs` on their `PATH`).
+
+.. versionchanged:: 2.9.0
+   ``hs``; formerly ``hyper-shell``.
+"""
 
 
 def run_ssh(*args, **kwargs) -> None:

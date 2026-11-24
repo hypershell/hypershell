@@ -332,6 +332,7 @@ EMPTY_NOT_GIVEN: Final[Dict[str, Tuple[str, str]]] = {
     'server.bind': ('server.bind', 'HYPERSHELL_SERVER_BIND'),
     'relay.bind': ('relay.bind', 'HYPERSHELL_RELAY_BIND'),
     'relay.advertise': ('relay.advertise', 'HYPERSHELL_RELAY_ADVERTISE'),
+    'relay.remote_exe': ('relay.remote_exe', 'HYPERSHELL_RELAY_REMOTE_EXE'),
     'server.tls.cert': ('server.tls.cert', 'HYPERSHELL_SERVER_TLS_CERT'),
     'task.cwd': ('task.cwd', 'HYPERSHELL_TASK_CWD'),
 }

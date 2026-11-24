@@ -33,6 +33,10 @@ Description
 .. versionadded:: 2.9.0
    ``--advertise`` (:pr:`116`).
 
+.. versionadded:: 2.9.0
+   ``--remote-exe``: site clients are launched as the relay's own ``hs``, not the legacy
+   ``hyper-shell``.
+
 
 .. _cli_relay_topology:
 

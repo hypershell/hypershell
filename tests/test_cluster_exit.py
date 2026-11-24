@@ -329,7 +329,7 @@ def test_launcher_cluster_exits_when_every_client_fails(temp_site: Path, in_memo
     assert seen['error']['type'] == 'ClusterLaunchError'
     message = seen['error']['message']
     assert message.startswith('every launched client has exited with tasks remaining: ')
-    assert f'{launcher} hyper-shell client ' in message and f'exited with {exited}' in message
+    assert f'{launcher} hs client ' in message and f'exited with {exited}' in message
     assert f'clients were told to dial {ADDRESS}:' in message
     assert seen['elapsed'] <= STOP_BOUND, seen
     assert not seen['server_alive']
