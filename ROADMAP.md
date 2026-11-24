@@ -211,19 +211,6 @@ has the same shape: it waits on its topology publisher, which never looks at the
 (`DESIGN.md` item 6)*
 **Seed:** [`issues/autoscaling-cluster-ignores-usr1.md`](issues/autoscaling-cluster-ignores-usr1.md) · *status: unshaped*
 
-## A relay starts its clients as the deprecated `hyper-shell`
-
-A relay launches every site client as the literal `hyper-shell client …` (`relay/site.py`, from
-`DEFAULT_REMOTE_EXE`), with no option or key to change it. Where an installation puts only `hs` and
-`hsx` on `PATH`, every relay launch fails with command-not-found. `hs cluster` already defaults
-`--remote-exe` to the path of the `hs` the user ran. The fix gives the relay the same default plus
-`--remote-exe` and `relay.remote_exe`, and retires `hyper-shell` as a launch default.
-
-*Target: 2.9.0 · Horizon: near-term, small · Depends on: — · Refs: `cluster/__init__.py`
-(`--remote-exe`), `cluster/ssh.py` and `cluster/remote.py` (`DEFAULT_REMOTE_EXE`); blocks the RCAC
-user guide's tier 4*
-**Seed:** [`issues/relay-client-exe-deprecated-name.md`](issues/relay-client-exe-deprecated-name.md) · *status: adopted:relay-client-exe-deprecated-name*
-
 ## A relay with no launcher exits when its client program is missing
 
 Started directly, a site client whose program does not exist raises in the site scaler, and the
@@ -231,21 +218,9 @@ relay logs CRITICAL and exits instead of counting a failed launch and serving it
 `relay-client-exe-deprecated-name` removes the trigger it found, but an explicit `--remote-exe`
 naming a missing program still ends the relay.
 
-*Target: 2.9.x · Horizon: near-term, small · Depends on: `relay-client-exe-deprecated-name` · Refs:
+*Target: 2.9.x · Horizon: near-term, small · Depends on: — (`relay-client-exe-deprecated-name` landed, #121) · Refs:
 `relay/site.py`, `cluster/remote.py` (direct launches)*
 **Seed:** [`issues/relay-direct-launch-missing-program.md`](issues/relay-direct-launch-missing-program.md) · *status: unshaped*
-
-## `hs client` dials `server.bind`, not `server.host`
-
-`hs client` defaults `-H` to `server.bind` (`client.py:1657`), though the configuration reference
-says clients dial `server.host`, and `hs submit --queue` does. A shared configuration with
-`bind = "0.0.0.0"` and `host` set to the login node's name sends every client to `0.0.0.0`, its own
-node. The fix makes `server.host` the default, keeps `-H` over it, and decides at shaping whether a
-setup that relied on `bind` being dialled gets a fallback or a release note.
-
-*Target: 2.9.0 · Horizon: near-term, small · Depends on: — · Refs: `src/hypershell/client.py`,
-`core/queue.py` (`QueueConfig.host`); blocks the RCAC user guide's tier 3*
-**Seed:** [`issues/client-host-default-from-bind.md`](issues/client-host-default-from-bind.md) · *status: adopted:client-host-default-from-bind*
 
 ## `hs cluster` and `hs relay` ignore the `_env` and `_eval` forms of `advertise`
 
@@ -253,8 +228,8 @@ Both read `advertise` with a plain `.get`, so a configuration giving `advertise_
 `advertise_eval` is silently dropped, and launched clients are told the bind-rule address. The fix
 reads every form, through the same lookup the client-side host rule uses.
 
-*Target: 2.9.x · Horizon: near-term, small · Depends on: `client-host-default-from-bind` (shared
-lookup) · Refs: `cluster/__init__.py` and `relay/__init__.py` (`advertise_host`)*
+*Target: 2.9.x · Horizon: near-term, small · Depends on: — (`client-host-default-from-bind` landed, #122;
+share its lookup) · Refs: `cluster/__init__.py` and `relay/__init__.py` (`advertise_host`)*
 **Seed:** [`issues/advertise-env-forms-ignored.md`](issues/advertise-env-forms-ignored.md) · *status: unshaped*
 
 ## `hs update group=…` stores a non-integer group
@@ -382,18 +357,6 @@ strict mode that refuses unknown keys would be a 2.10.0 interface change.
 *Target: 2.9.x · Horizon: near-term, small · Depends on: — · Refs:
 `src/hypershell/core/config_schema.py` (`KEYS`, `TABLES`); `issues/bounded-inputs.md` for values*
 **Seed:** [`issues/config-unknown-key-warning.md`](issues/config-unknown-key-warning.md) · *status: unshaped*
-
-## On PostgreSQL, a task cannot ask for 2 GB of memory or more
-
-`memory` is a byte count in an `INTEGER` column: 64-bit on SQLite, 32-bit on PostgreSQL. So on
-PostgreSQL `hs submit -m 4GB` is refused at insert, and then hangs (the committer death above). A
-retry is then refused as "already submitted", though nothing was stored. Every submitter that sets
-memory meets it, `hypershell-mcp` and `nf-hypershell` included. The fix is `BIGINT` and an upgrade
-step that retypes the column in place, which the upgrade step does not do yet.
-
-*Target: 2.9.0 · Horizon: near-term · Depends on: — · Refs: same committer death as
-`issues/database-locked-during-ingest-hangs.md`; `issues/ingest-robustness.md`*
-**Seed:** [`issues/memory-column-overflows-postgres.md`](issues/memory-column-overflows-postgres.md) · *status: adopted:memory-column-overflows-postgres*
 
 ## Docs and runtime surfacing
 
@@ -774,23 +737,6 @@ work is planned here, not in the security lane. The first entry is the prerequis
 server at all. Then a 2.10.0 pair, which can ship in either order: signing stops a server from
 authoring work, and sandboxing bounds what a signed task can still do.
 
-## The queue's RPC envelope is pickled in both directions
-
-The queue is a `multiprocessing` manager, and every request and reply around HyperShell's own JSON
-payloads is pickled. Unpickling can run code chosen by whoever produced the bytes, so each end of a
-connection trusts the other with its process. The manager serializes only through its connection's
-`send`/`recv`, the standard library already swaps those for its XML-RPC serializer, and HyperShell
-owns both connection pairs. So a codec for a closed vocabulary of plain values (requests, five reply
-kinds, proxy tokens, `queue.Empty`) replaces pickle with no change to the queues, the dispatcher or
-any FSM. A pre-codec peer is refused with a clear error, and there is no pickle fallback. The envelope
-is JSON, like the payloads. It adds microseconds per task, against milliseconds for the database, so
-msgpack's extra dependency buys nothing.
-
-*Target: 2.9.0 (2.9.0a10) · Horizon: near-term, big · Depends on: — · Refs: prerequisite of both
-entries below; `docs/security.rst` ("Pickle-serialized RPC"); `tests/bench/bench_queue.py` (the
-no-regression check)*
-**Seed:** [`issues/queue-wire-codec.md`](issues/queue-wire-codec.md) · *status: adopted:queue-wire-codec*
-
 ## A sandbox template around each task confines nothing
 
 A user can wrap each task in a sandbox through `-t/--template`, but `{}` is spliced unquoted into a
@@ -803,7 +749,7 @@ Landlock and Apptainer, a baseline credential-denying policy, and the whole-clie
 
 *Target: 2.10.0 · Horizon: near-term, in the 2.10.0 alphas · Depends on: the templating contract's
 quoted token (R1 of `issues/templating-and-remote-env-contract.md`; this cycle pulls it in if it
-has not shipped); the queue envelope above, for the client process itself · Refs: pairs with task
+has not shipped); the queue envelope (`spec/queue-wire-codec/`, #123, landed), for the client process itself · Refs: pairs with task
 signing below*
 **Seed:** [`issues/untrusted-server-client-sandbox.md`](issues/untrusted-server-client-sandbox.md) · *status: unshaped*
 
@@ -818,7 +764,7 @@ given with it or a row whose current signature still verifies, never `args` read
 database. Open for shaping: the terminal state of a refused task, which today's failure and retry
 queries must not pick up, and how much replay of a signed command under retry to allow.
 
-*Target: 2.10.0 · Horizon: near-term, in the 2.10.0 alphas · Depends on: the queue envelope above,
+*Target: 2.10.0 · Horizon: near-term, in the 2.10.0 alphas · Depends on: the queue envelope (`spec/queue-wire-codec/`, #123, landed),
 to hold against a compromised server · Refs: pairs with
 client-side sandboxing above; `spec/update-client-retry/GOAL.md` (#119: never-ran
 sentinels are not retried)*
@@ -869,7 +815,7 @@ in-process through `QueueServer`. Only one test uses it, but it keeps a second s
 decref and handshake logic. `SecureManager` is public, so retiring the method is a 2.10.0 interface
 change. Deferred by `queue-wire-codec`, which gives the path the new codec unchanged.
 
-*Target: 2.10.0 · Horizon: after 2.9.0, small · Depends on: `queue-wire-codec` · Refs:
+*Target: 2.10.0 · Horizon: after 2.9.0, small · Depends on: — (`queue-wire-codec` landed, #123) · Refs:
 `src/hypershell/core/queue.py` (`SecureManager.start`, `_child_bootstrap`)*
 **Seed:** [`issues/retire-forked-manager.md`](issues/retire-forked-manager.md) · *status: unshaped*
 

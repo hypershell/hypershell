@@ -50,9 +50,9 @@ submitter's error, instead of hanging.
 ## Notes
 
 - Check stream input and `hs submit` against the same lock in the same pass.
-- A second trigger, without a lock: on PostgreSQL, `hs submit -m 4GB` kills the committer on an
-  integer overflow and hangs the same way (`issues/memory-column-overflows-postgres.md`). The fix
-  here is what makes that one fail promptly.
+- A second trigger, without a lock: on PostgreSQL, `hs submit -m 4GB` killed the committer on an
+  integer overflow and hung the same way. #120 (`spec/memory-column-overflows-postgres/`) removed
+  that trigger by widening the column; any other DataError still hangs until this is fixed.
 - Whether SQLite's busy timeout should simply be longer during ingest is a separate choice to
   shape; a longer wait narrows the window but does not remove the hang.
 - Related: `spec/group-advance-strands-lower-group/` (REVIEW cycle 2, out-of-scope observation).

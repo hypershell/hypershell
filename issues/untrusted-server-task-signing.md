@@ -15,9 +15,9 @@ lane: public
 > compromised server. This one stops the server from authoring tasks; the sandbox seed bounds the
 > damage from tasks that were legitimately signed and still turn out harmful. Either can ship first.
 >
-> **Depends on:** `issues/queue-wire-codec.md`, a queue transport that carries data, not pickled
-> objects (planned for 2.9.0a10). Until it lands, signing does not hold against a compromised
-> server, and the docs must not claim it does.
+> **Depends on:** a queue transport that carries data, not pickled objects. Landed in #123
+> (`spec/queue-wire-codec/`), shipping in 2.9.0a10: the transport can no longer run code in a
+> client, so signing can hold against a compromised server.
 
 ## Problem
 
