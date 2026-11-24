@@ -84,13 +84,15 @@ datetimes, uuids, a zone, and text. A value of the kind inside its range is stor
 backends and in both forms, so the two backends hold the same thing. Any other value is refused
 with a usage error naming the column, the range or form and the value, exit 2, before anything is
 counted, asked or written. No bad value on any column ends in a traceback or exit 5. `id` is never
-written, and the whole-tag assignment is settled by C7. Text columns, tag changes and the action
+written, and `tag=VALUE`, which would replace the whole tag, is refused. An assignment `KEY=VALUE`
+whose key is not a task column is a tag change, the same as `KEY:VALUE` (R16), and the prompt shows
+which changes are columns and which are tags. Text columns, `KEY:VALUE` changes and the action
 options behave as today.
 
 ## Column kinds (the contract's table)
 
 `table:` names an entry of `bounded-inputs`' table. **New** rows are added to that table by this
-cycle; each is a gate item (C3 ruled the first; C9 proposes the others). "Clears" means `none` or
+cycle; each was ruled at the gate (C3 the first, C9 the others). "Clears" means `none` or
 `null`, in any case, writes NULL; "refused" means R9.
 
 | Column | Read as | Range (table entry) | `none` |
@@ -105,19 +107,26 @@ cycle; each is a gate item (C3 ruled the first; C9 proposes the others). "Clears
 | `cores_max` | decimal number | **new**, Peak cores: 0 … 32,767 (C9) | clears |
 | `memory_max` | decimal number of bytes | **new**, Peak memory: 0 … 2⁶³−1 (C9) | clears |
 | `retried` | boolean: the configuration's words, any case: `true`/`false`, `yes`/`no`, `on`/`off`, `1`/`0` | — | refused |
-| `submit_time` | datetime (C6) | — | refused |
-| `schedule_time`, `start_time`, `completion_time` | datetime (C6) | — | clears |
+| `submit_time` | datetime, ISO 8601 (C6) | — | refused |
+| `schedule_time`, `start_time`, `completion_time` | datetime, ISO 8601 (C6) | — | clears |
 | `submit_id` | uuid | — | refused |
 | `server_id`, `client_id`, `previous_id`, `next_id`, `source` | uuid | — | clears |
-| `zone` | a zone (C8) | — | clears (the default zone) |
+| `zone` | a zone name, as `hs submit --zone` reads it; `default` is the default zone (C8) | — | clears (the default zone) |
 | `group` | as #124 | `option.group` | refused (#124) |
 | `args` | text as given | — | refused |
 | `command`, `outpath`, `errpath`, `csvpath`, `submit_host`, `server_host`, `client_host`, `fingerprint` | text as given | — | clears (as today) |
-| `tag` | C7 | — | C7 |
+| `tag` | never assigned whole: `tag=VALUE` is refused (R11, C7) | — | refused |
 | `id` | never written (R10) | — | — |
 
 A **uuid** is the 8-4-4-4-12 hexadecimal form, in any case, stored in lower case. Its value is not
 checked against another table (`source` against `Source`, `previous_id` against a task).
+
+A **datetime** is ISO 8601: a date (`2026-01-01`, midnight), or a date and a time joined by `T` or a
+space, with optional seconds and fraction, and an optional offset or `Z`. A value without an offset
+is local time, the zone HyperShell writes and shows times in. `now`, `today`, `epoch` and relative
+forms are not datetimes (C6).
+
+Any other key, one that is not a column of `Task`, makes `KEY=VALUE` a tag change (R16).
 
 ## Acceptance criteria (the contract)
 
@@ -146,11 +155,13 @@ form. **The table** is `bounded-inputs`' range table (`SETTINGS`), its parsers, 
   finite and within their new rows (C9).
 - **R5** — `retried` SHALL take the configuration's boolean words (`true`/`false`, `yes`/`no`,
   `on`/`off`, `1`/`0`, any case), as a boolean key does since #113.
-- **R6** — `submit_time`, `schedule_time`, `start_time` and `completion_time` SHALL take the forms
-  C6 rules, read in the time zone C6 rules, and SHALL hold the same instant on SQLite and
-  PostgreSQL, shown the same by `hs info` and `hs list`.
+- **R6** — `submit_time`, `schedule_time`, `start_time` and `completion_time` SHALL take ISO 8601
+  only, as *Column kinds* defines it, with a value without an offset read as local time (C6). They
+  SHALL hold the same instant on SQLite and PostgreSQL, shown the same by `hs info` and `hs list`.
+  `now`, `today`, `epoch` and any other form SHALL be refused under R9.
 - **R7** — `submit_id`, `server_id`, `client_id`, `previous_id`, `next_id` and `source` SHALL take a
-  uuid; `zone` SHALL take what C8 rules.
+  uuid. `zone` SHALL take a zone name, read as `hs submit --zone` reads it: `default` and `none`
+  SHALL write NULL (the default zone), and any other name its zone (C8).
 
 **`none`, refusals, `id` and the tag.**
 
@@ -167,8 +178,9 @@ form. **The table** is `bounded-inputs`' range table (`SETTINGS`), its parsers, 
   column SHALL end in a traceback or exit status 5.
 - **R10** — `id` SHALL never be written: the single-task `hs update ID id VALUE` SHALL exit 2 and
   write nothing, as the filtered form's `id=VALUE` does today.
-- **R11** — `tag=VALUE` in the filtered form SHALL behave as C7 rules. `KEY:VALUE` changes,
-  `--remove-tag`, and the single-task `hs update ID tag KEY:VALUE` SHALL behave as today.
+- **R11** — `tag=VALUE` in the filtered form SHALL be refused under R9, exit 2, with a message
+  pointing to tag changes by `KEY=VALUE` and `KEY:VALUE`, and to `--remove-tag` (C7). `KEY:VALUE`
+  changes, `--remove-tag`, and the single-task `hs update ID tag KEY:VALUE` SHALL behave as today.
 - **R12** — WHERE a VALUE is inside its range but past the advisory limit of a reused entry
   (`cores` above 1,024; `attempt` above 100), `hs update` SHALL write it and log the table's one
   WARNING, as `bounded-inputs` R13 does for the resource tags; the exit status SHALL NOT change. No
@@ -177,8 +189,10 @@ form. **The table** is `bounded-inputs`' range table (`SETTINGS`), its parsers, 
 **Unchanged, proof and docs.**
 
 - **R13** — Every other change SHALL behave as today: a group change (#124), the text columns
-  (text as given, `none` clears), tag changes, `--cancel`, `--revert`, `--delete`,
-  `--remove-tag`, and the single-task form's refusals (#119, #124).
+  (text as given, `none` clears), `KEY:VALUE` tag changes, `--cancel`, `--revert`, `--delete`,
+  `--remove-tag`, and the single-task form's refusals (#119, #124). The one exception is a key that
+  is not a task column: today's refusal of it (`Unrecognized task field` in the filtered form,
+  `Invalid field name` in the single-task form, exit 2) is replaced by R16.
 - **R14** — Tests SHALL cover R1–R12 for every column in *Column kinds*, in both forms, on SQLite
   and PostgreSQL: for each kind, each accepted form, each bound and one past it, each refused value
   R9 lists, and `none`; a refused change given with another change (nothing written); a refusal
@@ -192,9 +206,28 @@ form. **The table** is `bounded-inputs`' range table (`SETTINGS`), its parsers, 
   `.. versionchanged:: 2.9.0`. Help and docs name top-level commands only. The squash commit body
   (the release note) SHALL list each change below as a behaviour change.
 
+**Any other key is a tag** (maintainer, 2026-11-24).
+
+- **R16** — WHEN the filtered form is given `KEY=VALUE` whose KEY is not a column of `Task`, or the
+  single-task form `hs update ID KEY VALUE` with such a KEY, `hs update` SHALL make it a tag
+  change, the same as `KEY:VALUE` and as `hs update ID tag KEY:VALUE` today: the same key rules and
+  the same reading of VALUE. `KEY:VALUE` SHALL be unchanged. `id` and `tag` are columns, so
+  `id=VALUE` and `tag=VALUE` stay refused (R10, R11). IF KEY is not a valid tag key, THEN
+  `hs update` SHALL exit 2 with the tag rules' message, before counting or prompting, and write
+  nothing. WHEN the filtered form prompts (without `-f`), the prompt SHALL show each change as a
+  column change or a tag change, so that a misspelled column (`exit_stauts=0`) is visible as a tag
+  before anything is written. Tests SHALL cover both forms and both backends: a key that collides
+  with nothing, a misspelled column, an invalid tag key, and the prompt's text. The help and
+  `docs/_include/task_update_desc.rst` SHALL say that any key that is not a column is a tag, and
+  that a misspelled column becomes a tag.
+
+  *Consequence, accepted by the maintainer:* a misspelled column is written as a tag instead of
+  being refused. Without `-f` the prompt shows it; under `-f`, and in the single-task form, which
+  never prompts, it is written without one.
+
 ### User-visible changes (the release note)
 
-Each is a change from `develop` `39834600` and from 2.8.x. Items 6–8 depend on C6–C8.
+Each is a change from `develop` `39834600` and from 2.8.x.
 
 1. **`hs update` reads `cores`, `memory` and `timeout` as `hs submit` does.** `memory=4G` and
    `timeout=1:30:00` are stored as bytes and seconds. Earlier releases stored the text on SQLite,
@@ -210,11 +243,23 @@ Each is a change from `develop` `39834600` and from 2.8.x. Items 6–8 depend on
 4. **`retried` takes `yes`/`no` and `on`/`off`** as well as `true`/`false` and `1`/`0`.
 5. **`none` on a column that may not be empty** (`args`, `submit_id`, `submit_time`, `attempt`,
    `retried`, `part`) exits 2 naming the column, instead of exit 5 and a traceback.
-6. **The datetime columns can be written on SQLite,** in the forms C6 rules, and read the same way
-   on PostgreSQL; forms PostgreSQL's server accepted and C6 does not (for example `today`, `epoch`)
-   now exit 2.
+6. **The datetime columns take ISO 8601, on both backends.** A value without an offset is local
+   time. Earlier releases refused every value with exit 5 and a traceback on SQLite, and on
+   PostgreSQL stored whatever the server parsed, in the server session's zone. `now`, `today` and
+   `epoch`, which PostgreSQL stored, now exit 2. *Affects:* scripts that wrote `now` on PostgreSQL;
+   use `$(date -Iseconds)`.
 7. **`hs update ID id VALUE` exits 2,** as `id=VALUE` does; earlier it failed with a traceback.
-8. **`tag=VALUE` and `zone=VALUE`** behave as C7 and C8 rule.
+8. **`tag=VALUE` is refused,** exit 2, pointing to `KEY=VALUE`, `KEY:VALUE` and `--remove-tag`.
+   Earlier releases replaced the task's whole tag with the value as JSON text (`"x"`, or `null`).
+9. **`zone=` takes a zone name,** as `hs submit --zone` does; `zone=default` and `zone=none` put the
+   task in the default zone. Earlier releases stored the text on SQLite, refused a name with exit 5
+   on PostgreSQL, and on both stored the default zone's reserved id when given it, which the default
+   zone's clients do not match.
+10. **`KEY=VALUE` with a key that is not a task column is a tag change,** the same as `KEY:VALUE`, in
+    both forms (`hs update ID KEY VALUE` too). Earlier releases refused it, exit 2 (`Unrecognized
+    task field`, `Invalid field name`). The prompt shows each change as a column or a tag.
+    *Affects:* a misspelled column (`exit_stauts=0`) is now written as a tag instead of refused;
+    check the prompt, and take care under `-f` and in the single-task form, which do not prompt.
 
 ## Non-goals (no-gos)
 
@@ -235,8 +280,8 @@ Each is a change from `develop` `39834600` and from 2.8.x. Items 6–8 depend on
 ## Clarifications
 
 Proposed in shaping on 2026-11-24 by the shaping agent, who could not ask the maintainer. C1–C4
-were ruled at the GOAL gate on 2026-11-24 (below); C6–C9, raised by the widening, are marked for
-the gate.
+were ruled at the GOAL gate on 2026-11-24; C6–C9, raised by the widening, were ruled at the second
+gate the same day (*GOAL gate (2026-11-24)* below). No marker remains.
 
 - **C0 — Kind, appetite, target** (seed, `status: unshaped`): `fix`, target 2.9.0, for 2.9.0a10;
   appetite `small` from the seed, widened to `big` by C4. Builds after `bounded-inputs` lands. The
@@ -263,8 +308,8 @@ the gate.
   argument, refused as `group=x` is (#124 C4), and the table's R4 sends an option's refusal to 2.
   The `DataError`, `StatementError` and `IntegrityError` tracebacks (exit 5) become status-2
   refusals.
-- **C6 — The datetime rule.** [NEEDS CLARIFICATION: which forms, and which time zone for a naive
-  value?] Today SQLite takes nothing but `none`, and PostgreSQL takes whatever its server parses,
+- **C6 — The datetime rule. Resolved 2026-11-24** (maintainer): **(a) and (i)**, ISO 8601 only, a
+  value without an offset is local time. Today SQLite takes nothing but `none`, and PostgreSQL takes whatever its server parses,
   in the server session's zone. HyperShell writes these columns as aware local times
   (`datetime.now().astimezone()`, as `--cancel` does); SQLite keeps the local wall time and
   PostgreSQL the instant (`timestamp with time zone`).
@@ -283,7 +328,8 @@ the gate.
   `start_time=2026-01-01T09:00` means 09:00 as `hs info` shows it. A value with an offset is the
   same instant on both backends. On PostgreSQL this refuses `now`, `today` and `epoch`, which its
   server accepts today (release note 6).
-- **C7 — `tag=VALUE`.** [NEEDS CLARIFICATION: refuse, read as a tag set, or keep?] Today the
+- **C7 — `tag=VALUE`. Resolved 2026-11-24** (maintainer): **(a)**, refused, exit 2, the message
+  pointing to `KEY=VALUE`, `KEY:VALUE` and `--remove-tag`. Today the
   filtered form's `tag=x` replaces the task's whole tag with the JSON string `"x"` (and `tag=none`
   with JSON `null`), where every reader expects a mapping.
   - **(a) Refuse `tag=VALUE`,** exit 2, pointing to `KEY:VALUE` changes and `--remove-tag`.
@@ -295,7 +341,7 @@ the gate.
   `KEY:VALUE` pairs already express. (b) invents a second tag syntax for one column, with its own
   quoting and refusals; (c) keeps a write that corrupts the column. The single-task
   `ID tag KEY:VALUE`, which merges one tag, is unchanged under every option.
-- **C8 — `zone=VALUE`.** [NEEDS CLARIFICATION: a zone name or a uuid?] `zone` holds a uuid, but one
+- **C8 — `zone=VALUE`. Resolved 2026-11-24** (maintainer): **(a)**, a zone name. `zone` holds a uuid, but one
   derived from a zone's name (`uuid5(ZONE_NAMESPACE, name)`), and NULL for the default zone, whose
   reserved id is never stored; users name zones (`hs submit --zone NAME`), and `hs list` shows the
   name. Today SQLite stores the text given, and both backends store the default zone's reserved id
@@ -310,7 +356,8 @@ the gate.
   **Recommended: (a).** It is the reading users already have from `hs submit` and `hs list`, it
   cannot strand a task under the reserved id, and it needs no uuid from the user. (b) keeps a
   value only the database shows.
-- **C9 — New rows for `cores_max` and `memory_max`.** [NEEDS CLARIFICATION: these ranges?] They are
+- **C9 — New rows for `cores_max` and `memory_max`. Resolved 2026-11-24** (foreman, under the
+  maintainer's mandate): **(a)**, the two rows as proposed. They are
   the peaks a client measures while a task runs (`client.py:932-933`), stored as `DOUBLE`; the
   table has no number entry for them.
   - **(a) Two rows by meaning:** Peak cores, a number 0 … 32,767, the cores ceiling (no host a
@@ -334,11 +381,40 @@ the gate.
   the form named for kinds the table has no range for (uuid, datetime, boolean, zone); whether the
   check reuses the table's error directly or wraps it as #124 wraps the group's; how a refusal of
   two changes at once is reported; where the advisory WARNING is flushed in `hs update`; how a
-  datetime with an offset is stored on SQLite so R6 holds.
+  datetime with an offset is stored on SQLite so R6 holds; for R16, which separator wins in an
+argument holding both (`note:a=b` is refused today as the field `note:a`), and how the prompt
+lists column and tag changes.
 
-**Ruled at the GOAL gate** (2026-11-24): C1 and C4 by the maintainer, C2 and C3 by the foreman under
-the maintainer's mandate. The GOAL was widened from the seed's five columns to every column, as one
-amendment; C6–C9 are open and block `hs-plan`.
+**Ruled at the first GOAL gate** (2026-11-24): C1 and C4 by the maintainer, C2 and C3 by the foreman
+under the maintainer's mandate. The GOAL was widened from the seed's five columns to every column,
+as one amendment.
+
+### GOAL gate (2026-11-24)
+
+Approved. Rulings, with who made each:
+
+- **C1 (maintainer):** `exit_status` and `attempt` stay writable and are read by kind (R3).
+- **C2 (foreman, under the maintainer's mandate):** `memory` and `timeout` take the full size and
+  duration grammars, through `bounded-inputs`' entries (R2).
+- **C3 (foreman, under the maintainer's mandate):** `attempt` takes the `ATTEMPTS` entry;
+  `exit_status` gets a new row, −32,768 … 32,767, added to `bounded-inputs`' table by this cycle.
+- **C4 (maintainer):** every column in this cycle; appetite `big`.
+- **C6 (maintainer):** ISO 8601 only; a value without an offset is local time; `now`, `today` and
+  `epoch` exit 2; `none` clears every timestamp but `submit_time` (R6, R8).
+- **C7 (maintainer):** `tag=VALUE` is refused, exit 2, the message pointing to `KEY=VALUE`,
+  `KEY:VALUE` and `--remove-tag` (R11).
+- **C8 (maintainer):** `zone=` takes a zone name as `hs submit --zone` does; `zone=default` and
+  `zone=none` write NULL, the default zone (R7).
+- **C9 (foreman, under the maintainer's mandate):** (a), the Peak cores and Peak memory rows as
+  proposed (R4).
+- **C11 (maintainer, new):** `KEY=VALUE` for any key that is not a task column is a tag change, the
+  same as `KEY:VALUE`, in both forms; the prompt shows column and tag changes apart; today's
+  unknown-field refusal is replaced (R16, R13). In the maintainer's words: "I want to keep the ':'
+  operator for tags, but … it's a better design to simply allow any `key=value` and if it's not a
+  primary column, treat it as a tag." He accepts that a misspelled column becomes a tag; the prompt
+  is where it shows.
+
+No R-ID was renumbered; R16 is appended. The contract is locked; `hs-plan` designs against it.
 
 ## Related materials
 
