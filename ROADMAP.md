@@ -332,6 +332,16 @@ by `update-client-retry`'s shaping, which takes the same form's action options.
 same routing) · Refs: `issues/update-legacy-tag-lost-write.md`*
 **Seed:** [`issues/update-legacy-form-ignores-filters.md`](issues/update-legacy-form-ignores-filters.md) · *status: unshaped*
 
+## `hs update` stores text in the task's integer columns
+
+`hs update exit_status=x`, `attempt=x`, `cores=x`, `memory=x` and `timeout=x` each store the text
+and exit 0. `cores`, `memory` and `timeout` drive dispatch. The fix reads each column by its kind,
+through `hs submit`'s parsers and `bounded-inputs`' ranges, refusing with exit 2 before any write.
+
+*Target: 2.9.0 · Horizon: near-term, small · Depends on: `bounded-inputs`,
+`update-group-and-legacy-filters` · Refs: `spec/submit-input-checks/` (#118)*
+**Seed:** [`issues/update-typed-columns.md`](issues/update-typed-columns.md) · *status: unshaped*
+
 ## Every numeric setting has one declared range, one parser and one error
 
 Bounds on numeric input were added one cycle at a time (a period above zero, an evict cap, a rate
