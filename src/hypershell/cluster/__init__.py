@@ -12,7 +12,6 @@ from types import TracebackType
 # Standard libs
 import os
 import sys
-import math
 import shlex
 from functools import cached_property
 
@@ -24,15 +23,15 @@ from cmdkit.cli import Interface, ArgumentError
 from hypershell.core.config import config, blame, find_available_ports, config_seconds, PARAM_UNSET
 from hypershell.core.tls import (TLSConfig, TLSError, DEFAULT_HANDSHAKE, handshake_seconds,
                                  from_namespace as tls_from_namespace)
-from hypershell.core.types import parse_period, UnitError, RATE_MINIMUM, RATE_FORMS, ranged
+from hypershell.core.types import parse_period, ranged
 from hypershell.core.logging import Logger
 from hypershell.core.template import DEFAULT_TEMPLATE
-from hypershell.core.exceptions import get_shared_exception_mapping
+from hypershell.core.exceptions import get_shared_exception_mapping, ReadingMixin, reading
 from hypershell.data import initdb, checkdb, DATABASE_DIALECT, DATABASE_ENABLED
 from hypershell.data.model import Task, Source, Zone, STDIN_SOURCE_ID, DEFAULT_TASK_GROUP, zone_name
 from hypershell.client import DEFAULT_NUM_THREADS, DEFAULT_DELAY, DEFAULT_SIGNALWAIT
 from hypershell.server import (DEFAULT_BUNDLESIZE, DEFAULT_ATTEMPTS, DEFAULT_SERVER_POLL, DEFAULT_PORT, DEFAULT_EVICT,
-                               is_file_input, check_evict, configured_eager, configured_retries)
+                               is_file_input, configured_eager, configured_retries)
 from hypershell.submit import (DEFAULT_BUNDLEWAIT, load_json_source, json_source_key, validate_json_expansion,
                                validate_json_groups, scan_task_lines, source_fingerprint, GatedSource,
                                decide_source_gate, refuse_below_reached_group, task_fingerprints,
@@ -134,7 +133,7 @@ Options:
 """
 
 
-class ClusterApp(Application):
+class ClusterApp(ReadingMixin, Application):
     """Run managed cluster."""
 
     name = APP_NAME
@@ -388,21 +387,10 @@ class ClusterApp(Application):
 
     def check_arguments(self: ClusterApp) -> None:
         """Various checks on input arguments."""
-        try:
-            # A number from the configuration is not parsed by the option.
-            self.autoscaling_period = parse_period(self.autoscaling_period)
-        except UnitError as error:
-            raise ArgumentError(str(error)) from error
-        self.evict_after = check_evict(config_seconds('server', 'evict'))
+        # A number from the configuration (checked as it loaded) is not parsed by the option: under one second is one.
+        self.autoscaling_period = parse_period(self.autoscaling_period)
+        self.evict_after = config_seconds('server', 'evict')
         self.eager_mode = configured_eager(self.eager_mode)
-        if isinstance(self.ratelimit, float) and not math.isfinite(self.ratelimit):
-            # The option reads a rate given as text; a number from a file is refused here, as the option refuses it.
-            raise ArgumentError(f'client.ratelimit: Rate {self.ratelimit!r} is not valid: expected a finite number '
-                                f'({blame(config, "client", "ratelimit")})')
-        if isinstance(self.ratelimit, float) and 0 < abs(self.ratelimit) < RATE_MINIMUM:
-            # A number from a file under the floor is refused here, as the option refuses it.
-            raise ArgumentError(f'client.ratelimit: Rate {self.ratelimit!r} is not valid: expected {RATE_FORMS} '
-                                f'({blame(config, "client", "ratelimit")})')
         given_filepath = self.filepath is not None
         if self.from_json:
             if given_filepath:
@@ -652,7 +640,8 @@ class ClusterApp(Application):
 
     def __enter__(self: ClusterApp) -> ClusterApp:
         """Set up resources and attributes."""
-        self.check_arguments()
+        with reading('configuration'):
+            self.check_arguments()
         self.enable_tls()
         if not self.in_memory:  # With --no-db the configured database is never opened.
             if DATABASE_DIALECT == 'sqlite' or self.auto_initdb:

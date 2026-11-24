@@ -18,6 +18,7 @@ import shutil
 import tomlkit
 import logging
 import socket
+import copy
 import functools
 import platform
 import subprocess
@@ -30,17 +31,18 @@ from cmdkit.cli import Interface, ArgumentError
 
 # Internal libs
 from hypershell.core.platform import path, home, default_path
-from hypershell.core.exceptions import write_traceback, display_critical
+from hypershell.core.exceptions import write_traceback, display_critical, SettingRefused
 from hypershell.core.sys import PATH_SEP
-from hypershell.core.types import TIME_FORMS, _match_seconds
-from hypershell.core.config_schema import KEYS, read_environment, match_name, variable_name, VariableError
+from hypershell.core.config_schema import (KEYS, ZONE_KEYS, NUMERIC, SETTINGS, read_environment, match_name,
+                                           variable_name, setting_for, advise, shown, Kind, SettingError,
+                                           VariableError, VariableRefusal)
 
 # Public interface
 __all__ = [
     'config', 'update', 'default', 'ConfigurationError', 'Namespace', 'blame',
     'resolve_auth', 'check_auth_forms', 'AUTH_FORMS', 'AUTH_SECTIONS', 'AUTH_ENV', 'is_key_variable',
     'is_relay_variable', 'env_variable',
-    'config_seconds', 'client_host', 'WILDCARD_BINDS',
+    'config_seconds', 'client_host', 'WILDCARD_BINDS', 'check_settings', 'unchecked_config', 'CONFIG_COMMAND',
     'KEY_OPTION_STRINGS', 'SERVER_KEY_SOURCES', 'RefuseKeyOption', 'refuse_key_option',
     'load', 'reload', 'reload_local', 'load_file', 'reload_file', 'load_env', 'reload_env', 'load_task_env',
     'ENV_VARIABLES',
@@ -277,6 +279,8 @@ def reload_env() -> Namespace:
     """
     try:
         layer, variables = read_environment(os.environ)
+    except VariableRefusal as error:
+        raise SettingRefused(str(error)) from None
     except VariableError as error:
         raise ConfigurationError(str(error)) from None
     ENV_VARIABLES.clear()
@@ -347,32 +351,134 @@ def config_seconds(*varpath: str, base: Configuration = None, whole: bool = Fals
 
     A number is used as given. Text takes the forms of the duration options, its exact value an `int`
     when whole and a `float` otherwise. The key is read by attribute, so its `_env` and `_eval` forms
-    resolve. A value that is not a duration raises `ConfigurationError` naming the key, where it came
-    from, and the forms a duration takes.
+    resolve (the configuration loaded at import holds them resolved and checked). A value its entry in
+    the table refuses raises :class:`SettingRefused` in the one form, naming the key and where it came
+    from.
     """
     base = config if base is None else base
     key = '.'.join(varpath)
     *section, name = varpath
     table = functools.reduce(lambda parent, part: parent[part], section, base)
     form = next((given for given in (name, f'{name}_env', f'{name}_eval') if given in table), name)
+    value = _resolved(table, name, form, key, base, section)
+    try:
+        return SETTINGS[setting_for(key)].parse(value, key, source=_source_of(base, *section, form), whole=whole)
+    except SettingError as error:
+        raise SettingRefused(str(error)) from None
+
+
+def _source_of(base: Configuration, *varpath: str) -> Optional[str]:
+    """The file or variable that gives `varpath` (as :func:`blame` names it, without its `from: `)."""
+    try:
+        label = blame(base, *varpath)
+    except KeyError:
+        return None
+    return None if label is None else label.removeprefix('from: ')
+
+
+def _resolved(table: Namespace, name: str, form: str, key: str, base: Configuration, section: List[str]) -> Any:
+    """The value of `name` in `table`, read by attribute so its `_env` or `_eval` `form` resolves.
+
+    A variable that is not set, or a command that fails, raises `ConfigurationError` naming the key
+    and where it came from; only the error's type is named, as its text can carry a command's output.
+    """
     try:
         value = getattr(table, name)
     except Exception as error:
-        # Only the error's type is named: its text can carry part of a command's output.
         raise ConfigurationError(f'{key} could not be resolved: {type(error).__name__} '
                                  f'({blame(base, *section, form)})') from None
     if value is None and form == f'{name}_env':
         raise ConfigurationError(f'{key}_env names {table[form]}, which is not set ({blame(base, *section, form)})')
-    if isinstance(value, (int, float)) and not isinstance(value, bool):
-        return value
-    seconds = _match_seconds(value.strip()) if isinstance(value, str) else None
-    try:
-        if seconds is not None:
-            return math.ceil(seconds) if whole else int(seconds) if seconds.denominator == 1 else float(seconds)
-    except OverflowError:
-        pass
-    raise ConfigurationError(f'{key}: Duration {value!r} is not valid: expected {TIME_FORMS} '
-                             f'({blame(base, *section, form)})')
+    return value
+
+
+def _numeric_paths(base: Configuration) -> Iterator[Tuple[str, ...]]:
+    """The path of every numeric key, and of each numeric key of each `[relay.zone.<name>]` table the view holds."""
+    for key, kind in KEYS.items():
+        if kind in NUMERIC:
+            yield tuple(key.split('.'))
+    zones = base.get('relay', {}).get('zone', None)
+    if isinstance(zones, dict):
+        for zone, table in zones.items():
+            if isinstance(table, dict):
+                for key, kind in ZONE_KEYS.items():
+                    if kind in NUMERIC:
+                        yield 'relay', 'zone', zone, key
+
+
+FILE_LAYERS: Final[Tuple[str, ...]] = ('system', 'user', 'local')
+"""The layers a configuration file gives."""
+
+
+def check_settings(base: Configuration, exempt_files: bool = False) -> Configuration:
+    """The configuration `base` with every numeric key checked against its range, and pinned.
+
+    Each numeric key a file or the environment gives, in any form (`_env` and `_eval` resolved once,
+    here), is read by its entry in the table. Whole numbers and numbers are written back as numbers,
+    durations and sizes as given, into the layer that gave them under the plain key, so `which` and
+    `blame` still name the file or variable. A value past an advisory limit is warned of once. A
+    value the entry refuses raises :class:`SettingRefused`, in the one form and naming its source;
+    with `exempt_files` (`hs config`), a file's refused value gives way to the built-in default
+    instead, while the environment's is still refused, and nothing is warned of. `base` itself is
+    left as it was. A refused variable's value is shown, and read, as its text.
+    """
+    layers = {label: copy.deepcopy(dict(layer)) for label, layer in base.namespaces.items()}
+    for varpath in _numeric_paths(base):
+        *section, name = varpath
+        table = base
+        for part in section:
+            table = table.get(part) if isinstance(table, dict) else None
+        if not isinstance(table, dict):
+            continue
+        form = next((given for given in (name, f'{name}_env', f'{name}_eval') if given in table), None)
+        if form is None:
+            continue
+        try:
+            label = base.which(*section, form)
+        except KeyError:
+            continue
+        if label in ('default', 'preload'):
+            continue
+        key = '.'.join(varpath)
+        setting = setting_for(key)
+        source = _source_of(base, *section, form)
+        value = _resolved(table, name, form, key, base, section)
+        given = value
+        if label == 'env' and form == name and (variable := ENV_VARIABLES.get(tuple(varpath))) in os.environ:
+            given = os.environ[variable]
+        try:
+            checked = SETTINGS[setting].parse(given, key, source=source, whole=False)
+        except SettingError as error:
+            if exempt_files and label in FILE_LAYERS:
+                for file_label in FILE_LAYERS:
+                    _forget(layers.get(file_label), section, name)
+                continue
+            raise SettingRefused(str(error)) from None
+        if not exempt_files:
+            advise(setting, checked, key, given=value)  # As the layer holds it (a variable's number, typed)
+        if SETTINGS[setting].kind in (Kind.INT, Kind.NUMBER, Kind.INT_OR_NONE):
+            value = checked
+        _forget(layers[label], section, name)
+        _place(layers[label], section, name, value)
+        if label == 'env' and form != name:
+            ENV_VARIABLES[tuple(varpath)] = ENV_VARIABLES.pop((*section, form), variable_name(key))
+    return Configuration(**layers)
+
+
+def _forget(layer: Optional[dict], section: List[str], name: str) -> None:
+    """Remove every form of `name` (`name`, `name_env`, `name_eval`) from the table `section` of `layer`."""
+    for part in section:
+        layer = layer.get(part) if isinstance(layer, dict) else None
+    if isinstance(layer, dict):
+        for form in (name, f'{name}_env', f'{name}_eval'):
+            layer.pop(form, None)
+
+
+def _place(layer: dict, section: List[str], name: str, value: Any) -> None:
+    """Set `name` to `value` in the table `section` of `layer`."""
+    for part in section:
+        layer = layer.setdefault(part, {})
+    layer[name] = value
 
 
 WILDCARD_BINDS: Final[FrozenSet[str]] = frozenset({'0.0.0.0', ''})
@@ -639,27 +745,63 @@ def reload_local(filepath: Optional[str] = None) -> Configuration:
     return build_configuration(loader=loader)
 
 
-try:
-    if (local_config := os.getenv('HYPERSHELL_CONFIG_FILE', None)) is not None:
-        path.local.config = local_config  # Modified as to not lie to the user
-        config = reload_local(local_config)
-    else:
-        config = load()
-    check_auth_forms(config)
-except ConfigurationError as error:
-    display_critical(error, module=__name__)
-    sys.exit(exit_status.bad_config)
-except Exception as error:
-    write_traceback(error, module=__name__)
-    sys.exit(exit_status.bad_config)
-
-
 RELAY_MARKER: Final[str] = '_HYPERSHELL_RELAY'
 """Private environment variable that marks a process started to run `hs relay`.
 
 It sits outside the `HYPERSHELL_` prefix, so it never reaches the configuration, and it is
 removed as soon as it is read, so no child process inherits it.
 """
+
+def _relay_requested(argv: List[str] = None) -> bool:
+    """True if this process runs `hs relay`: the private marker is set, or the command line names it."""
+    if os.environ.pop(RELAY_MARKER, None):
+        return True
+    argv = sys.argv if argv is None else argv
+    program = os.path.splitext(os.path.basename(argv[0]))[0] if argv else ''
+    return program in ('hs', 'hyper-shell') and len(argv) > 1 and argv[1] == 'relay'
+
+
+RELAY_PROCESS: Final[bool] = _relay_requested()
+"""Set in a process that runs `hs relay`; its database section is the relay database.
+
+The swap happens here, before `hypershell.data` builds its engine from this configuration, so
+every module that reads the database section sees the relay database (after the configuration
+is loaded, below). One relay per process.
+"""
+
+def _config_requested(argv: List[str] = None) -> bool:
+    """True if this process runs `hs config`, which runs on a file holding a refused value so it can be repaired."""
+    argv = sys.argv if argv is None else argv
+    program = os.path.splitext(os.path.basename(argv[0]))[0] if argv else ''
+    return program in ('hs', 'hyper-shell') and len(argv) > 1 and argv[1] == 'config'
+
+
+CONFIG_COMMAND: Final[bool] = _config_requested()
+"""Set in a process that runs `hs config`: a file's refused value gives way to its default (see `check_settings`)."""
+
+
+try:
+    if (local_config := os.getenv('HYPERSHELL_CONFIG_FILE', None)) is not None:
+        path.local.config = local_config  # Modified as to not lie to the user
+        unchecked_config = reload_local(local_config)
+    else:
+        unchecked_config = load()
+    config = check_settings(unchecked_config, exempt_files=CONFIG_COMMAND)
+    check_auth_forms(config)
+except SettingRefused as error:
+    display_critical(str(error), module=__name__)
+    sys.exit(exit_status.bad_config)
+except ConfigurationError as error:
+    display_critical(error, module=__name__)
+    sys.exit(exit_status.bad_config)
+except (ValueError, OverflowError) as error:
+    text = str(error).replace('\n', ' - ')
+    display_critical(f'{type(error).__name__}: {text if len(text) <= 200 else shown(text)}', module=__name__)
+    sys.exit(exit_status.bad_config)
+except Exception as error:
+    write_traceback(error, module=__name__)
+    sys.exit(exit_status.bad_config)
+
 
 RELAY_PRAGMAS: Final[Dict[str, str]] = {'synchronous': 'FULL'}
 """SQLite pragmas for the relay database: a committed insert survives a power loss."""
@@ -687,22 +829,6 @@ def relay_database_section(base: Namespace) -> Namespace:
                       'pragmas': dict(RELAY_PRAGMAS)})
 
 
-def _relay_requested(argv: List[str] = None) -> bool:
-    """True if this process runs `hs relay`: the private marker is set, or the command line names it."""
-    if os.environ.pop(RELAY_MARKER, None):
-        return True
-    argv = sys.argv if argv is None else argv
-    program = os.path.splitext(os.path.basename(argv[0]))[0] if argv else ''
-    return program in ('hs', 'hyper-shell') and len(argv) > 1 and argv[1] == 'relay'
-
-
-RELAY_PROCESS: Final[bool] = _relay_requested()
-"""Set in a process that runs `hs relay`; its database section is the relay database.
-
-The swap happens here, before `hypershell.data` builds its engine from this configuration, so
-every module that reads the database section sees the relay database. One relay per process.
-"""
-
 if RELAY_PROCESS:
     config['database'] = relay_database_section(config)
 
@@ -716,7 +842,7 @@ def _leaf_paths(tree: dict, path: tuple = ()) -> Iterator[str]:
             yield '.'.join((*path, name))
 
 
-ACTIVE_CONFIG_VARS: Final[List[str]] = sorted({*KEYS, *_leaf_paths(config)})
+ACTIVE_CONFIG_VARS: Final[List[str]] = sorted({*KEYS, *_leaf_paths(unchecked_config)})
 """Every documented key and every key the configuration holds, by dotted path (for completion)."""
 
 

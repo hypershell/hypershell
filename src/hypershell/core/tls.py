@@ -25,7 +25,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 
 # Internal libs
 from hypershell.core.logging import Logger
-from hypershell.core.types import parse_time, UnitError, TIME_FORMS
+from hypershell.core.config_schema import SETTINGS, SettingError, TIME_FORMS
 
 # Public interface
 __all__ = [
@@ -61,7 +61,8 @@ DEFAULT_KEY_FILENAME: Final[str] = 'server.key'
 # Seconds a server gives a connection to complete its TLS handshake, counted from accept, the most it
 # accepts (one day), and the configuration key that sets it
 DEFAULT_HANDSHAKE: Final[int] = 30
-MAX_HANDSHAKE: Final[int] = 86400
+HANDSHAKE = SETTINGS['server.tls.handshake']
+MAX_HANDSHAKE: Final[int] = HANDSHAKE.high
 HANDSHAKE_KEY: Final[str] = 'server.tls.handshake'
 
 # RFC 5280 caps X.520 ``commonName`` at 64 UTF-8 characters. ``socket.getfqdn()`` can return
@@ -165,29 +166,16 @@ def handshake_seconds(value: Union[int, float, str]) -> int:
     parses the value.
 
     Raises:
-        TLSError: `value` is not a duration, or is not greater than zero, or is more than one day
-            (:data:`MAX_HANDSHAKE` seconds). The message names ``server.tls.handshake`` and the
-            accepted forms.
+        TLSError: `value` is not a duration, or is outside the range of ``server.tls.handshake`` in
+            the table (1 to :data:`MAX_HANDSHAKE` seconds). The message names the key, its range and
+            the accepted forms.
     """
+    text = value if isinstance(value, int) and not isinstance(value, bool) else str(value)
     try:
-        seconds = parse_time(value)
-    except UnitError as error:
-        raise TLSError(f'{HANDSHAKE_KEY}: {error}') from error
-    except ValueError as error:  # A number with more digits than Python converts
-        raise TLSError(f'{HANDSHAKE_KEY}: Duration {_shown(value)} is not valid: expected {TIME_FORMS}') from error
-    if not 0 < seconds <= MAX_HANDSHAKE:
-        raise TLSError(f'{HANDSHAKE_KEY} must be greater than 0 and at most one day ({MAX_HANDSHAKE} seconds) '
-                       f'(given {_shown(value)}): expected {TIME_FORMS}')
-    return seconds
-
-
-def _shown(value: object) -> str:
-    """`value` for an error message, cut short when long."""
-    try:
-        text = repr(value)
-    except ValueError:  # An integer with more digits than Python converts
-        return 'a number too long to show'
-    return text if len(text) <= 40 else f'{text[:20]}... ({len(text)} characters)'
+        return HANDSHAKE.parse(text, HANDSHAKE_KEY)
+    except SettingError as error:
+        forms = f'; a duration is {TIME_FORMS}' if error.out_of_range else ''
+        raise TLSError(f'{error}{forms}') from None
 
 
 def build_server_context(cfg: TLSConfig) -> ssl.SSLContext:

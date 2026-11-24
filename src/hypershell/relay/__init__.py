@@ -54,7 +54,8 @@ from sqlalchemy import inspect
 from hypershell.core.config import (config, default, RELAY_PROCESS, RELAY_MARKER, DEFAULT_RELAY_PORT, DEFAULT_AUTH,
                                     PARAM_UNSET, relay_database_section, config_seconds)
 from hypershell.core.signal import SIGUSR1, SIGUSR2, SIGTERM
-from hypershell.core.exceptions import get_shared_exception_mapping, handle_exception, handle_disconnect
+from hypershell.core.exceptions import (get_shared_exception_mapping, handle_exception, handle_disconnect,
+                                        ReadingMixin, reading, SettingRefused)
 from hypershell.core.logging import Logger, INSTANCE
 from hypershell.core.queue import QueueClient, QueueConfig
 from hypershell.core.reconnect import UpstreamLink, LinkDown, TLSMismatchError
@@ -62,6 +63,7 @@ from hypershell.core.thread import Thread, join_waking
 from hypershell.core.tls import (TLSConfig, TLSError, DEFAULT_HANDSHAKE, handshake_seconds,
                                  from_namespace as tls_from_namespace)
 from hypershell.core.types import parse_period, UnitError, ranged
+from hypershell.core.config_schema import parse_setting, SettingError
 from hypershell.data import ensuredb
 from hypershell.data.core import engine
 from hypershell.data.model import Task, zone_name, zone_id, DEFAULT_ZONE_NAME
@@ -296,6 +298,17 @@ def zone_bounds(settings: Mapping[str, Any], relay_wide: Mapping[str, Any]) -> T
     floor = min(upper, max(1, size if lo is None else lo))
     start = min(upper, max(floor, size if init is None else init))
     return advertised, Bounds(min=floor, max=upper, init=start)
+
+
+def ranged_value(setting: str, key: str, value: Any) -> int:
+    """The whole number `value` of the key `key`, read by the entry `setting` of the table (else exit 2, naming it).
+
+    The configuration is checked as it loads, so this refuses only a value set in place after that.
+    """
+    try:
+        return parse_setting(setting, value, name=key)
+    except SettingError as error:
+        raise ArgumentError(str(error)) from None
 
 
 def zone_options(value: Any) -> Tuple[List[Optional[str]], Dict[Optional[str], Dict[str, Any]]]:
@@ -1109,7 +1122,7 @@ Options:
 """
 
 
-class RelayApp(Application):
+class RelayApp(ReadingMixin, Application):
     """Run relay for one site."""
 
     name = APP_NAME
@@ -1188,7 +1201,8 @@ class RelayApp(Application):
 
     def run(self: RelayApp) -> None:
         """Run relay."""
-        self.check_args()
+        with reading('configuration'):
+            self.check_args()
         # Read before the database is bound: a re-executed relay's `sys.argv[0]` is `-c`, so it is
         # handed this value across the re-execution instead.
         self.program  # noqa: resolved here, in the process the user started
@@ -1319,8 +1333,8 @@ class RelayApp(Application):
         """
         try:
             return parse_period(config.autoscale.period)
-        except UnitError as error:
-            raise ArgumentError(str(error)) from error
+        except UnitError as error:  # Checked as the configuration loaded: only a value set in place after that
+            raise SettingRefused(str(error)) from None
 
     @functools.cached_property
     def durations(self: RelayApp) -> Dict[str, int | float]:
@@ -1338,12 +1352,7 @@ class RelayApp(Application):
         given: Dict[str, Optional[int]] = {}
         for key in BOUND_OPTIONS:
             value = config.relay.get(key, None)
-            if value in (None, PARAM_UNSET) or value == PARAM_UNSET:
-                given[key] = None
-            elif isinstance(value, bool) or not isinstance(value, int) or value < 0:
-                raise ArgumentError(f'relay.{key} must be a whole number, at least 0 (given {value!r})')
-            else:
-                given[key] = value
+            given[key] = None if value in (None, PARAM_UNSET) else ranged_value(f'relay.{key}', f'relay.{key}', value)
         return given
 
     def check_bounds(self: RelayApp) -> None:
@@ -1388,19 +1397,9 @@ class RelayApp(Application):
         checked: Dict[Optional[str], Dict[str, Any]] = {}
         for zone, given in self.zone_plan[1].items():
             name, table = zone or DEFAULT_ZONE_NAME, {}
-            if 'size' in given:
-                size = given['size']
-                if isinstance(size, bool) or not isinstance(size, int) or size < 1:
-                    raise ArgumentError(f'Site size of zone {name} must be a whole number, at least 1 '
-                                        f'(given {size!r})')
-                table['size'] = size
-            for key in BOUND_OPTIONS:
+            for key in ('size', *BOUND_OPTIONS):
                 if key in given:
-                    value = given[key]
-                    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-                        raise ArgumentError(f'relay.zone.{name}.{key} must be a whole number, at least 0 '
-                                            f'(given {value!r})')
-                    table[key] = value
+                    table[key] = ranged_value(f'relay.zone.*.{key}', f'relay.zone.{name}.{key}', given[key])
             for key in ('launcher', 'launcher_args'):
                 if key in given:
                     if not isinstance(given[key], str):

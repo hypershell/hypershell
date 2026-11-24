@@ -76,7 +76,8 @@ from hypershell.core.types import JSONData, ranged
 from hypershell.core.pretty_print import format_tag
 from hypershell.core.tag import Tag
 from hypershell.core.exceptions import (handle_exception, handle_disconnect,
-                                        handle_address_unknown, HostAddressInfo, get_shared_exception_mapping)
+                                        handle_address_unknown, HostAddressInfo, get_shared_exception_mapping,
+                                        ReadingMixin, reading)
 from hypershell.data.model import (Task, Source, Zone, DIRECT_SOURCE_ID, STDIN_SOURCE_ID, DEFAULT_TASK_GROUP,
                                    TaskGroupInfo, TaskGroupError, ensure_group, tag_text,
                                    serialize_tasks, zone_name)
@@ -1553,7 +1554,7 @@ Options:
 """
 
 
-class SubmitApp(Application):
+class SubmitApp(ReadingMixin, Application):
     """Submit tasks to the database."""
 
     name = APP_NAME
@@ -1661,8 +1662,9 @@ class SubmitApp(Application):
         group against the database's reached group (exit 2); only then the zone, the source and
         the tasks.
         """
-        self.check_arguments()
-        self.check_tags()
+        with reading('configuration'):
+            self.check_arguments()
+            self.check_tags()
         self.check_source()
         self.queue = None
         if self.queue_mode:

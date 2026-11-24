@@ -118,12 +118,12 @@ def _text(value: Any) -> str | int:
 
 
 def parse_bytes(value: str | int, name: str = 'size') -> int:
-    """Bytes in a size (e.g., '512MB', '16G', '1.5GiB'), exact, from 0 to 2**63 - 1; the refusal is named `name`."""
+    """Bytes in a size (e.g., '512MB', '16G', '1.5GiB'), exact, within the table's size range; the refusal is named `name`."""
     return _parsed(SIZE, _text(value), name)
 
 
 def parse_time(value: str | int, name: str = 'duration') -> int:
-    """Whole seconds in a duration, rounded up (e.g., '1h30m', '1.5h', '1:30:00' -> 5400), from 0 to 2**31 - 1.
+    """Whole seconds in a duration, rounded up (e.g., '1h30m', '1.5h', '1:30:00' -> 5400), within the table's range.
 
     The refusal is named `name`.
     """

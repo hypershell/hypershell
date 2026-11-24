@@ -78,7 +78,8 @@ from hypershell.core.queue import (QueueClient, QueueConfig, QueueVersionError, 
                                    DEFAULT_REMOTE_TIMEOUT, DEFAULT_LOCAL_TIMEOUT)
 from hypershell.core.dispatch import build_version
 from hypershell.core.exceptions import (handle_exception, handle_disconnect,
-                                        handle_address_unknown, HostAddressInfo, get_shared_exception_mapping)
+                                        handle_address_unknown, HostAddressInfo, get_shared_exception_mapping,
+                                        ReadingMixin, reading)
 
 # Public interface
 __all__ = ['run_client', 'ClientThread', 'ClientApp', 'ClientInfo',
@@ -1645,7 +1646,7 @@ Options:
 """
 
 
-class ClientApp(Application):
+class ClientApp(ReadingMixin, Application):
     """Run individual client directly."""
 
     name = APP_NAME
@@ -1742,7 +1743,8 @@ class ClientApp(Application):
         no_key = (not any(is_key_variable(name, sections=(('server', ), )) for name in os.environ)
                   and self.auth == DEFAULT_AUTH)
         try:
-            self.check_args()
+            with reading('configuration'):
+                self.check_args()
             self.enable_tls()
             run_client(num_threads=self.num_threads,
                        bundlesize=advertised_size(self.bundlesize),

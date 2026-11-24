@@ -45,15 +45,16 @@ def layered(**server: Any) -> Configuration:
 
 SECONDS: Final[Dict[str, Tuple[Any, bool, Any]]] = {
     'number': (600, False, 600),
-    'fraction': (9.5, False, 9.5),
+    'fraction': (19.5, False, 19.5),
     'units': ('10m', False, 600),
-    'fractional-units': ('1.5s', False, 1.5),
+    'fractional-units': ('10.5s', False, 10.5),
     'slurm': ('1:30:00', False, 5400),
     'spaces': (' 90 ', False, 90),
-    'whole-rounds-up': ('1.2s', True, 2),
+    'whole-rounds-up': ('10.2s', True, 11),
     'whole-units': ('5m', True, 300),
 }
-"""For each case: the value given, whether whole seconds are asked for, and the seconds read."""
+"""For each case: the value given, whether whole seconds are asked for, and the seconds read (each inside
+`server.evict`'s range, which the reader holds it to)."""
 
 
 @mark.unit
@@ -147,7 +148,7 @@ def test_duration_refused_at_start(temp_site: Path, path: str) -> None:
         env = child_env(site, HYPERSHELL_SERVER_AUTH=KEY, **variables)
     status, _, stderr = run_bounded(site, argv, env, bound=BOUND)
     source = name or str(site / 'config.toml')
-    assert_refused(status, stderr, path, source, 'Duration')
+    assert_refused(status, stderr, path, source, 'expected a duration')
 
 
 RELAY_UNITS: Final[Dict[str, Tuple[str, str, Any]]] = {

@@ -41,7 +41,7 @@ __all__ = ['Kind', 'TableKind', 'KEYS', 'TABLES', 'ZONE_KEYS', 'TIMESCALE_KEYS',
            'PROSE_KEYS', 'SCALAR_TABLES', 'EMPTY_UNSET', 'VARIANTS', 'PREFIX', 'VariableError', 'read_value',
            'read_untyped', 'match_name', 'match_path', 'read_environment', 'variable_name',
            'Range', 'SETTINGS', 'SettingError', 'parse_setting', 'shown', 'advise', 'flush_advice',
-           'ADVISED', 'PENDING', 'TIME_FORMS', 'MEMORY_FORMS', 'DELAY_RANDOM_FORM', 'match_seconds', 'match_bytes']
+           'ADVISED', 'PENDING', 'setting_for', 'VariableRefusal', 'NUMERIC', 'TIME_FORMS', 'MEMORY_FORMS', 'DELAY_RANDOM_FORM', 'match_seconds', 'match_bytes']
 
 
 PREFIX: Final[str] = 'HYPERSHELL_'
@@ -183,6 +183,10 @@ del T, B, I, N, D, S
 
 class VariableError(ValueError):
     """A variable's name or value the environment layer cannot hold; the message names the variable."""
+
+
+class VariableRefusal(VariableError):
+    """A variable's value that is not a number of its key's kind, refused in the one form of a setting's refusal."""
 
 
 BOOL_WORDS: Final[Dict[str, bool]] = {
@@ -371,8 +375,14 @@ def read_environment(environ: Mapping[str, str]) -> Tuple[Dict[str, Any], Dict[T
             continue
         if path in variables:
             raise VariableError(f'{variables[path]} and {name} both set {".".join(path)}')
+        setting = setting_for('.'.join(path))
         try:
-            values[path] = read_value(kind, environ[name])
+            if setting is not None and kind in (Kind.INT, Kind.NUMBER, Kind.INT_OR_NONE):
+                values[path] = SETTINGS[setting].read(environ[name], '.'.join(path), source=name)
+            else:
+                values[path] = read_value(kind, environ[name])
+        except SettingError as error:
+            raise VariableRefusal(str(error)) from None
         except ValueError as error:
             raise VariableError(f'{".".join(path)}: expected {error}, '
                                 f'given {environ[name]!r} (from: {name})') from None
@@ -602,11 +612,25 @@ class Range:
         return f'{direction.capitalize()} {figure(limit)}{self.unit}{other} it runs with a warning.'
 
     def refusal(self: Range, name: str, value: Any, source: Optional[str] = None, out_of_range: bool = True) -> str:
-        """The one refusal: `<name>: expected <form> from <A> to <B>, given <V>`, and its source."""
-        detail = '' if out_of_range else self.detail or KIND_DETAILS.get(self.kind)
+        """The one refusal: `<name>: expected <form> from <A> to <B>, given <V>`, and its source.
+
+        A value not of the kind at all, refused without a source (an option, a task's tag), also lists
+        the kind's forms; a configuration refusal ends with its source instead.
+        """
+        detail = '' if out_of_range or source is not None else self.detail or KIND_DETAILS.get(self.kind)
         message = f'{name}: expected {KIND_FORMS[self.kind]} from {self.bounds}, given {shown(value)}'
         message += f'; {detail}' if detail else ''
         return message + (f' (from: {source})' if source is not None else '')
+
+    def read(self: Range, value: Any, name: str, source: Optional[str] = None, whole: bool = True) -> Any:
+        """`value` read by this range's kind, the range left unchecked; :class:`SettingError` if it is not of the kind.
+
+        A whole number too wide to convert is refused here too, as out of range.
+        """
+        try:
+            return self._read(value, whole)
+        except _Refused as refused:
+            raise SettingError(name, self, value, source, out_of_range=refused.out_of_range) from None
 
     def parse(self: Range, value: Any, name: str, source: Optional[str] = None, whole: bool = True) -> Any:
         """`value` read by this range's kind, inside the range, else :class:`SettingError` naming `name`.
@@ -825,6 +849,20 @@ SETTINGS: Final[Dict[str, Range]] = {
 }
 """The range of every numeric setting: each numeric key of :data:`KEYS`, each zone key as
 `relay.zone.*.<key>`, and each option that sets no key as `option.<name>`."""
+
+
+NUMERIC: Final[Tuple[Kind, ...]] = (Kind.INT, Kind.NUMBER, Kind.INT_OR_NONE, Kind.DURATION, Kind.SIZE)
+"""The kinds of a numeric setting."""
+
+
+def setting_for(path: str) -> Optional[str]:
+    """The entry of :data:`SETTINGS` for the dotted key `path` (a zone key's by its zone key), or None if not numeric."""
+    if path in SETTINGS and not path.startswith('option.'):
+        return path
+    parts = path.split('.')
+    if len(parts) == 4 and parts[:2] == ['relay', 'zone'] and ZONE_KEYS.get(parts[3]) in NUMERIC:
+        return f'relay.zone.*.{parts[3]}'
+    return None
 
 
 def parse_setting(setting: str, value: Any, name: Optional[str] = None, source: Optional[str] = None,

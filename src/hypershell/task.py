@@ -42,7 +42,7 @@ from sqlalchemy.types import Text as TEXT
 from hypershell.core.platform import default_path
 from hypershell.core.config import config
 from hypershell.core.exceptions import (handle_exception, handle_exception_silently, handle_broken_pipe,
-                                        get_shared_exception_mapping)
+                                        get_shared_exception_mapping, ReadingMixin)
 from hypershell.core.logging import Logger, HOSTNAME
 from hypershell.core.remote import SSHConnection
 from hypershell.core.signal import exit_status_for_signal
@@ -82,7 +82,7 @@ Options:
 """
 
 
-class TaskSubmitApp(Application):
+class TaskSubmitApp(ReadingMixin, Application):
     """Submit task to database."""
 
     interface = Interface(SUBMIT_PROGRAM, SUBMIT_USAGE, SUBMIT_HELP)
@@ -163,7 +163,7 @@ Options:
 """
 
 
-class TaskInfoApp(Application):
+class TaskInfoApp(ReadingMixin, Application):
     """Get metadata/status/outputs of task."""
 
     interface = Interface(INFO_PROGRAM, INFO_USAGE, INFO_HELP)
@@ -336,7 +336,7 @@ Options:
 """
 
 
-class TaskWaitApp(Application):
+class TaskWaitApp(ReadingMixin, Application):
     """Wait for task to complete."""
 
     interface = Interface(WAIT_PROGRAM, WAIT_USAGE, WAIT_HELP)
@@ -421,7 +421,7 @@ Options:
 """
 
 
-class TaskRunApp(Application):
+class TaskRunApp(ReadingMixin, Application):
     """Submit task and wait for completion."""
 
     interface = Interface(RUN_PROGRAM, RUN_USAGE, RUN_HELP)
@@ -626,7 +626,7 @@ Options:
 """
 
 
-class TaskSearchApp(Application, SearchableMixin):
+class TaskSearchApp(ReadingMixin, Application, SearchableMixin):
     """Search for tasks in database."""
 
     interface = Interface(SEARCH_PROGRAM, SEARCH_USAGE, SEARCH_HELP)
@@ -997,7 +997,7 @@ Options:
 """
 
 
-class TaskUpdateApp(Application, SearchableMixin):
+class TaskUpdateApp(ReadingMixin, Application, SearchableMixin):
     """Update task metadata."""
 
     interface = Interface(UPDATE_PROGRAM, UPDATE_USAGE, UPDATE_HELP)

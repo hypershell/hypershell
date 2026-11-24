@@ -233,6 +233,15 @@ subsystems.
 
 - `config` is built **once at import** — an effectively immutable per-process singleton. `hs config
   set` writes disk but does **not** mutate the live singleton (needs restart).
+- **Every numeric key is checked at load** (`check_settings`, inside the import-time `try`, before
+  `check_auth_forms` and the relay swap): each key a file or the environment gives, `_env`/`_eval`
+  resolved **once** there, is read by its `SETTINGS` entry (`core/config_schema.py`) and written
+  back into the layer that gave it (numbers as numbers, durations and sizes as given), so every
+  later read, class bodies and API defaults included, sees a checked value. A refusal is one line
+  (`SettingRefused`, no class prefix), exit 3, naming the key, range, value and source. Under
+  `hs config` (`CONFIG_COMMAND`) a file's refused value gives way to its default so the file can be
+  repaired; `hs config get`/`which` read `unchecked_config`. A new numeric key needs its `SETTINGS`
+  entry (`tests/test_bounded_table.py`).
 - Sentinels: `'<auto>'` (materialize), `'<none>'` (unset). The `X or None` idiom means **`0` =
   unlimited/auto** for many numeric knobs.
 - `data/core.py` creates engine + `Session` at import and can `sys.exit(3)` on bad config; SQLite
@@ -249,10 +258,12 @@ subsystems.
   `EMPTY_UNSET` is not given.
 - `hs config set` reads its value by the same rule (`match_path`, the dotted path matched as
   written, then `read_value`): a value that does not convert exits 2 before `update()`, and nothing
-  is written; `update()` reads and writes the file as UTF-8 whatever the locale. `server.eager` and
-  `server.evict` are read at each command's start check
-  (`configured_eager`, `check_evict`), never at import. `server.attempts` is read when a Python API
-  entry point is built without `max_retries` (`configured_retries()`).
+  is written; `update()` reads and writes the file as UTF-8 whatever the locale. A numeric key's
+  value goes through its `SETTINGS` entry (range and kind) and any other key's integer must fit 64
+  bits, exit 2 otherwise. `server.eager` is read at each command's start check (`configured_eager`);
+  `server.evict` is checked at load like every numeric key and read by `config_seconds`.
+  `server.attempts` is read when a Python API entry point is built without `max_retries`
+  (`configured_retries()`), already checked.
 - **Relay process:** `core/config.py` replaces the whole `[database]` section with the relay's private
   SQLite file at import (`RELAY_PROCESS`), so one relay runs per process and a late start re-executes,
   handing the new process its own program in `_HYPERSHELL_RELAY_PROGRAM` (beside

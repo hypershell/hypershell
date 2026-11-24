@@ -6,7 +6,7 @@ appetite: big
 status: in_progress
 branch: fix/bounded-inputs
 base: develop
-current_phase: P3
+current_phase: P4
 last_updated: '2026-11-24'
 phases:
 - id: P1
@@ -55,7 +55,7 @@ phases:
 - id: P3
   name: 'Configuration: the check at load with write-back, the hs config exemption,
     the retired checks as entries, hs config set, the backstop, API defaults'
-  status: pending
+  status: done
   satisfies:
   - R3
   - R4
@@ -69,7 +69,7 @@ phases:
   - P2
   parallel: false
   hammerable: false
-  hill: uphill
+  hill: downhill
   verify: test -n "$HS_TEST_POSTGRES" && python3 spec/submit-input-checks/drive/bounded.py
     2700 uv run pytest -q -p no:cacheprovider tests/test_bounded_table.py tests/test_bounded_parsers.py
     tests/test_bounded_options.py tests/test_bounded_config.py tests/test_bounded_config_set.py
@@ -299,28 +299,40 @@ every command reads through it, refuses with the R4 line (exit 2) and advises on
 the retired checks are table entries; `hs config` still repairs a bad file; `hs config set` refuses by
 the table; nothing numeric before work ends in a traceback.
 
-- [ ] `core/config.py`: `CONFIG_COMMAND` (moved above the load, with `_relay_requested`);
+- [x] `core/config.py`: `CONFIG_COMMAND` (moved above the load, with `_relay_requested`);
       `check_settings(config, exempt_files=CONFIG_COMMAND)` inside the import-time `try`, before
       `check_auth_forms` and the relay swap (PLAN § 2.3); `_env`/`_eval` of numeric keys resolved once
       and written back; zone tables walked; refused file values replaced by defaults in the checked
       view under `hs config`; an unchecked view for `hs config get`/`which`; the refusal printed as
       one line without a class prefix, exit 3; `config_seconds` over the table.
-- [ ] `core/config_schema.py` `read_value`: numeric kinds through the table's parsers (same message).
-- [ ] Retire into entries (R6): `check_evict` and its call sites (`server.py`, `cluster/__init__.py`,
+- [x] `core/config_schema.py` `read_value`: numeric kinds through the table's parsers (same message).
+- [x] Retire into entries (R6): `check_evict` and its call sites (`server.py`, `cluster/__init__.py`,
       the relay's evict read); `configured_failed_launches`; `configured_retries` (reads the checked
       value); `check_arguments`' period and rate; `handshake_seconds`' range; `set_retention_count`;
       the range parts of `relay_bounds`/`zone_settings`/`zone_bounds`. `HeartMonitor`'s explicit
       `evict_after` guard reads `EVICT`'s bounds (PLAN § 3 deviation).
-- [ ] `config.py` `ConfigSetApp` (R7): numeric and zone keys through their entries; untyped integers
+- [x] `config.py` `ConfigSetApp` (R7): numeric and zone keys through their entries; untyped integers
       outside −2⁶³ … 2⁶³−1 refused (digit count first); exit 2, nothing written, the value cut.
-- [ ] `reading(stage)` (R8) in `core/exceptions.py`; applied around `from_cmdline` (mixin), the start
+- [x] `reading(stage)` (R8) in `core/exceptions.py`; applied around `from_cmdline` (mixin), the start
       checks, the import-time load and the app imports in `hypershell/__init__.py` (PLAN § 2.4).
-- [ ] R10: API defaults from configuration read the checked values; `docs/api/*.rst` name the ranges.
-- [ ] Docs: `config_param_ref.rst` gives each numeric key's range and advisory limit (a `Range:`
+- [x] R10: API defaults from configuration read the checked values; `docs/api/*.rst` name the ranges.
+- [x] Docs: `config_param_ref.rst` gives each numeric key's range and advisory limit (a `Range:`
       sentence after the forms sentence, its marker in the entry's `.. only:: html` group);
       `config_intro.rst` (and `config_intro_alt.rst`) say a variable is held to its key's range and
       drop "checked by the command that reads it"; `invariants.md` §10 and `AGENTS.md` § Configuration
       updated for the load-time check (§10's `check_evict` sentence).
+- **Built (P3 notes):** the environment layer reads a whole number or number through its entry's kind
+  (`Range.read`), so a variable's kind error has the one form at once; its range is checked with every other key
+  by `check_settings`, which shows a refused variable's text as given and gives an advisory the value as the layer
+  holds it. A configuration refusal names its source last and lists no forms (the option and tag refusals still
+  do). Under `hs config` the load check neither refuses a file's value (it gives way to the default) nor warns.
+  `SettingRefused` (a `ConfigurationError`) prints its line as written; `reading(stage)` and `ReadingMixin` are the
+  backstop. The relay's in-place reads (`relay_bounds`, `zone_settings`, `site_period`) go through the entries;
+  `zone_bounds`, a relations helper with explicit arguments, keeps its own type check. `config_seconds` holds a
+  key to its entry's range. Tests amended where the GOAL changed what they pin: `test_env_duration.py`'s reader
+  cases sit inside `server.evict`'s range and its refusal names `expected a duration`; the relay's zone message.
+  One P1 setup fixed: `test_file_value_refused` unsets the fixture's `HYPERSHELL_SERVER_PORT`, so the file's port
+  decides.
 - **Verify:** the frontmatter `verify:` (configuration, `hs config set`, backstop and advisory suites;
   the touched suites; docs tests but the agent docs; guards; `no_bypass.sh` clean; `bounds_drive.sh`
   `options`, `config`, `set`, `advise`).

@@ -57,7 +57,7 @@ def test_file_value_refused(temp_site: Path, text: str, argv: List[str], name: s
     """A file's bad value stops the command at load, exit 3, naming the key and the file; no database is opened."""
     path, variables = write_config(temp_site, text)
     database = Path(os.environ['HYPERSHELL_DATABASE_FILE'])
-    rc, _, stderr = hs_cli(temp_site, argv, **variables)
+    rc, _, stderr = hs_cli(temp_site, argv, HYPERSHELL_SERVER_PORT=None, **variables)  # The file's port decides
     assert_one_refusal(rc, stderr, exit_status.bad_config, name, source=str(path))
     assert not database.exists(), 'the database was opened'
 

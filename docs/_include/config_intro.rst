@@ -158,7 +158,12 @@ The value is read by the key's type:
   that does not convert, an empty one included, stops the command with a configuration error naming
   the variable.
 - A duration or a size takes the forms its entry gives (e.g., ``HYPERSHELL_SERVER_EVICT=10m``,
-  ``HYPERSHELL_TASK_MEMORY=16G``), checked by the command that reads it.
+  ``HYPERSHELL_TASK_MEMORY=16G``).
+- A numeric value is held to its key's range (each entry of the parameter reference gives it),
+  checked when the configuration loads, for every command, as a file's value is. A value outside
+  it stops the command before it starts, with one line naming the key, the range, the value and
+  the variable (exit status 3). A value given by ``_ENV`` or ``_EVAL`` is checked when it
+  resolves, once, as the configuration loads.
 - An entry with no type of its own (one you name in ``database.connect_args``,
   ``database.pragmas`` or ``[database]``, and a name held as below) holds a TOML integer, float or
   boolean when the value is exactly one (``5``, ``2.5``, ``true``), and the text otherwise
@@ -194,3 +199,8 @@ hold (e.g., a zone ``gpu-a100``).
        :pr:`113`: a key whose name has an underscore, open-table entries, zone tables,
        ``_ENV``/``_EVAL``, values as written, and an empty value for an optional text key read as
        not given.
+
+    .. versionchanged:: 2.9.0
+       A variable's numeric value is held to its key's range when the configuration loads, for
+       every command; before, a duration or a size was checked by the command that read it, and
+       most numbers not at all. A numeric key's ``_EVAL`` command runs once per process.

@@ -25,6 +25,8 @@ from sqlalchemy.exc import OperationalError
 from hypershell.core.fsm import State, StateMachine
 from hypershell.core.tls import TLSConfig
 from hypershell.core.config import default, config, blame, ConfigurationError
+from hypershell.core.config_schema import parse_setting, SettingError
+from hypershell.core.exceptions import SettingRefused
 from hypershell.core.thread import Thread, join_waking
 from hypershell.core.logging import Logger, INSTANCE
 from hypershell.core.template import DEFAULT_TEMPLATE
@@ -370,12 +372,12 @@ DEFAULT_AUTOSCALE_FAILED_LAUNCHES: Final[int] = default.autoscale.failed_launche
 
 
 def configured_failed_launches() -> int:
-    """The `[autoscale] failed_launches` setting, refused naming its source unless a non-negative integer."""
-    value = config.autoscale.failed_launches
-    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-        raise ConfigurationError(f'Expected a non-negative integer for `autoscale.failed_launches`, '
-                                 f'given {value!r} ({blame(config, "autoscale", "failed_launches")})')
-    return value
+    """The `[autoscale] failed_launches` setting, read by its entry in the table; refused naming its source."""
+    source = (blame(config, 'autoscale', 'failed_launches') or '').removeprefix('from: ') or None
+    try:
+        return parse_setting('autoscale.failed_launches', config.autoscale.failed_launches, source=source)
+    except SettingError as error:
+        raise SettingRefused(str(error)) from None
 
 
 def client_registrations() -> Tuple[int, int]:
