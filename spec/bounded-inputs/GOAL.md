@@ -78,23 +78,23 @@ Each range is a **floor** taken from what the setting means (0 runs nothing, 0 m
 can overflow downstream. Real use sits far inside every range. Counts are of the setting's
 configuration keys and its options without a key; a key with several options counts once.
 
-| Class | Kind | Range | Why | Settings (keys · options without a key are listed too) |
-| --- | --- | --- | --- | --- |
-| Threads | int | 1 … 4,194,304 | 0 threads runs nothing (today `-N 0` runs). The ceiling is the most thread ids a 64-bit Linux host gives a process, the figure `RATE_MINIMUM`'s floor already rests on. | `relay.num_threads` · `-N/--num-threads` (`hs client`, `hs cluster`) |
-| Count | int | 1 … 2³¹−1 | 0 is an empty bundle, queue, page or relay. The ceiling is a 32-bit signed integer, PostgreSQL's `INTEGER` and a C `int`. | `server.queuesize`, `server.bundlesize`, `server.bundlemax`, `client.bundlesize`, `submit.bundlesize`, `relay.bundlesize`, `relay.upstream.bundlesize`, `relay.size`, zone `size` · `-l/--limit` (`hs list`, `hs update`) |
-| Count or none | int (`int_or_none`) | 0 … 2³¹−1 | 0 is documented as none or never; `relay.min`, `relay.max` and `relay.init` also take `<none>`, as today. | `logging.file.keep`, `autoscale.failed_launches`, `autoscale.size.init`, `.min`, `.max`, zone `min`, `max`, `init`, `relay.min`, `relay.max`, `relay.init` |
-| Attempts | int | `server.attempts` 1 … 32,767; `-r/--max-retries` 0 … 32,766 | A task's `attempt` column is `SMALLINT` on PostgreSQL. | `server.attempts` · `-r/--max-retries` (`hs server`, `hs cluster`) |
-| Cores | int | 0 … 32,767; 0 is unconstrained | `task.cores` is `SMALLINT` on PostgreSQL (`cores:100000` hangs today); no node is near it. | `task.cores`, `client.cores` |
-| Port | int | 1 … 65,535 | A TCP port. | `server.port`, `relay.port`, `relay.upstream.port`, `database.port` |
-| Group | int | −2³¹ … 2³¹−1 | `task.group` is `INTEGER` (#118, unchanged). `hs list -g` and `hs update -g` take it too, unchecked today. | · `-g/--group` (`hs submit`, `hs list`, `hs update`) |
-| Part | int | 0 … 2³¹−1 | `task.part` is `INTEGER`. | · `--part` (`hs list`) |
-| Duration | duration | 0 … 2³¹−1 s (about 68 years) | `task.timeout` is `INTEGER` seconds; the ceiling is also under the longest wait a thread can block (`threading.TIMEOUT_MAX`, about 292 years) and a `timedelta`. | `server.poll`, `server.tls.handshake`, `client.bundlewait`, `client.heartrate`, `client.timeout`, `submit.bundlewait`, `task.timeout`, `task.signalwait`, `relay.bundlewait`, `relay.poll`, `relay.retention`, `relay.timeout`, `relay.upstream.heartrate`, `.deadline`, `.backoff`, `.evict_hint` · `-n/--interval` (`hs wait`, `hs run`) |
-| Evict | duration | 10 s … 2³¹−1 s | The floor is #117's. The cap falls from 86,399,999,913,600 s (2.7 million years) to the duration ceiling. | `server.evict` |
-| Period | duration | greater than 0 … 2³¹−1 s; under 1 s reads as 1 s, as today | #112's floor and rounding. | `autoscale.period` |
-| Start delay | duration | −(2³¹−1) … 2³¹−1 s; a leading `-` waits a random time up to it, as today | The duration ceiling, either sign. | · `-d/--delay-start` (`hs client`, `hs cluster`) |
-| Size | size | 0 … 2⁶³−1 bytes; 0 is unconstrained | `task.memory` is `BIGINT` (#120). 2⁶³ bytes is the `DataError` case. | `task.memory`, `client.memory` |
-| Rate | number | 0 (no limit), or 10⁻⁶ … 10⁹ tasks per second | The floor is #117's (`RATE_MINIMUM`). At 10⁹ a client waits a nanosecond per task, less than starting any process takes, so a higher rate is no limit. | `client.ratelimit` |
-| Factor | number | 10⁻⁶ … 10⁹ | 0 divides by zero in the scaling pressure (`Task.task_pressure`); the same decimal span as a rate. | `autoscale.factor` |
+| Class | Kind | Range | Advise | Why | Settings (keys · options without a key are listed too) |
+| --- | --- | --- | --- | --- | --- |
+| Threads | int | 1 … 4,194,304 | above 1,024 | 0 threads runs nothing (today `-N 0` runs). The ceiling is the most thread ids a 64-bit Linux host gives a process, the figure `RATE_MINIMUM`'s floor already rests on. | `relay.num_threads` · `-N/--num-threads` (`hs client`, `hs cluster`) |
+| Count | int | 1 … 2³¹−1 | — | 0 is an empty bundle, queue, page or relay. The ceiling is a 32-bit signed integer, PostgreSQL's `INTEGER` and a C `int`. | `server.queuesize`, `server.bundlesize`, `server.bundlemax`, `client.bundlesize`, `submit.bundlesize`, `relay.bundlesize`, `relay.upstream.bundlesize`, `relay.size`, zone `size` · `-l/--limit` (`hs list`, `hs update`) |
+| Count or none | int (`int_or_none`) | 0 … 2³¹−1 | — | 0 is documented as none or never; `relay.min`, `relay.max` and `relay.init` also take `<none>`, as today. | `logging.file.keep`, `autoscale.failed_launches`, `autoscale.size.init`, `.min`, `.max`, zone `min`, `max`, `init`, `relay.min`, `relay.max`, `relay.init` |
+| Attempts | int | `server.attempts` 1 … 32,767; `-r/--max-retries` 0 … 32,766 | `server.attempts` above 100; `-r` above 99 | A task's `attempt` column is `SMALLINT` on PostgreSQL. | `server.attempts` · `-r/--max-retries` (`hs server`, `hs cluster`) |
+| Cores | int | 0 … 32,767; 0 is unconstrained | above 1,024 | `task.cores` is `SMALLINT` on PostgreSQL (`cores:100000` hangs today); no node is near it. | `task.cores`, `client.cores` |
+| Port | int | 1 … 65,535 | — | A TCP port. | `server.port`, `relay.port`, `relay.upstream.port`, `database.port` |
+| Group | int | −2³¹ … 2³¹−1 | — | `task.group` is `INTEGER` (#118, unchanged). `hs list -g` and `hs update -g` take it too, unchecked today. | · `-g/--group` (`hs submit`, `hs list`, `hs update`) |
+| Part | int | 0 … 2³¹−1 | — | `task.part` is `INTEGER`. | · `--part` (`hs list`) |
+| Duration | duration | 0 … 2³¹−1 s (about 68 years) | — | `task.timeout` is `INTEGER` seconds; the ceiling is also under the longest wait a thread can block (`threading.TIMEOUT_MAX`, about 292 years) and a `timedelta`. | `server.poll`, `server.tls.handshake`, `client.bundlewait`, `client.heartrate`, `client.timeout`, `submit.bundlewait`, `task.timeout`, `task.signalwait`, `relay.bundlewait`, `relay.poll`, `relay.retention`, `relay.timeout`, `relay.upstream.heartrate`, `.deadline`, `.backoff`, `.evict_hint` · `-n/--interval` (`hs wait`, `hs run`) |
+| Evict | duration | 10 s … 2³¹−1 s | — | The floor is #117's. The cap falls from 86,399,999,913,600 s (2.7 million years) to the duration ceiling. | `server.evict` |
+| Period | duration | greater than 0 … 2³¹−1 s; under 1 s reads as 1 s, as today | above 3,600 s | #112's floor and rounding. | `autoscale.period` |
+| Start delay | duration | −(2³¹−1) … 2³¹−1 s; a leading `-` waits a random time up to it, as today | — | The duration ceiling, either sign. | · `-d/--delay-start` (`hs client`, `hs cluster`) |
+| Size | size | 0 … 2⁶³−1 bytes; 0 is unconstrained | — | `task.memory` is `BIGINT` (#120). 2⁶³ bytes is the `DataError` case. | `task.memory`, `client.memory` |
+| Rate | number | 0 (no limit), or 10⁻⁶ … 10⁹ tasks per second | below 0.001, other than 0 | The floor is #117's (`RATE_MINIMUM`). At 10⁹ a client waits a nanosecond per task, less than starting any process takes, so a higher rate is no limit. | `client.ratelimit` |
+| Factor | number | 10⁻⁶ … 10⁹ | above 100 | 0 divides by zero in the scaling pressure (`Task.task_pressure`); the same decimal span as a rate. | `autoscale.factor` |
 
 Options that set a listed key take its range: `-b/--bundlesize`, `-w/--bundlewait`, `-c/--cores` and
 `--task-cores`, `-C/--client-cores`, `-m/--memory` and `--task-memory`, `-M/--client-memory`,
@@ -106,6 +106,24 @@ the backwards-compatible aliases of the task commands.
 **Tally (from shaping; `hs-plan` confirms).** 50 configuration keys: 28 integer (21 `int`, 4 zone
 keys, 3 `int_or_none`), 18 duration, 2 size, 2 number. 7 settings exist only as options: 5 integer
 (threads, retries, group, part, limit) and 2 duration (start delay, interval).
+
+**Advisory limits (the second tier; maintainer, 2026-11-24).** The range is what HyperShell can
+hold and store. A few settings also have an advisory limit, well inside the range, past which real use
+is very unlikely. A value past it is accepted and runs as today, with one WARNING (R13). The first
+four are the maintainer's; the last two are proposed with a real-use reason. Every other setting has
+none: no limit is clearly sensible for it.
+
+| Advise | Setting | Why |
+| --- | --- | --- |
+| above 1,024 | threads (`-N`, `relay.num_threads`) | No good reason to run more executor threads in one client; a wider node runs more clients. (Maintainer.) |
+| above 100 | `server.attempts`; `-r` above 99 | A task that fails 100 times will not pass on the 101st. (Maintainer.) |
+| above 1,024 | cores (`task.cores`, `client.cores`, the `cores` tag) | No node a task runs on has more. (Maintainer.) |
+| above 100 | `autoscale.factor` | Dynamic scaling adds clients when the estimated time to completion passes the factor times the average task's duration (`Task.task_pressure`); past 100 it hardly scales at all. (Maintainer.) |
+| above 3,600 s | `autoscale.period` | A scaling check less often than hourly leaves new work unanswered for an hour; the default is 60 s. |
+| below 0.001, other than 0 | `client.ratelimit` | Under one task per 1,000 s per client a throttle is a schedule, usually a rate meant per minute or hour; 0 is no limit and never advised. |
+
+The advisory limits never apply to an explicit Python API argument (C3), and every built-in default
+is inside them.
 
 ## Acceptance criteria (the contract)
 
@@ -171,6 +189,21 @@ keys, 3 `int_or_none`), 18 duration, 2 size, 2 number. 7 settings exist only as 
   name the ranges. *(C3, ruled 2026-11-24; explicit arguments are the follow-up seed
   `issues/api-argument-ranges.md`, 2.10.0.)*
 
+**The advisory tier** (maintainer, 2026-11-24).
+
+- **R13** — A setting MAY have an advisory limit in the table, beside its range (*Advisory limits*
+  above). WHERE a value is inside the range but past its advisory limit, it SHALL be accepted and
+  SHALL behave as today, and HyperShell SHALL log one WARNING naming the setting, the value and the
+  advisory limit and saying the command runs anyway; the exit status SHALL NOT change. The warning
+  SHALL apply wherever the range is checked: an option, the configuration at load (a file or a
+  variable), `hs config set`, and the resource tags of R9. It SHALL NOT apply to an explicit Python
+  API argument. It SHALL be logged at most once per setting per process. For resource tags it SHALL
+  be one summary per submission, giving the count of tasks past the limit and the first such line or
+  record, not one warning per task. A value at the advisory limit SHALL NOT warn. Tests SHALL cover,
+  for each advisory limit, a value just past it (the WARNING logged once, the run unaffected, exit 0
+  where the command completes) and a value at it (no warning). The documentation SHALL give each
+  advisory limit beside its range (R12).
+
 **Proof.**
 
 - **R11** — Tests SHALL cover, for each kind, through an option, a file key and a variable: each
@@ -183,7 +216,8 @@ keys, 3 `int_or_none`), 18 duration, 2 size, 2 number. 7 settings exist only as 
   memory, timeout and attempt values are stored.
 - **R12** — Documentation, per `AGENTS.md` § Docs, each passage marked
   `.. versionchanged:: 2.9.0`: the parameter reference (`docs/_include/config_param_ref.rst`) gives
-  each numeric key's range; each command's page gives the range of each numeric option; the
+  each numeric key's range and any advisory limit beside it (R13); each command's page gives the
+  range and any advisory limit of each numeric option; the
   environment-variable page says a variable is held to its key's range. `AGENTS.md` § Configuration
   names the table, and the review rubric's "Absurd input is not a finding" drops "before
   `bounded-inputs` lands" and points at the table. The squash commit body SHALL name each change in
@@ -205,6 +239,10 @@ keys, 3 `int_or_none`), 18 duration, 2 size, 2 number. 7 settings exist only as 
 4. **A file's numeric key may be text.** `attempts = "3"` reads as 3, as the variable does, instead
    of failing every command at import.
 5. **`hs config set` refuses an out-of-range value,** and any integer TOML cannot hold, exit 2.
+6. **Some settings warn past an advisory limit,** and run anyway: more than 1,024 threads, more
+   than 100 attempts (`-r` above 99), more than 1,024 cores, a scaling factor above 100, a scaling
+   period above an hour, and a rate below 0.001 tasks per second other than 0. One WARNING per
+   setting per run; one summary per submission for resource tags. The exit status is unchanged.
 
 ## Non-goals (no-gos)
 
@@ -309,6 +347,16 @@ mandate, with the maintainer's own rulings on C1, C2, C3 and C5.
 
 The absorbed seeds `config-set-wide-integers` and `config-text-attempts-crashes` stay adopted, as
 shaped. Target 2.9.0. The contract is locked; `hs-plan` designs against it.
+
+**Amended at the GOAL gate** (2026-11-24, maintainer): a second, advisory tier. In the maintainer's
+words: "These ranges look fine if we're guarding technical correctness … For some of these I think
+we can apply warnings for even more restrictive inputs. Like more than 1024 threads (no good reason
+to go higher), or more than 100 attempts, or more than 1024 cores, or factor greater than 100, etc.
+… I don't know that I want to halt the software for them, a warning would suffice. I think your
+values are correct for the software functioning." The table gains an Advise column and *Advisory
+limits*; R13 states the behaviour, tests and docs; release note change 6. The maintainer seeded
+threads, attempts, cores and factor; `hs-plan` proposed the period and the rate, each with its
+reason, and left every other setting without one. The tier counts against C4's phase budget.
 
 ## Related materials
 
