@@ -340,7 +340,7 @@ through `hs submit`'s parsers and `bounded-inputs`' ranges, refusing with exit 2
 
 *Target: 2.9.0 · Horizon: near-term, small · Depends on: `bounded-inputs`,
 `update-group-and-legacy-filters` · Refs: `spec/submit-input-checks/` (#118)*
-**Seed:** [`issues/update-typed-columns.md`](issues/update-typed-columns.md) · *status: unshaped*
+**Seed:** [`issues/update-typed-columns.md`](issues/update-typed-columns.md) · *status: adopted:update-typed-columns*
 
 ## Every numeric setting has one declared range, one parser and one error
 
