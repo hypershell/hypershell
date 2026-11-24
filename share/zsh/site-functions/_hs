@@ -504,7 +504,7 @@ function _hs_client() {
         '(-b --bundlesize)'{-b,--bundlesize}'[Bundle size to request and return (default: from server)]:size:(1 10 100 1000)' \
         '--zone[Run only tasks of this zone]:zone:' \
         '(-w --bundlewait)'{-w,--bundlewait}'[Time to wait before flushing tasks; seconds, 30s, 5m, 1h30m, or a Slurm time]:seconds:(5 10 30 60 600 30s 1m 10m)' \
-        '(-H --host)'{-H,--host}'[Hostname for server (default: localhost)]:host:_hs_known_hosts' \
+        '(-H --host)'{-H,--host}'[Hostname for server (default: by server.host)]:host:_hs_known_hosts' \
         '(-p --port)'{-p,--port}'[Port number for server (default: 50001)]:port:_hs_ports' \
         '(--no-tls)--no-tls[Disable TLS for queue interface (not recommended)]' \
         '(--no-tls)--tls-key[Path to TLS private key file]:key file:_files' \

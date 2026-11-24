@@ -6,7 +6,7 @@
 
 # Type annotations
 from __future__ import annotations
-from typing import TypeVar, Union, List, Optional, Protocol, Final, Iterator, Dict, Tuple
+from typing import TypeVar, Union, List, Optional, Protocol, Final, FrozenSet, Iterator, Dict, Tuple, Any
 
 # Standard libs
 import os
@@ -40,7 +40,7 @@ __all__ = [
     'config', 'update', 'default', 'ConfigurationError', 'Namespace', 'blame',
     'resolve_auth', 'check_auth_forms', 'AUTH_FORMS', 'AUTH_SECTIONS', 'AUTH_ENV', 'is_key_variable',
     'is_relay_variable', 'env_variable',
-    'config_seconds',
+    'config_seconds', 'client_host', 'WILDCARD_BINDS',
     'KEY_OPTION_STRINGS', 'SERVER_KEY_SOURCES', 'RefuseKeyOption', 'refuse_key_option',
     'load', 'reload', 'reload_local', 'load_file', 'reload_file', 'load_env', 'reload_env', 'load_task_env',
     'ENV_VARIABLES',
@@ -373,6 +373,74 @@ def config_seconds(*varpath: str, base: Configuration = None, whole: bool = Fals
         pass
     raise ConfigurationError(f'{key}: Duration {value!r} is not valid: expected {TIME_FORMS} '
                              f'({blame(base, *section, form)})')
+
+
+WILDCARD_BINDS: Final[FrozenSet[str]] = frozenset({'0.0.0.0', ''})
+"""Bind addresses that listen on every interface, which no client can dial as such."""
+
+
+def _server_form(base: Configuration, name: str) -> Optional[str]:
+    """The form of `server.<name>` in the merged view (`name`, `name_env` or `name_eval`), or None."""
+    table = base['server']
+    return next((form for form in (name, f'{name}_env', f'{name}_eval') if form in table), None)
+
+
+def _given(base: Configuration, name: str) -> Optional[str]:
+    """The form of `server.<name>` that a configuration layer gives, or None when only the defaults hold it.
+
+    The deciding layer is asked of the form held, never of the bare name, which a variant form
+    displaces; a layer decides even when its value equals the default.
+    """
+    form = _server_form(base, name)
+    if form is None:
+        return None
+    try:
+        return None if base.which('server', form) == 'default' else form
+    except KeyError:
+        return None
+
+
+def _server_value(base: Configuration, name: str, form: str) -> Any:
+    """The value of `server.<name>`, read by attribute so its `_env` and `_eval` forms resolve.
+
+    A variable that is not set, or a command that fails, raises `ConfigurationError` naming the key
+    and where it came from.
+    """
+    table = base['server']
+    try:
+        value = getattr(table, name)
+    except Exception as error:
+        # Only the error's type is named: its text can carry part of a command's output.
+        raise ConfigurationError(f'server.{name} could not be resolved: {type(error).__name__} '
+                                 f'({blame(base, "server", form)})') from None
+    if value is None and form == f'{name}_env':
+        raise ConfigurationError(f'server.{form} names {table[form]}, which is not set '
+                                 f'({blame(base, "server", form)})')
+    return value
+
+
+def client_host(base: Configuration = None) -> str:
+    """The address a client given no -H dials (see `server.host` in the configuration reference).
+
+    The first of: `server.host` when a configuration layer gives it, whatever its value;
+    `server.advertise` when a layer gives it a value; `server.bind` when it is one specific address
+    (not one of :const:`WILDCARD_BINDS`); else `localhost`. The marker for an unset value
+    (:const:`PARAM_UNSET`) is never the answer. The configuration is read when this is called.
+    """
+    base = config if base is None else base
+    if form := _given(base, 'host'):
+        host = _server_value(base, 'host', form)
+        if host != PARAM_UNSET:
+            return str(host)
+    if form := _given(base, 'advertise'):
+        advertise = _server_value(base, 'advertise', form)
+        if advertise not in (None, '', PARAM_UNSET):
+            return str(advertise)
+    if form := _server_form(base, 'bind'):
+        bind = _server_value(base, 'bind', form)
+        if bind is not None and bind != PARAM_UNSET and str(bind) not in WILDCARD_BINDS:
+            return str(bind)
+    return 'localhost'
 
 
 def get_logging_style(base: Configuration) -> str:

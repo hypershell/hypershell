@@ -34,7 +34,7 @@ from dataclasses import dataclass, field
 from subprocess import Popen, PIPE
 
 # Internal libs
-from hypershell.core.config import load_task_env, is_key_variable
+from hypershell.core.config import load_task_env, is_key_variable, WILDCARD_BINDS
 from hypershell.core.logging import Logger, HOSTNAME
 from hypershell.client import AUTH_ENV, OMPI_ENV_LIST
 from hypershell.data.model import DEFAULT_ZONE_NAME
@@ -81,9 +81,6 @@ SSH_NO_INPUT: Final[str] = '-n'
 
 SSH_OPTIONS_WITH_VALUE: Final[str] = 'BbcDEeFIiJLlmOoPpQRSWw'
 """Letters of the ssh options that take a value."""
-
-WILDCARD_BINDS: Final[FrozenSet[str]] = frozenset({'0.0.0.0', ''})
-"""Bind addresses that listen on every interface, which no client can dial as such."""
 
 
 def advertised_host(bind: str, advertise: Optional[str] = None) -> str:

@@ -54,7 +54,10 @@ Options
     without one. See ``--zone`` on `submit`.
 
 ``-H``, ``--host`` *ADDR*
-    Hostname or IP address to connect with server (default: localhost).
+    Hostname or IP address to connect with server (default: ``server.host``).
+
+    With no ``-H``, the client dials ``server.host`` when the configuration gives it, else
+    ``server.advertise``, else ``server.bind`` when it is one specific address, else *localhost*.
 
 ``-p``, ``--port`` *NUM*
     Port number to connect with server (default: 50001).

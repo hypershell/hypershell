@@ -31,4 +31,8 @@ Description
    :pr:`106`: ``-w``/``--bundlewait`` takes a duration with units or a Slurm time, as ``-W`` does,
    and a signed value is refused.
 
+.. versionchanged:: 2.9.0
+   With ``--queue`` and no ``-H``, it dials ``server.advertise`` or a specific ``server.bind`` when
+   ``server.host`` is not given, as `client` does; before, *localhost*.
+
 .. include:: ../_include/submit_help.rst

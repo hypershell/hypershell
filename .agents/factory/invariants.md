@@ -275,13 +275,19 @@ subsystems.
   at each launch site): `--advertise`/`server.advertise` for remote `hs cluster` modes, and
   `hs relay --advertise`/`relay.advertise` for a relay's site clients (never `server.advertise`),
   else the bind address, else `HOSTNAME` for a wildcard bind. Constructors take `advertise=` and
-  `evict_after=` and never read those keys; only `ClusterApp`/`RelayApp` read them. A
+  `evict_after=` and never read those keys; of the launchers only `ClusterApp`/`RelayApp` read
+  them. A
   `max_retries=None` is the exception: `ServerThread`, `AutoScalingCluster` and `AutoScalingServer`
   resolve it through `server.configured_retries()` (`server.attempts - 1`). A relay's site cluster
   computes the address once (`AutoScalingCluster.advertised`) and every zone's
   `relay/site.py::zone_launch` dials it, so no zone can diverge. It must be routable from clients. The
   autoscaler never terminates clients (they self-exit on idle) and ignores
   `no_confirm`/`in_memory`/`forever`/`restart`.
+- A client given no `-H` (`hs client`, `hs submit --queue`, `QueueConfig.load()`) dials
+  `core/config.py::client_host`, read when the command starts: `server.host` when a layer gives it,
+  else `server.advertise`, else a specific `server.bind`, else `localhost`. So clients read
+  `server.advertise` too; no client-side default reads `bind` directly, and the Python API defaults
+  stay `localhost`.
 - A cluster whose launched clients are all gone with work left exits 5 (`ClusterLaunchError`):
   launcher, `--mpi` and `--ssh` through `cluster/watch.py` (all exited, at least one non-zero, and
   `work_remains`; all-zero exits keep waiting); autoscaling after `autoscale.failed_launches`

@@ -1,5 +1,5 @@
 ---
-status: unshaped
+status: adopted:client-host-default-from-bind
 kind: fix
 appetite: small
 target: 2.9.0

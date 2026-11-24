@@ -1139,7 +1139,7 @@ class HeartMonitorThread(Thread):
         super().stop(wait=wait, timeout=timeout)
 
 
-DEFAULT_BIND: Final[str] = QueueConfig.host
+DEFAULT_BIND: Final[str] = default.server.bind
 """Default bind address for server."""
 
 DEFAULT_PORT: Final[int] = QueueConfig.port

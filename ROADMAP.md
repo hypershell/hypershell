@@ -245,7 +245,7 @@ setup that relied on `bind` being dialled gets a fallback or a release note.
 
 *Target: 2.9.0 · Horizon: near-term, small · Depends on: — · Refs: `src/hypershell/client.py`,
 `core/queue.py` (`QueueConfig.host`); blocks the RCAC user guide's tier 3*
-**Seed:** [`issues/client-host-default-from-bind.md`](issues/client-host-default-from-bind.md) · *status: unshaped*
+**Seed:** [`issues/client-host-default-from-bind.md`](issues/client-host-default-from-bind.md) · *status: adopted:client-host-default-from-bind*
 
 ## `hs cluster` and `hs relay` ignore the `_env` and `_eval` forms of `advertise`
 

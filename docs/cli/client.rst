@@ -46,4 +46,8 @@ Description
    ``client.bundlewait`` for its ``-b`` and ``-w`` defaults; ``submit.bundlesize`` and
    ``submit.bundlewait`` no longer reach it (move them to ``[client]``).
 
+.. versionchanged:: 2.9.0
+   With no ``-H``/``--host``, the client dials ``server.host``, else ``server.advertise``, else a
+   specific ``server.bind``, else *localhost*; before, it dialled ``server.bind``.
+
 .. include:: ../_include/client_help.rst
