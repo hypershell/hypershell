@@ -311,7 +311,7 @@ Tests come first (P1). Each test that needs the fix is a strict xfail with reaso
 - **Accepted:**
   - resolving the host when the command starts rather than at import (§5, risk 1; §3 deviation);
   - refusing an `_env` form that names an unset variable (§5, risk 2; §3 deviation);
-  - risks 3, 4, 6 and 7 as planned (§5).
+  - the rest of §5 as planned: `hs config get`, `host = ""`, and the build environments. (Corrected 2026-11-23: the foreman's note numbered these "3, 4, 6 and 7" from the planner's report, not from §5.)
 - **Risk 5** (`hs cluster`'s `advertised_host` ignores `advertise_env`/`advertise_eval`): the
   foreman files a follow-up seed, outside this cycle.
 
