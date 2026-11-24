@@ -358,6 +358,18 @@ strict mode that refuses unknown keys would be a 2.10.0 interface change.
 `src/hypershell/core/config_schema.py` (`KEYS`, `TABLES`); `issues/bounded-inputs.md` for values*
 **Seed:** [`issues/config-unknown-key-warning.md`](issues/config-unknown-key-warning.md) · *status: unshaped*
 
+## The Python API does not hold explicit arguments to the numeric ranges
+
+`bounded-inputs` holds every option, configuration key and variable to one table of ranges, and the
+Python API's configuration-derived defaults with them. An argument a Python caller passes explicitly
+is used as given, by the maintainer's ruling (2026-11-24), and the ranges are only documented. Check
+each parameter that mirrors a setting through the same parsers and raise `ValueError` before work
+starts.
+
+*Target: 2.10.0 · Horizon: mid-term, small · Depends on: `bounded-inputs` · Refs:
+`spec/bounded-inputs/GOAL.md` (C3)*
+**Seed:** [`issues/api-argument-ranges.md`](issues/api-argument-ranges.md) · *status: unshaped*
+
 ## Docs and runtime surfacing
 
 Behaviour that is correct or deliberate but unannounced: `--no-confirm` silently disables orphan

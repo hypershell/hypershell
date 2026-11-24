@@ -137,8 +137,9 @@ keys, 3 `int_or_none`), 18 duration, 2 size, 2 number. 7 settings exist only as 
   and ` (from: <file or variable>)` for configuration. `<name>` is the option as defined
   (`-N/--num-threads`) or the key (`server.evict`). `<V>` SHALL be cut to a short printable form, so
   that no value of any length raises while it is printed. The command SHALL exit **2** for an
-  option and **3** for a configuration key, from a file or a variable. [NEEDS CLARIFICATION: C1 —
-  exit status and wording for configuration versus options.]
+  option and **3** for a configuration key, from a file or a variable. *(C1, ruled 2026-11-24:
+  this moves a refused `server.evict` from 5 to 3, and `hs cluster`'s refusal of a file's
+  `autoscale.period` and `client.ratelimit` from 2 to 3; release note changes 2 and 3.)*
 
 **Every way in.**
 
@@ -146,8 +147,7 @@ keys, 3 `int_or_none`), 18 duration, 2 size, 2 number. 7 settings exist only as 
   configuration (all files and the environment) against its range, and refuse under R4 before it
   starts work. A key given by `_env` or `_eval` SHALL be checked when it resolves, as its value is
   only known then. `hs config` SHALL still run when a file holds a bad value, so the file can be
-  repaired. [NEEDS CLARIFICATION: C2 — check the whole merged configuration, or only the keys the
-  command reads.]
+  repaired; `hs config` is exempt for file values only. *(C2, ruled 2026-11-24.)*
 - **R6** — No numeric setting SHALL be read around the parsers. The existing checks (the period,
   the evict floor and cap, the rate floor and finiteness, `failed_launches`, the 32-bit group,
   `config_seconds`) SHALL become table entries read through them. `hs client`, `hs relay`,
@@ -165,11 +165,11 @@ keys, 3 `int_or_none`), 18 duration, 2 size, 2 number. 7 settings exist only as 
   `--from-json` record, SHALL take the ranges of `task.cores`, `task.memory` and `task.timeout`
   through the same parsers. A refusal SHALL follow #118's group refusal: read-in-full input is
   refused whole, exit 5, nothing inserted, naming the value and its line or record; on a stream
-  only the line is refused, with an ERROR; `-t` exits 2. [NEEDS CLARIFICATION: C5 — resource tags
-  in or out.]
+  only the line is refused, with an ERROR; `-t` exits 2. *(C5, ruled 2026-11-24: in this cycle.)*
 - **R10** — The Python API SHALL take its configuration-derived defaults through R5's check. A
   value a Python caller passes explicitly SHALL be handled as today, and the API documentation SHALL
-  name the ranges. [NEEDS CLARIFICATION: C3 — validate the Python API or not.]
+  name the ranges. *(C3, ruled 2026-11-24; explicit arguments are the follow-up seed
+  `issues/api-argument-ranges.md`, 2.10.0.)*
 
 **Proof.**
 
@@ -223,8 +223,8 @@ keys, 3 `int_or_none`), 18 duration, 2 size, 2 number. 7 settings exist only as 
 - **The database schema.** No `CHECK` constraints and no migration; the table keeps values inside
   the columns' types.
 - **Wire values from peers** (frame lengths and the like, `spec/queue-wire-codec/REVIEW.md`).
-- **Explicit Python API arguments,** per C3's recommendation; a follow-up seed if the maintainer
-  wants them.
+- **Explicit Python API arguments,** per C3: the follow-up seed `issues/api-argument-ranges.md`,
+  target 2.10.0.
 
 ## Clarifications
 
@@ -244,19 +244,20 @@ Decided in shaping (2026-11-24):
 - **Q:** One ceiling for all durations? — **A:** Yes, 2³¹−1 seconds, the `task.timeout` column. It
   lowers the evict cap from #117's; both are absurd, and one ceiling is simpler.
 
-Open, each blocking `hs-plan` until the maintainer answers:
+Proposed in shaping, each blocking `hs-plan`; all five were resolved at the GOAL gate on
+2026-11-24 (below):
 
-- **C1** [NEEDS CLARIFICATION] — **Exit status and wording, configuration versus option.** Today a
-  bad option exits 2 (`bad_argument`), a bad variable or `ConfigurationError` exits 3
-  (`bad_config`), and some configuration refusals exit 2 (`hs cluster`'s period and rate) or 5
-  (evict).
+- **C1 — Exit status and wording, configuration versus option. Resolved 2026-11-24**
+  (maintainer): **A.** Today a bad option exits 2 (`bad_argument`), a bad variable or
+  `ConfigurationError` exits 3 (`bad_config`), and some configuration refusals exit 2
+  (`hs cluster`'s period and rate) or 5 (evict).
   - (A) Option 2, configuration 3, one message form with ` (from: …)` for configuration. Matches
     cmdkit's statuses and the environment layer.
   - (B) Everything 2: one status for all bad input.
   - (C) Keep each site's status as today; unify the message only.
   - **Recommendation: A.** It is what the seed proposes and what most sites already do; B hides
     whether to fix the command line or a file.
-- **C2** [NEEDS CLARIFICATION] — **What the start-up check covers.**
+- **C2 — What the start-up check covers. Resolved 2026-11-24** (maintainer): **A.**
   - (A) The whole merged configuration, at load, for every command; `hs config` is not refused for
     a bad file value, so it can repair it; `_env` and `_eval` keys are checked when they resolve.
   - (B) Only the keys a command reads, when it reads them, plus R8's backstop.
@@ -264,7 +265,7 @@ Open, each blocking `hs-plan` until the maintainer answers:
     already behaves, and it catches keys read after start-up (a relay, an autoscaler, a launched
     client), which under B would fail mid-run. The cost: a bad `relay.retention` stops `hs list`.
     That is "bail on bad input".
-- **C3** [NEEDS CLARIFICATION] — **The Python API.**
+- **C3 — The Python API. Resolved 2026-11-24** (maintainer): **B.**
   - (A) Validate every public parameter that mirrors a setting, raising `ValueError`.
   - (B) Validate only what comes from configuration (R5); explicit arguments as today, ranges
     documented.
@@ -272,21 +273,42 @@ Open, each blocking `hs-plan` until the maintainer answers:
   - **Recommendation: B.** A Python caller gets a Python exception, not a traceback at a terminal,
     and A touches every public signature. A follow-up seed can take A if wanted. The seed asked for
     the API to read through the parsers; B narrows that.
-- **C4** [NEEDS CLARIFICATION] — **Appetite: one cycle or two.** Twelve criteria is past the
-  circuit-breaker.
+- **C4 — Appetite: one cycle or two. Resolved 2026-11-24** (foreman, under the maintainer's
+  mandate): **A, falling back to B.** Twelve criteria is past the circuit-breaker.
   - (A) One `big` cycle in phases: table and parsers; options; configuration and `hs config set`;
     backstop, tags and docs.
   - (B) Two cycles: R1–R8 with R11–R12 now (the table, parsers, error, every way in, backstop);
     R9 (tags) and R10 (API) as a follow-up seed.
   - **Recommendation: A, falling back to B** if `hs-plan` finds more than four phases. Most criteria
     are one mechanism applied many times, and the backstop is small. R9 and R10 are the natural cut.
-- **C5** [NEEDS CLARIFICATION] — **Task resource tags.** The rubric's rule names options, keys and
-  variables, not task input.
+- **C5 — Task resource tags. Resolved 2026-11-24** (maintainer): **A.** The rubric's rule names
+  options, keys and variables, not task input.
   - (A) In: R9 as written.
   - (B) Out: a follow-up seed.
   - **Recommendation: A.** `memory` and `timeout` tags already go through `parse_bytes` and
     `parse_time`, so they get the range with the parser. `cores` is the one more, and it closes the
     PostgreSQL `cores:100000` hang. #118 already settled how task input is refused.
+
+**Ruled at the GOAL gate** (2026-11-24). Approved by the foreman, gate judge under the maintainer's
+mandate, with the maintainer's own rulings on C1, C2, C3 and C5.
+
+- **C1 (maintainer):** an option out of range exits 2, and a configuration value, from a file or a
+  variable, exits 3, with one message form. This moves a refused `server.evict` from 5 to 3, and
+  `hs cluster`'s refusal of a file's `autoscale.period` and `client.ratelimit` from 2 to 3. The
+  release note says so (changes 2 and 3).
+- **C2 (maintainer):** the whole merged configuration is checked at load, for every command. Keys
+  given by `_env` or `_eval` are checked when they resolve. `hs config` is exempt for file values,
+  so a bad file can be repaired.
+- **C3 (maintainer):** the Python API checks only the defaults that come from configuration;
+  explicit arguments behave as today, and the API documentation gives the ranges. Validating explicit
+  arguments is the follow-up seed `issues/api-argument-ranges.md`, filed with this gate, target
+  2.10.0.
+- **C4 (foreman, under the mandate):** one `big` cycle in phases. If `hs-plan` finds more than four
+  phases are needed, it falls back to the split: R9 and R10 go to a follow-up cycle.
+- **C5 (maintainer):** the resource tags `cores`, `memory` and `timeout` are in this cycle, as R9.
+
+The absorbed seeds `config-set-wide-integers` and `config-text-attempts-crashes` stay adopted, as
+shaped. Target 2.9.0. The contract is locked; `hs-plan` designs against it.
 
 ## Related materials
 
