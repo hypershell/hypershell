@@ -79,10 +79,10 @@ phases:
     sh spec/relay-advertise/drive/bound.sh 900 uv run --python 3.12 --group docs sphinx-build
     -W --keep-going -q -E -b html docs /tmp/claude-501/docs-html-host
 review:
-  last_reviewed_commit: 7ec82256
-  verdict: changes-requested
+  last_reviewed_commit: 6c9eafe5
+  verdict: approved
   blocked_reason: 'F1 (LOW): .bind reference sentence misstates the fallback'
-  cycle: 1
+  cycle: 2
 ---
 # TECH.md — `hs client` dials `server.host` when no `-H` is given
 

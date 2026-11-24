@@ -59,3 +59,17 @@ now uses `client_host()`; `host_eval` and `bind_eval` no longer run at import.
 
 ## Human-gate triggers
 - None. F1 is a docs sentence.
+
+## Review cycle 2 — approved (2026-11-23)
+
+- **Reviewed commit:** 6c9eafe5 · **Mode:** scoped by the foreman to verifying F1. The remediation
+  touches one docs sentence, and cycle 1 had already verified every R-ID by real drives.
+- **F1 is fixed.** The `.bind` entry now reads: a client, or `submit --queue`, given no `-H` dials
+  `.host`, else `.advertise`; when neither is given, it dials the bind address if it is one specific
+  address, else *localhost*.
+  - Checked against `client_host()` in fresh subprocesses: host given; advertise only; a specific
+    bind; a wildcard bind; nothing given; and an explicit localhost host. All six match R3.
+  - It agrees with the `.host` and `.advertise` entries, the `.bind` marker and the `-H` help in
+    `client_help.rst` and `submit_help.rst`.
+- **Docs build** `-W`: exit 0. The diff since 7ec82256 touches only `docs/` and `spec/`.
+- **Findings:** none.
