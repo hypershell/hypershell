@@ -252,6 +252,27 @@ def test_api_default_reads_checked_value(temp_site: Path) -> None:
     assert seen == '2'
 
 
+@mark.unit
+@mark.parametrize('evict', [9, 2**31, 10**30, 10**400, float('inf'), float('nan'), -1.5],
+                  ids=['9', '2**31', '10**30', '10**400', 'inf', 'nan', 'minus-1.5'])
+def test_heartmonitor_evict_refused(evict: float) -> None:
+    """`HeartMonitor`'s `evict_after` outside `server.evict`'s range raises the entry's refusal, however wide."""
+    from types import SimpleNamespace
+    from hypershell.server import HeartMonitor
+    with pytest.raises(RuntimeError, match=r'^evict_after: expected a duration from 10 s to 2,147,483,647 s, given '):
+        HeartMonitor(queue=SimpleNamespace(), evict_after=evict)
+
+
+@mark.unit
+def test_heartmonitor_evict_in_range() -> None:
+    """`HeartMonitor` takes `evict_after` at both bounds of `server.evict`."""
+    from types import SimpleNamespace
+    from datetime import timedelta
+    from hypershell.server import HeartMonitor
+    for evict in (10, 2**31 - 1):
+        assert HeartMonitor(queue=SimpleNamespace(), evict_after=evict).evict_after == timedelta(seconds=evict)
+
+
 IN_RANGE: Final[str] = '\n'.join([
     '[server]', 'bundlesize = 2147483647', 'attempts = 32767', 'evict = 2147483647', 'port = 65535',
     '[autoscale]', 'factor = 1e9', '[client]', 'ratelimit = 0.000001',

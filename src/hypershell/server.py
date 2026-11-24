@@ -876,7 +876,9 @@ class HeartMonitor(StateMachine):
         self.in_memory = in_memory
         self.no_confirm = no_confirm
         if isinstance(evict_after, (int, float)) and not isinstance(evict_after, bool):
-            if not (math.isfinite(evict_after) and SETTINGS['server.evict'].inside(evict_after)):
+            # An int too wide for a float is compared as an int: math.isfinite would overflow on it
+            if isinstance(evict_after, float) and not math.isfinite(evict_after) \
+                    or not SETTINGS['server.evict'].inside(evict_after):
                 raise RuntimeError(SETTINGS['server.evict'].refusal('evict_after', evict_after))
         self.wait_check = timedelta(seconds=int(evict_after / 10))
         self.evict_after = timedelta(seconds=evict_after)
