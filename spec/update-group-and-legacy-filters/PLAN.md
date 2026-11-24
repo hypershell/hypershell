@@ -271,3 +271,19 @@ task that never ran and writes it with `-R`.
 **Gate (P4):** the whole suite serially; the PostgreSQL half of the new tests with `HS_TEST_POSTGRES`;
 every red-listed test green; both drive modes; the docs build with `-W`; no `hs task ` in the changed
 docs.
+
+## Plan gate (2026-11-24)
+
+**Approved** by the foreman, gate judge under the maintainer's mandate.
+
+- **Accepted:**
+  - adding `tests/test_update_group.py` to the CI PostgreSQL job (§5);
+  - argument checks before the database is read, so an unknown ID with a bad group exits 2 (§2.1,
+    §5);
+  - the option refusal reported before the group refusal (§2.2);
+  - the filtered-form timing: the group check after `ensuredb()`, before the count (§2.1);
+  - the shared `--where` default left as is (§4);
+  - unrun checks are met at P1 (§5);
+  - `1e3`/`true` refused (gate C4).
+- **The seed `issues/update-typed-columns.md` is now filed on develop** (d132d45c). This branch is
+  cut from `03a02bd8` and does not need it.
