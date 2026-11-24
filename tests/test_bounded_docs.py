@@ -127,6 +127,16 @@ def test_env_page_names_ranges(page: str) -> None:
 
 
 @mark.unit
+def test_config_set_page_names_ranges() -> None:
+    """The `hs config set` page says a numeric value is held to its key's range, an untyped integer to 64 bits, marked."""
+    text = flat((DOCS / '_include' / 'config_set_desc.rst').read_text(encoding='utf-8'))
+    assert "held to the key's range" in text and 'outside 64 bits' in text and 'advisory limit' in text
+    assert 'checked by the command that reads it' not in text
+    page = (DOCS / 'cli' / 'config_set.rst').read_text(encoding='utf-8')
+    assert any("held to the key's range" in flat(body) for body in MARKER.findall(page))
+
+
+@mark.unit
 @mark.parametrize('page', ['client', 'cluster', 'server', 'submit'])
 def test_api_pages_name_ranges(page: str) -> None:
     """Each API page says its configuration defaults are held to the table's ranges, and explicit arguments are not."""
