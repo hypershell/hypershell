@@ -1,0 +1,53 @@
+# bounded-inputs: guard tests that must pass on the base build AND after every phase (what must not change).
+# Run from the repository root:
+#   sh spec/submit-input-checks/drive/run_list.sh spec/bounded-inputs/drive/guards.txt 1200
+# `pg:` lines run only with HS_TEST_POSTGRES set (sandbox off). New tests of in-range values (R2) join this
+# list in P1 once written: tests/test_bounded_options.py::test_option_in_range_unchanged and
+# tests/test_bounded_config.py::test_file_value_in_range_unchanged.
+
+# R2: the duration, size and delay forms keep their meaning and rounding.
+tests/test_duration_options.py::test_delay_accepted
+tests/test_duration_options.py::test_time_still_rounds_up
+tests/test_duration_options.py::test_delay_option_random_form_two_words
+tests/test_duration_options.py::test_seconds_option_parsed
+tests/test_duration_options.py::test_seconds_key_from_environment
+tests/test_duration_options.py::test_seconds_key_from_config_file
+tests/test_duration_options.py::test_seconds_key_number_unchanged
+tests/test_size_duration.py::test_size_accepted
+tests/test_size_duration.py::test_memory_option_parsed
+tests/test_size_duration.py::test_duration_accepted
+tests/test_size_duration.py::test_timeout_numbers_unchanged
+tests/test_size_duration.py::test_timeout_from_environment
+tests/test_env_duration.py::test_config_seconds
+tests/test_env_duration.py::test_config_seconds_variable_form
+tests/test_env_duration.py::test_server_evict_units
+
+# R2: a period under one second reads as one; the rate floor and a fractional rate as today.
+tests/test_period_floor.py::test_parse_period_accepted
+tests/test_period_floor.py::test_period_option_accepted
+tests/test_period_floor.py::test_period_key_accepted
+tests/test_config_unread.py::test_rate_option_takes_number
+tests/test_config_unread.py::test_rate_zero_is_no_limit
+tests/test_config_unread.py::test_cluster_rate_at_floor
+tests/test_config_unread.py::test_launched_rate_word
+
+# R2: typed values from files and variables, and hs config set's accepted values.
+tests/test_config_set_types.py::test_typed_converted
+tests/test_config_set_types.py::test_text_kept
+tests/test_retry_defaults.py::test_default_retries_follow_configuration
+tests/test_retry_defaults.py::test_explicit_max_retries_wins
+tests/test_retry_defaults.py::test_default_retries_from_environment
+tests/test_cluster_evict.py::test_cluster_evict_exact
+tests/test_cluster_evict.py::test_cluster_evict_default
+
+# The group rule's accepted forms (one group parser).
+tests/test_group_integer.py::test_ensure_group_accepts_integer
+tests/test_group_integer.py::test_parse_group_accepts
+tests/test_group_integer.py::test_submit_file_accepts_group
+tests/test_group_integer.py::test_submit_tag_option_accepts_group
+tests/test_group_integer.py::test_submit_json_accepts_integer_group
+
+# Memory column storage (#120).
+tests/test_memory_column.py::test_sqlite_column_unchanged
+tests/test_memory_column.py::test_large_memory_sqlite
+pg:tests/test_memory_column.py::test_postgres_column_bigint

@@ -60,3 +60,10 @@ is skipped by the parser):
 - **Skill cause:** As `spec/env-config-keys/META.md` F3 and `spec/config-set-and-unread/META.md`: the `unshaped` bullet does not ask for the seed to be checked against `develop`.
 - **Recommended fix:** As recorded there.
 - **Confidence:** high · **Effort:** small
+
+## F4 — No shared red-on-base harness; this plan reuses two other cycles' drive scripts · seen again
+`origin=hs-plan:step6 severity=low category=tooling status=open target=.agents/factory/bin/`
+- **What happened:** Every phase's `verify:` calls `spec/relay-hardening/drive/red_check.sh` and `spec/submit-input-checks/drive/bounded.py` and `run_list.sh`, found by reading a precedent cycle, because nothing under `.agents/factory/bin/` proves "fails on <rev>" or runs a bounded node-id list.
+- **Skill cause:** As `spec/contended-writes/META.md` F4 and `spec/env-config-keys/META.md` F4: Step 6 and the TECH template give no way to prove a test red on the base.
+- **Recommended fix:** As recorded there: move those scripts to `.agents/factory/bin/` and name them in Step 6.
+- **Confidence:** high · **Effort:** small

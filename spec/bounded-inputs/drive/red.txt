@@ -1,0 +1,79 @@
+# bounded-inputs: regression tests that must fail on the base build (8548053b) for what they check.
+# Checked by the landed checker, read-only, from the repository root (PostgreSQL lines need the sandbox off):
+#   RED_LIST=spec/bounded-inputs/drive/red.txt RED_BASE_REV=8548053b sh spec/relay-hardening/drive/red_check.sh
+# One pytest node id per line; `pg:` lines run only with HS_TEST_POSTGRES set. Tests that import a new name
+# (the table, parse_setting, SettingError, RangedOption, ensure_resources, reading, advise) fail on the base by
+# its absence, not by the defect, and are not listed: those are the in-process matrix, the table and default
+# coverage, gate (a) and the advisory unit tests. Every test here drives the CLI or an existing name and fails
+# on the base by assertion. These ids are the contract P1 writes to; P1 may fix an id, never drop a requirement.
+# Parameter ids in brackets: the db_site fixture's database (sqlite, postgres), then the test's own.
+
+# R1 / R6: no option is typed as a plain int or float (gate b, by assertion on the base).
+tests/test_bounded_table.py::test_no_plain_numeric_option_type
+
+# R3 / R4: an option out of range or not a number exits 2 with one message (accepted or other text today).
+tests/test_bounded_options.py::test_option_refused[submit-cores-100000]
+tests/test_bounded_options.py::test_option_refused[submit-memory-8388608TB]
+tests/test_bounded_options.py::test_option_refused[submit-timeout-2147483648]
+tests/test_bounded_options.py::test_option_refused[submit-bundlesize-0]
+tests/test_bounded_options.py::test_option_refused[list-limit-minus5]
+tests/test_bounded_options.py::test_option_refused[list-group-2147483648]
+tests/test_bounded_options.py::test_option_refused[list-part-minus1]
+tests/test_bounded_options.py::test_option_refused[cluster-num-threads-4194305]
+tests/test_bounded_options.py::test_option_refused[cluster-factor-nan]
+tests/test_bounded_options.py::test_option_refused[cluster-factor-0]
+tests/test_bounded_options.py::test_option_refused[client-ratelimit-minus5]
+tests/test_bounded_options.py::test_option_refused[server-port-65536]
+tests/test_bounded_options.py::test_option_refused[wait-interval-0]
+tests/test_bounded_options.py::test_option_message_form
+tests/test_bounded_options.py::test_option_message_printable_4300_digits
+
+# R4 / R5: configuration out of range or not a number exits 3 with (from: …), before work.
+tests/test_bounded_config.py::test_file_value_refused[client-ratelimit-1e-300-client]
+tests/test_bounded_config.py::test_file_value_refused[server-bundlesize-true]
+tests/test_bounded_config.py::test_file_value_refused[server-evict-4300-digits]
+tests/test_bounded_config.py::test_file_value_refused[task-cores-100000]
+tests/test_bounded_config.py::test_file_value_refused[relay-retention-list]
+tests/test_bounded_config.py::test_file_value_refused[zone-size-0]
+tests/test_bounded_config.py::test_variable_refused[server-queuesize-0]
+tests/test_bounded_config.py::test_variable_refused[client-heartrate-2147483648]
+tests/test_bounded_config.py::test_eval_value_refused
+tests/test_bounded_config.py::test_config_command_runs_with_bad_file
+
+# R3: a file's numeric key given as text is read by its kind.
+tests/test_bounded_config.py::test_text_attempts_runs_three_attempts
+
+# C1: refusals that exited 2 or 5 exit 3.
+tests/test_bounded_config.py::test_cluster_period_key_exits_3
+tests/test_bounded_config.py::test_cluster_ratelimit_key_exits_3
+tests/test_bounded_config.py::test_evict_key_exits_3
+
+# R7: hs config set refuses and writes nothing.
+tests/test_bounded_config_set.py::test_set_refused[server-bundlesize-0]
+tests/test_bounded_config_set.py::test_set_refused[server-evict-4300-digits]
+tests/test_bounded_config_set.py::test_set_refused[zone-size-0]
+tests/test_bounded_config_set.py::test_set_refused[task-memory-8EB]
+tests/test_bounded_config_set.py::test_set_untyped_wide_integer_refused
+
+# R8: an injected OverflowError before work exits cleanly.
+tests/test_bounded_backstop.py::test_injected_error_before_work[arguments]
+tests/test_bounded_backstop.py::test_injected_error_before_work[start]
+
+# R9: resource tags out of range are refused like a bad group.
+tests/test_bounded_tags.py::test_tag_option_refused[cores-100000]
+tests/test_bounded_tags.py::test_tag_option_refused[memory-8388608TB]
+tests/test_bounded_tags.py::test_file_tag_refused_whole[sqlite-cores-100000]
+tests/test_bounded_tags.py::test_file_tag_refused_whole[sqlite-memory-9223372036854775808]
+tests/test_bounded_tags.py::test_file_tag_refused_whole[sqlite-timeout-2147483648]
+pg:tests/test_bounded_tags.py::test_file_tag_refused_whole[postgres-cores-100000]
+tests/test_bounded_tags.py::test_json_tag_refused_whole[sqlite-cores-text]
+tests/test_bounded_tags.py::test_stream_tag_line_refused
+
+# R11: on PostgreSQL the largest values are stored (2**63-1 bytes is 2**63 through today's parser).
+pg:tests/test_bounded_tags.py::test_largest_values_stored[postgres]
+
+# R13: past an advisory limit, one WARNING and the run goes on.
+tests/test_bounded_advisory.py::test_option_advised_once[client-num-threads-1025]
+tests/test_bounded_advisory.py::test_option_advised_once[cluster-factor-101]
+tests/test_bounded_advisory.py::test_file_value_advised_once[server-attempts-101]
+tests/test_bounded_advisory.py::test_tags_advised_once_per_submission[sqlite]
