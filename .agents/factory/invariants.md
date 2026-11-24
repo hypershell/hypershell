@@ -116,7 +116,9 @@ subsystems.
 - **A task group must be an integer** (`ensure_group`: an `int`, not a `bool`, in PostgreSQL's
   32-bit range) wherever input sets it: an inline or tag-only `group:` tag, `-t group:…` (exit 2,
   before any input is read), a `--from-json` `group` key. Anything else raises `TaskGroupError`
-  (exit 5) naming the value and its line or record. The resource tags `cores`, `memory` and
+  (exit 5) naming the value and its line or record. `hs update group=VALUE` and
+  `hs update ID group VALUE` take it by `parse_group` (exit 2, before counting or writing).
+  The resource tags `cores`, `memory` and
   `timeout` follow the same paths (`ensure_resources`, by the `task.*` entries of `SETTINGS`, the
   text as written), raising `TaskResourceError`; both are a `TaskInputError`, which every catch site
   catches. Tags past an advisory limit give one summary per submission. `Task.new(group=…)` stays unchecked (queue mode

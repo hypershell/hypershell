@@ -50,7 +50,8 @@ from hypershell.core.types import smart_coerce, JSONData, to_json_type, ranged
 from hypershell.core.pretty_print import format_tag, format_json, format_bytes, format_source
 from hypershell.core.tag import Tag
 from hypershell.data.core import Session
-from hypershell.data.model import Task, Source, Zone, JSON, CANCEL_STATUS, zone_name, DEFAULT_ZONE_NAME
+from hypershell.data.model import (Task, Source, Zone, JSON, CANCEL_STATUS, zone_name, DEFAULT_ZONE_NAME,
+                                   TaskGroupError, parse_group)
 from hypershell.data import ensuredb, DATABASE_DIALECT
 
 # Public interface
@@ -959,6 +960,10 @@ UPDATE_HELP = f"""\
   Include any number of FIELD=VALUE or tag KEY:VALUE positional arguments.
   The -w/--where and -t/--with-tag operate just as in the search command.
 
+  A group change (group=VALUE, or ID group VALUE in the single-task form)
+  takes an integer as hs submit -g does; any other value exits with status 2
+  before anything is counted, asked or written.
+
   Using --cancel marks tasks terminal (schedule_time and completion_time to now,
   exit_status to {CANCEL_STATUS}); they will not be scheduled, retried, or reverted.
   Using --revert reverts everything as if the task was new again.
@@ -970,6 +975,10 @@ UPDATE_HELP = f"""\
   and VALUE as positional arguments remains valid.
   The single-task form takes no --cancel, --revert, --delete or --remove-tag;
   given one, it exits with status 2 and writes nothing.
+  The single-task form takes no option that selects tasks (-w, -t, -g, -l, -s,
+  --desc, -F, -S, -C, -R, -X, --retries, --signal); given one, it exits with
+  status 2 and writes nothing. To write a task only if it matches, use the
+  filtered form: hs update FIELD=VALUE -w "id == ID" -F.
 
 Arguments:
   ARGS...                    Assignment pairs for update.
@@ -995,6 +1004,46 @@ Options:
   -f, --no-confirm           Do not ask for confirmation.
   -h, --help                 Show this message and exit.\
 """
+
+
+SELECTION_OPTIONS: Final[List[Tuple[str, str]]] = [
+    ('where_clauses', '-w/--where'),
+    ('taglist', '-t/--with-tag'),
+    ('group_filter', '-g/--group'),
+    ('limit', '-l/--limit'),
+    ('order_by', '-s/--order-by'),
+    ('order_desc', '--desc'),
+    ('show_failed', '-F/--failed'),
+    ('show_succeeded', '-S/--succeeded'),
+    ('show_completed', '-C/--completed'),
+    ('show_remaining', '-R/--remaining'),
+    ('show_cancelled', '-X/--cancelled'),
+    ('retry_filter', '--retries'),
+    ('signal_filter', '--signal'),
+]
+"""The options of `hs update` that select tasks, as (attribute, name); the single-task form takes none."""
+
+
+def option_given(value: Any) -> bool:
+    """True when an option's parsed `value` is not its default (`[]`, `None` or `False`); `0` is given."""
+    if isinstance(value, bool):
+        return value is True
+    if isinstance(value, list):
+        return value != []
+    return value is not None
+
+
+def change_value(field: str, text: str) -> Any:
+    """The value a change writes to task column `field`, given as `text` (exit 2 for a group that is not one)."""
+    if field == 'group':
+        try:
+            return parse_group(text)
+        except TaskGroupError as error:
+            raise ArgumentError(str(error)) from error
+    if Task.columns.get(field) is str:
+        # A text column takes the text as given (e.g., `args=1` stays text); `none` and `null` clear it.
+        return None if text.lower() in {'none', 'null'} else text
+    return smart_coerce(text)
 
 
 class TaskUpdateApp(ReadingMixin, Application, SearchableMixin):
@@ -1072,8 +1121,11 @@ class TaskUpdateApp(ReadingMixin, Application, SearchableMixin):
             options = [name for name, given in (('--cancel', self.cancel_mode), ('--revert', self.revert_mode),
                                                 ('--delete', self.delete_mode), ('--remove-tag', self.remove_tag))
                        if given]
-            if options:
-                raise ArgumentError(f'Cannot use {", ".join(options)} with the single-task form ID FIELD VALUE')
+            selection = [name for attribute, name in SELECTION_OPTIONS if option_given(getattr(self, attribute))]
+            if options or selection:
+                hint = ' (to write a task only if it matches: hs update FIELD=VALUE -w "id == ID")' if selection else ''
+                raise ArgumentError(f'Cannot use {", ".join(options + selection)} '
+                                    f'with the single-task form ID FIELD VALUE{hint}')
         elif self.delete_mode and (self.update_args or self.remove_tag):
             words = [*self.update_args, *(['--remove-tag', *self.remove_tag] if self.remove_tag else [])]
             raise ArgumentError(f'Cannot use --delete with changes (given: {" ".join(words)})')
@@ -1093,11 +1145,7 @@ class TaskUpdateApp(ReadingMixin, Application, SearchableMixin):
                 Task.update(uuid, tag={**Task.from_id(uuid).tag,
                                        **Tag.parse_cmdline_list([value, ])})
             else:
-                if Task.columns.get(field) is str:
-                    value = None if value.lower() in {'none', 'null'} else value
-                else:
-                    value = smart_coerce(value)
-                Task.update(uuid, **{field: value, })
+                Task.update(uuid, **{field: change_value(field, value), })
         except StaleDataError as err:
             raise Task.NotFound(str(err)) from err
 
@@ -1193,13 +1241,7 @@ class TaskUpdateApp(ReadingMixin, Application, SearchableMixin):
                     raise ArgumentError(f'Cannot alter task "id" (given: {field}={value})')
                 if field not in Task.columns:
                     raise ArgumentError(f'Unrecognized task field "{field}"')
-                if Task.columns.get(field) is str:
-                    # We want to coerce the value (e.g., as an int or None)
-                    # But also allow for, e.g., args==1 which expects type str.
-                    value = None if value.lower() in {'none', 'null'} else value
-                else:
-                    value = smart_coerce(value)
-                field_updates[field] = value
+                field_updates[field] = change_value(field, value)
             elif ':' in arg:
                 key, value = arg.split(':', 1)
                 tag_updates[key] = smart_coerce(value)
