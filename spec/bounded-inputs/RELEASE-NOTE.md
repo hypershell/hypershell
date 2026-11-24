@@ -34,11 +34,16 @@ Behaviour changes:
 - The resource tags `cores`, `memory` and `timeout` take the ranges of `-c`, `-m` and `-W`, from an
   inline tag, `-t` or a `--from-json` record. A file, standard input read in full or a JSON source
   holding a bad value is refused whole (exit 5, nothing submitted, naming the value and its line or
-  record); on a stream only that line is refused, with an error; `-t` exits 2.
+  record); on a stream only that line is refused, with an error; `-t` exits 2, on `hs submit` and
+  `hs run` alike, before anything is written. A tag is read as its option reads it, except that a
+  `cores` tag with a zero fraction (`cores:4.0`) still reads as that whole number (`cores:4.5` is
+  refused), and a `timeout` tag's fraction of a second rounds up to whole seconds
+  (`timeout:90.5` is 91), as `-W` rounds it; before, a bare decimal was stored as written.
 - Some settings warn past an advisory limit and run anyway: more than 1,024 threads, more than 100
   attempts (`-r` above 99), more than 1,024 cores, a scaling factor above 100, a scaling period
   above an hour (3,600 seconds), and a rate below 0.001 tasks per second other than 0. One warning
-  per setting per run; one summary per submission for resource tags. The exit status is unchanged.
+  per setting per run; one summary per submission for resource tags, a single task given as
+  arguments included. The exit status is unchanged.
 - A numeric key given by `_eval` (or `_EVAL`) runs its command once per process, when the
   configuration loads, instead of at every read.
 

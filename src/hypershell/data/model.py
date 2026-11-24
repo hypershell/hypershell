@@ -36,7 +36,7 @@ from hypershell.core.logging import Logger, HOSTNAME, INSTANCE
 from hypershell.core.heartbeat import Heartbeat
 from hypershell.core.types import (JSONData, to_json_type, from_json_type, serialize, deserialize,
                                    parse_bytes, parse_time, UnitError)
-from hypershell.core.config_schema import SETTINGS, SettingError
+from hypershell.core.config_schema import SETTINGS, SettingError, Kind
 from hypershell.core.uuid import uuid
 from hypershell.core.tag import Tag
 from hypershell.data.core import schema, Session
@@ -149,21 +149,32 @@ RESOURCE_SETTINGS: Final[Dict[str, str]] = {'cores': 'task.cores', 'memory': 'ta
 """Each resource tag, and the entry of the table it is read by."""
 
 
+WHOLE_DECIMAL: Final[re.Pattern] = re.compile(r'(?P<whole>[+-]?[0-9]+(?:_[0-9]+)*)\.0+', re.ASCII)
+"""A whole number written as a decimal with a zero fraction (``4.0``, ``4.00``), as a tag may give it."""
+
+
 def ensure_resources(tags: Dict[str, Any], texts: Optional[Dict[str, Optional[str]]] = None) -> Dict[str, Any]:
     """`tags` with each resource tag read by its `task.*` entry, else :class:`TaskResourceError`.
 
     A tag's text as written (`texts`, from a line or `-t`) is read as the option reads it; without
     it, the value is read as a configuration file's value of that kind (a JSON record). An empty
-    value (a bare tag) is left as it is.
+    value (a bare tag) is left as it is. A whole-number tag (`cores`) written as a decimal with a
+    zero fraction (``4.0``) is read as that whole number, as a JSON ``4.0`` is; a refusal shows the
+    text as written.
     """
     for name, setting in RESOURCE_SETTINGS.items():
         if name not in tags or tags[name] is None or tags[name] == '':
             continue
         text = (texts or {}).get(name)
+        given = tags[name] if not text else text
+        entry = SETTINGS[setting]
+        value = given
+        if entry.kind is Kind.INT and isinstance(given, str) and (match := WHOLE_DECIMAL.fullmatch(given.strip())):
+            value = match.group('whole')
         try:
-            tags[name] = SETTINGS[setting].parse(tags[name] if not text else text, setting)
+            tags[name] = entry.parse(value, setting)
         except SettingError as error:
-            raise TaskResourceError(str(error)) from None
+            raise TaskResourceError(str(SettingError(setting, entry, given, out_of_range=error.out_of_range))) from None
     return tags
 
 

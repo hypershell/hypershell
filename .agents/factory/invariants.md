@@ -120,8 +120,11 @@ subsystems.
   `hs update ID group VALUE` take it by `parse_group` (exit 2, before counting or writing).
   The resource tags `cores`, `memory` and
   `timeout` follow the same paths (`ensure_resources`, by the `task.*` entries of `SETTINGS`, the
-  text as written), raising `TaskResourceError`; both are a `TaskInputError`, which every catch site
-  catches. Tags past an advisory limit give one summary per submission. `Task.new(group=…)` stays unchecked (queue mode
+  text as written; a whole-number tag with a zero fraction, `cores:4.0`, reads as 4), raising
+  `TaskResourceError`; both are a `TaskInputError`, which every catch site catches. `-t` on
+  `hs submit`, `hs run` and the one-task submit reads its tags by `read_tag_options` (exit 2, before
+  the database is opened). Tags past an advisory limit give one summary per submission, a single
+  task from arguments included (`advise_one_task`). `Task.new(group=…)` stays unchecked (queue mode
   passes None), and a retry (`Task.new_retry`) copies the stored group, a legacy text group too. Read-in-full input (a named file to `hs submit`,
   `hs cluster` or `hs server`, `--from-json`, arguments, and `hs submit` stdin with a database) is
   scanned whole (`scan_task_lines`) before any write, with or without a database; a stream's

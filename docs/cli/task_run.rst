@@ -25,4 +25,9 @@ Description
    option, the range and the value (exit status 2). ``-n 0`` is refused: it queried the database
    without rest. The least interval is one second.
 
+.. versionchanged:: 2.9.0
+   A resource tag given with ``-t``/``--tag`` outside its range is refused (exit status 2) before
+   anything is written; before, it was stored as given, or stopped the command with an error from
+   the database.
+
 .. include:: ../_include/task_run_help.rst

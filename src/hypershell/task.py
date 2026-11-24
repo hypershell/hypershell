@@ -51,8 +51,9 @@ from hypershell.core.pretty_print import format_tag, format_json, format_bytes, 
 from hypershell.core.tag import Tag
 from hypershell.data.core import Session
 from hypershell.data.model import (Task, Source, Zone, JSON, CANCEL_STATUS, zone_name, DEFAULT_ZONE_NAME,
-                                   TaskGroupError, parse_group)
+                                   TaskGroupError, TaskInputError, parse_group)
 from hypershell.data import ensuredb, DATABASE_DIALECT
+from hypershell.submit import read_tag_options, advise_one_task
 
 # Public interface
 __all__ = ['TaskGroupApp',
@@ -109,19 +110,21 @@ class TaskSubmitApp(ReadingMixin, Application):
                 self.zone = zone_name(self.zone)
             except ValueError as error:
                 raise ArgumentError(str(error)) from error
-        ensuredb()
         self.check_tags()
+        ensuredb()
         zone = None if self.zone is None else Zone.ensure(self.zone)
-        task = Task.new(args=' '.join(self.argv), tag=self.tags, zone=zone)
+        args = ' '.join(self.argv)
+        task = Task.new(args=args, tag=self.tags, zone=zone)
+        advise_one_task(args, self.tags)
         Task.add(task)
         print(task.id)
 
     def check_tags(self: TaskSubmitApp) -> None:
-        """Ensure valid tags."""
-        self.tags = {} if not self.taglist else Tag.parse_cmdline_list(self.taglist)
+        """Ensure valid tags, before the database is opened: a resource tag is read by its `task.*` entry."""
         try:
+            self.tags = read_tag_options(self.taglist)
             Task.ensure_valid_tag(self.tags)
-        except (ValueError, TypeError) as error:
+        except (ValueError, TypeError, TaskInputError) as error:
             raise ArgumentError(str(error)) from error
 
 
@@ -442,9 +445,14 @@ class TaskRunApp(ReadingMixin, Application):
 
     def run(self: TaskRunApp) -> None:
         """Submit task and wait for completion."""
+        try:
+            tags = read_tag_options(self.taglist)  # Before the database is opened: exit 2 writes nothing
+        except TaskInputError as error:
+            raise ArgumentError(str(error)) from error
         ensuredb()
-        task = Task.new(args=' '.join(self.argv),
-                        tag=(None if not self.taglist else Tag.parse_cmdline_list(self.taglist)))
+        args = ' '.join(self.argv)
+        task = Task.new(args=args, tag=tags or None)
+        advise_one_task(args, tags)
         Task.add(task)
         TaskWaitApp(uuid=task.id, interval=self.interval).run()
         TaskInfoApp(uuid=task.id, print_stdout=True).run()

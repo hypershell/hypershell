@@ -88,6 +88,7 @@ from hypershell.data import initdb, checkdb, DATABASE_DIALECT, DATABASE_ENABLED
 # Public interface
 __all__ = ['submit_from', 'submit_file', 'load_json_tasks', 'load_json_source', 'json_source_key',
            'validate_json_expansion', 'validate_json_groups', 'validate_json_records', 'TagAdvice',
+           'read_tag_options', 'advise_one_task',
            'GatedSource', 'InputScan', 'scan_task_lines', 'read_in_full', 'source_fingerprint', 'is_file_input',
            'source_name',
            'source_fingerprint_and_count', 'apply_source_gate', 'decide_source_gate', 'GateDecision',
@@ -228,6 +229,24 @@ class TagAdvice:
             tasks = '1 task' if count == 1 else f'{count:,} tasks'
             log.warning(f'{setting}: {tasks} {direction} the advised {figure(limit)}{entry.unit} ({reason}), '
                         f'the first at {self.first[setting]}; running anyway')
+
+
+def read_tag_options(taglist: Optional[List[str]]) -> Dict[str, JSONData]:
+    """The tags given by `-t` (`key:value` tokens), each resource tag read by its `task.*` entry.
+
+    A resource tag's text is read as written, as the option of that resource reads it. Raises
+    :class:`~hypershell.data.model.TaskInputError` naming the entry (``task.memory``), for the
+    command to refuse with exit status 2 before anything is written.
+    """
+    tags = {} if not taglist else Tag.parse_cmdline_list(taglist)
+    return ensure_resources(tags, {name: tag_text(taglist, name) for name in RESOURCE_SETTINGS if name in tags})
+
+
+def advise_one_task(args: str, tags: Optional[Dict[str, JSONData]] = None) -> None:
+    """One advisory summary for a single task given as arguments: its `-t` `tags` with its inline tags over them."""
+    advice = TagAdvice()
+    advice.note({**(tags or {}), **Task.split_argline(args)[1]}, 'the command line')
+    advice.log()
 
 
 def task_lines(lines: Iterable[str], *, template: str = DEFAULT_TEMPLATE,
@@ -1810,9 +1829,11 @@ class SubmitApp(ReadingMixin, Application):
             submit_from([args, ], queue_config=self.queue,
                         cores=self.cores, memory=self.memory, timeout=self.timeout, group=self.group,
                         tags=self.tags)
+            advise_one_task(args, self.tags)
         else:
             task = Task.new(args=args, cores=self.cores, memory=self.memory, timeout=self.timeout,
                             group=self.group, tag=self.tags, source=self.source_id, zone=self.zone_id)
+            advise_one_task(args, self.tags)
             Task.add(task)
             log.info(f'Submitted task ({task.id})')
 
@@ -1832,9 +1853,8 @@ class SubmitApp(ReadingMixin, Application):
         Tags are checked in both modes, but only a submission to the database applies them: queue
         mode leaves them unset, as it always has.
         """
-        tags = {} if not self.taglist else Tag.parse_cmdline_list(self.taglist)
         try:
-            ensure_resources(tags, {name: tag_text(self.taglist, name) for name in RESOURCE_SETTINGS if name in tags})
+            tags = read_tag_options(self.taglist)
             Task.ensure_valid_tag(tags)
             if 'group' in tags:
                 tags['group'] = ensure_group(tags['group'], text=tag_text(self.taglist, 'group'))

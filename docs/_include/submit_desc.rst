@@ -51,18 +51,24 @@ The resource tags ``cores``, ``memory`` and ``timeout`` take the ranges of the `
 ``-W`` options, and are refused as a group is, wherever they come from (an inline tag, ``-t`` or a
 ``--from-json`` record): input read in full is refused whole, with nothing submitted, naming the
 value and its line (or record); on a stream only that line is refused, with an error; ``-t`` is
-refused before any input is read.
+refused before any input is read (exit status 2), here and on ``hs run``.
 
 - ``cores``: Range: 0 (unconstrained) to 32,767. Above 1,024 it runs with a warning.
 - ``memory``: Range: 0 bytes (unconstrained) to 9,223,372,036,854,775,807 bytes.
 - ``timeout``: Range: 0 s to 2,147,483,647 s.
 
+A tag is read as its option reads it, with one difference: ``cores`` written as a decimal with a
+zero fraction (``cores:4.0``) is that whole number, as in a ``--from-json`` record, while a
+non-zero fraction (``cores:4.5``) is refused. A ``timeout`` with a fraction of a second is rounded
+up to whole seconds, as ``-W`` rounds it (``timeout:90.5`` is 91 seconds).
+
 Tasks past the advisory limit run as before; one warning for the whole submission gives their
-count and the first such line (or record).
+count and the first such line (or record, or the command line for one task given as arguments).
 
 .. versionchanged:: 2.9.0
    A resource tag outside its range, or not of its kind, is refused as a group that is not an
    integer is; before, it was stored as given, or stopped the submission while it was written.
+   ``hs run -t`` refuses one the same way. A ``cores`` tag of ``4.0`` is still read as 4.
 
 With ``--from-json``, read tasks from a JSON file instead. The value is
 ``FILE[@path]`` where the optional dotted ``path`` locates the list of task objects
