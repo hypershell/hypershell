@@ -220,6 +220,13 @@ No fan-out (small fix, known root causes, no high-blast-radius file). Resolved b
 - **Verifies not dry-run at plan time.** Lean plan: the counts (106, 29 `pg:`) and the commands are
   derived from §6, not run. P1 is where they meet reality; a corrected count or command is amended
   through `set_phase.py` with a PLAN note, not by weakening a check.
+- **P1 fence corrected (2026-11-24, foreman ruling).** P1's second fence term compared the tree with
+  `03a02bd8`, but this branch's shaping commit `2386fb0a` changed `ROADMAP.md` and the two seeds in
+  `issues/`, so the term could never pass. It now compares with `eec25fc0`, the parent of P1 (the plan
+  gate), which keeps its purpose: P1 changes nothing outside `spec/` and `tests/`. It is no weaker;
+  excluding `ROADMAP.md` and `issues/` instead was rejected because that would weaken it. No other
+  phase has a fence on `03a02bd8` (P4's `RED_BASE_REV=03a02bd8` is the red check's base, correct as
+  is). Changed with `set_phase.py --phase P1 --verify`.
 
 ## 6. Verification strategy
 

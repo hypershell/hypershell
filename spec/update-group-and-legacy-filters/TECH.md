@@ -7,12 +7,12 @@ appetite: small
 status: in_progress
 branch: fix/update-group-and-legacy-filters
 base: develop
-current_phase: P1
+current_phase: P2
 last_updated: '2026-11-24'
 phases:
 - id: P1
   name: 'Tests first: the red list on 03a02bd8 (tests only)'
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
@@ -22,9 +22,9 @@ phases:
   depends_on: []
   parallel: false
   hammerable: false
-  hill: uphill
+  hill: downhill
   verify: git diff --quiet 03a02bd8 -- src docs share AGENTS.md .agents .github &&
-    test -z "$(git diff --name-only 03a02bd8 -- . ':!spec' ':!tests')" && test -n
+    test -z "$(git diff --name-only eec25fc0 -- . ':!spec' ':!tests')" && test -n
     "$HS_TEST_POSTGRES" && test "$(grep -cvE '^#|^$' spec/update-group-and-legacy-filters/red.txt)"
     -eq 106 && test "$(grep -c '^pg:' spec/update-group-and-legacy-filters/red.txt)"
     -eq 29 && RED_BASE_REV=03a02bd8 RED_LIST="$PWD/spec/update-group-and-legacy-filters/red.txt"
@@ -171,16 +171,16 @@ atomic code+state commit.
 **Goal:** every new test is in the tree and fails on `03a02bd8` for what it checks; every guard and
 every other test in the touched files passes.
 
-- [ ] `tests/test_update_group.py` (new): PLAN §6's first table, on `db_site` (imports `admin`,
+- [x] `tests/test_update_group.py` (new): PLAN §6's first table, on `db_site` (imports `admin`,
       `ts_database`, `ts_site` from `tests.test_timescale` as `tests/test_group_integer.py` does).
       Assert exit 2, `group` and the (non-empty) value in stderr, no `Searching database`, no
       `Updated`, every row unchanged; not #118's sentence word for word (PLAN §2.4).
-- [ ] `tests/test_update_refusals.py`: PLAN §6's second table: the 23 spellings as one table, the
+- [x] `tests/test_update_refusals.py`: PLAN §6's second table: the 23 spellings as one table, the
       three red tests and the three guards. The filtered-form guard sets its five tasks with
       `hs update FIELD=VALUE -t n:K -f` (accepted values only).
-- [ ] `spec/update-group-and-legacy-filters/red.txt`: one node id per red test, 106 lines, the 29
+- [x] `spec/update-group-and-legacy-filters/red.txt`: one node id per red test, 106 lines, the 29
       PostgreSQL ids prefixed `pg:`; a comment header naming the base and the count.
-- [ ] Nothing outside `tests/` and `spec/` changes.
+- [x] Nothing outside `tests/` and `spec/` changes.
 - **Verify:** see frontmatter: the fence; `HS_TEST_POSTGRES` set; `red.txt` holds 106 ids, 29 `pg:`;
   `red_check` all red on `03a02bd8`; `rest_green` over the new and neighbouring files.
 - **Touches:** `tests/test_update_group.py`, `tests/test_update_refusals.py`,
