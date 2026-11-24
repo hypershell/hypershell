@@ -789,7 +789,7 @@ msgpack's extra dependency buys nothing.
 *Target: 2.9.0 (2.9.0a10) · Horizon: near-term, big · Depends on: — · Refs: prerequisite of both
 entries below; `docs/security.rst` ("Pickle-serialized RPC"); `tests/bench/bench_queue.py` (the
 no-regression check)*
-**Seed:** [`issues/queue-wire-codec.md`](issues/queue-wire-codec.md) · *status: unshaped*
+**Seed:** [`issues/queue-wire-codec.md`](issues/queue-wire-codec.md) · *status: adopted:queue-wire-codec*
 
 ## A sandbox template around each task confines nothing
 

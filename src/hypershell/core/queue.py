@@ -25,8 +25,8 @@ from functools import cache
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from multiprocessing import util, ProcessError
-from multiprocessing.managers import (BaseManager, BaseProxy, Server, State, AutoProxy, RemoteError,
-                                      listener_client, convert_to_error)
+from multiprocessing.managers import (BaseManager, BaseProxy, Server, State, AutoProxy, RemoteError, Token,
+                                      listener_client, convert_to_error, dispatch)
 from multiprocessing.connection import (_ConnectionBase, Listener, SocketListener, Client, Connection,
                                         address_type, answer_challenge, deliver_challenge, BUFSIZE)
 from queue import Queue, SimpleQueue
@@ -45,6 +45,7 @@ from hypershell.core.tls import (TLSConfig, TLSError, install_process_context, b
                                  verify_peer_fingerprint, handshake_seconds, HANDSHAKE_KEY,
                                  from_namespace as _tls_from_namespace)
 from hypershell.core.dispatch import Dispatcher, PROTOCOL
+from hypershell.core.codec import encode, decode, CodecError, PickleFrame, OLD_PEER_REPLY
 
 # Public interface
 __all__ = [
@@ -64,11 +65,13 @@ TLS_SERIALIZER: Final[str] = 'hypershell-tls'
 """Serializer key registered with :data:`multiprocessing.managers.listener_client`.
 When a :class:`BaseManager` is constructed with this serializer, both ends route their
 traffic through :class:`SecureListener` / :func:`secure_client` instead of the cleartext
-stock pair."""
+pair. Every message is encoded with the queue's codec (:mod:`hypershell.core.codec`)."""
 
 PLAIN_SERIALIZER: Final[str] = 'hypershell-plain'
-"""Serializer key for cleartext queue traffic: the stock listener and client with Nagle's algorithm
-off on every TCP connection. The wire is the stock one, byte for byte."""
+"""Serializer key for cleartext queue traffic: :class:`_PlainListener` and :func:`_plain_client`, with
+Nagle's algorithm off on every TCP connection. The framing and the authentication handshake are the
+stock connection's, byte for byte; every message is encoded with the queue's codec
+(:mod:`hypershell.core.codec`)."""
 
 
 def _no_delay(sock: socket.socket) -> None:
@@ -112,16 +115,119 @@ def _no_delay_connection(conn: Connection) -> None:
             os.set_blocking(fd, blocking)
 
 
-class SecureConnection(_ConnectionBase):
+OLD_FRAMING: Final[str] = ('the peer speaks the queue framing of a release before 2.9.0a10; '
+                           'run matching server and client versions')
+"""Why a server refuses a peer of a release before 2.9.0a10 (logged with the peer's address)."""
+
+
+PUBLIC_REQUESTS: Final[frozenset] = frozenset(Server.public)
+"""The names a connection's first request to a queue manager's server may carry: the manager's public requests."""
+
+
+class _Refused(EOFError):
+    """A queue server's connection refused a message outside the queue vocabulary and is closed.
+
+    An :class:`EOFError`, so the manager's serve loop ends that connection's handler as it does for a
+    peer that disconnects, and serves its other connections as before.
+    """
+
+
+class _EnvelopeCodec:
+    """
+    The ``send`` and ``recv`` of a queue connection: each message is encoded and decoded with the queue's
+    codec (:mod:`hypershell.core.codec`), over the connection's own framing (``_send_bytes`` and
+    ``_recv_bytes``), which is unchanged. The authentication challenge (``send_bytes`` and
+    ``recv_bytes``) is unchanged too.
+
+    A connection a client dialled knows the address it dialled (``_dialled``); one a server accepted has
+    none. A message that does not decode into the vocabulary is refused: the connection closes itself
+    first, so nothing more is sent or received on it, records why (``refusal``), and raises. On a
+    server that is :class:`_Refused`; on a client it is :class:`QueueVersionError`, which is fatal: the
+    server it reached is of another version, or is not a queue server this client can understand.
+
+    A message in the pickle framing of a release before 2.9.0a10 is never decoded. A server answers it
+    with the one fixed reply such a peer reads (:data:`~hypershell.core.codec.OLD_PEER_REPLY`, the same
+    bytes for every peer) before it closes; a client names the older framing in its version error.
+
+    A queue client never asks its server for a proxy in a reply (``#PROXY``), so on a client's connection
+    such a reply is refused as a message outside the vocabulary, whether it comes as a tuple or as a list.
+
+    A server's connection takes its first request through :meth:`_recv_request` (see :class:`_ManagerServer`).
+    """
+
+    _dialled: Optional[Tuple[str, int]] = None
+    refusal: Optional[str] = None
+
+    def send(self, obj: Any) -> None:
+        """Send `obj` as one message; a value outside the vocabulary raises before anything is written."""
+        self._check_closed()
+        self._check_writable()
+        self._send_bytes(encode(obj))
+
+    def recv(self) -> Any:
+        """Receive one message, decoded into the vocabulary or refused (see the class notes)."""
+        self._check_closed()
+        self._check_readable()
+        buf = self._recv_bytes()
+        try:
+            with buf.getbuffer() as frame:  # Released before the buffer, even on a refusal
+                message = decode(frame)
+        except PickleFrame:
+            self._refuse_old_peer()
+        except CodecError as error:
+            self._refuse(error)
+        if self._dialled is not None and type(message) in (tuple, list) and message and message[0] == '#PROXY':
+            self._refuse(CodecError('a proxy in a reply, which a queue client never asks for'))
+        return message
+
+    def _recv_request(self) -> Any:
+        """Receive a server connection's first request, refused as outside the vocabulary unless it is a tuple
+        ``(ident, name, args, kwds)`` whose name is one of :data:`PUBLIC_REQUESTS`.
+
+        Set on the connection in place of :meth:`recv` for that one message; later messages are received
+        by :meth:`recv` itself.
+        """
+        del self.recv
+        message = self.recv()
+        if not (type(message) is tuple and len(message) == 4
+                and type(message[1]) is str and message[1] in PUBLIC_REQUESTS):
+            self._refuse(CodecError("a first request outside the manager's public requests"))
+        return message
+
+    def _refuse(self, error: CodecError) -> None:
+        """Close this connection, record why, and raise the error of its side."""
+        self.refusal = f'it sent a message outside the queue vocabulary ({error})'
+        self.close()
+        if self._dialled is None:
+            raise _Refused(self.refusal)
+        raise QueueVersionError(f'Server at {_peer_text(self._dialled)} sent a message outside this '
+                                f'version\'s queue vocabulary ({error}); run matching server and client versions')
+
+    def _refuse_old_peer(self) -> None:
+        """Refuse a peer of a release before 2.9.0a10: a server sends it the fixed reply first; then close
+        this connection, record why, and raise the error of its side."""
+        self.refusal = OLD_FRAMING
+        if self._dialled is None:
+            try:
+                self.send_bytes(OLD_PEER_REPLY)
+            except OSError:  # The peer has gone; there is nothing more to tell it
+                pass
+            self.close()
+            raise _Refused(self.refusal)
+        self.close()
+        raise QueueVersionError(f'Server at {_peer_text(self._dialled)} speaks the queue framing of a release '
+                                f'before 2.9.0a10; run matching server and client versions')
+
+
+class SecureConnection(_EnvelopeCodec, _ConnectionBase):
     """
     A :class:`multiprocessing.connection.Connection`-compatible wrapper around an :class:`ssl.SSLSocket`.
 
     Implements the same wire framing as the stock connection (a 4-byte network-order signed
     length, with a ``-1`` sentinel + 8-byte payload length for messages larger than 2 GiB)
     so it is a drop-in replacement, but every byte read or written passes through the TLS
-    layer. ``send`` / ``recv`` (which transparently pickle Python objects) are inherited
-    from :class:`_ConnectionBase` for free since they are layered on top of
-    ``_send_bytes`` / ``_recv_bytes``.
+    layer. ``send`` / ``recv`` encode and decode each message with the queue's codec
+    (:class:`_EnvelopeCodec`), layered on ``_send_bytes`` / ``_recv_bytes``.
     """
 
     def __init__(self: SecureConnection, ssl_sock: ssl.SSLSocket,
@@ -360,6 +466,7 @@ def secure_client(address, family=None, authkey: Optional[bytes] = None) -> Secu
     if cfg is not None:
         verify_peer_fingerprint(ssl_sock, cfg)
     conn = SecureConnection(ssl_sock)
+    conn._dialled = address
     if authkey is not None:
         if not isinstance(authkey, bytes):
             raise TypeError('authkey should be a byte string')
@@ -375,25 +482,47 @@ def secure_client(address, family=None, authkey: Optional[bytes] = None) -> Secu
 listener_client[TLS_SERIALIZER] = (SecureListener, secure_client)
 
 
-class _PlainListener(Listener):
-    """The stock listener, with Nagle's algorithm off on each accepted TCP connection."""
+class _PlainConnection(_EnvelopeCodec, Connection):
+    """A cleartext queue connection: the stock connection's framing, with the queue's codec for each message.
 
-    def accept(self: _PlainListener) -> Connection:
+    The stock :class:`~multiprocessing.connection.Connection` itself is left as it is: a forked manager's
+    pipe to its child and process start-up use it.
+    """
+
+
+class _PlainListener(Listener):
+    """The stock listener, handing over each accepted connection as a :class:`_PlainConnection`, with
+    Nagle's algorithm off on a TCP connection."""
+
+    def accept(self: _PlainListener) -> _PlainConnection:
         """Accept a connection as the stock listener does. A manager's server gives its listener no
         `authkey`, so the option is set before the handshake."""
         conn = super().accept()
+        conn.__class__ = _PlainConnection  # The same connection, with the queue's codec for each message
         _no_delay_connection(conn)
         return conn
 
 
-def _plain_client(address, family=None, authkey: Optional[bytes] = None) -> Connection:
-    """The stock :func:`multiprocessing.connection.Client`, with Nagle's algorithm off on a TCP
-    connection before the authentication handshake."""
+def _plain_client(address, family=None, authkey: Optional[bytes] = None) -> _PlainConnection:
+    """A cleartext queue connection to `address`, as the stock :func:`multiprocessing.connection.Client`
+    makes, but a :class:`_PlainConnection`, with Nagle's algorithm off on a TCP connection before the
+    authentication handshake."""
     if authkey is not None and not isinstance(authkey, bytes):
         raise TypeError('authkey should be a byte string')
-    conn = Client(address, family)
     if (family or address_type(address)) == 'AF_INET':
-        _no_delay_connection(conn)
+        raw = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            raw.setblocking(True)
+            _no_delay(raw)
+            raw.connect(address)
+        except Exception:
+            raw.close()
+            raise
+        conn = _PlainConnection(raw.detach())
+    else:
+        conn = Client(address, family)
+        conn.__class__ = _PlainConnection  # The same connection, with the queue's codec for each message
+    conn._dialled = address
     if authkey is not None:
         answer_challenge(conn, authkey)
         deliver_challenge(conn, authkey)
@@ -456,6 +585,47 @@ def _names(func: Callable[..., Any]) -> Tuple[str, ...]:
     return func.__code__.co_names
 
 
+def _strings(func: Callable[..., Any]) -> set:
+    """The string constants of the body of `func`, read through nested tuples and nested code objects."""
+    found, pending = set(), list(func.__code__.co_consts)
+    while pending:
+        const = pending.pop()
+        if isinstance(const, str):
+            found.add(const)
+        elif isinstance(const, tuple):
+            pending.extend(const)
+        elif inspect.iscode(const):
+            pending.extend(const.co_consts)
+    return found
+
+
+# The manager reaches a connection only through `send` and `recv` (which a queue connection encodes with
+# its codec), never through the byte-level methods or the pickler directly
+_ENVELOPE: Final[frozenset] = frozenset({'send', 'recv'})
+_BYTE_LEVEL: Final[frozenset] = frozenset({'send_bytes', 'recv_bytes', 'dumps', 'loads', '_ForkingPickler'})
+
+
+def _sends_through_envelope(func: Callable[..., Any]) -> bool:
+    """Whether `func` sends and receives with `send` and `recv`, and touches no byte-level method or pickler."""
+    names = set(_names(func))
+    return _ENVELOPE <= names and not names & _BYTE_LEVEL
+
+
+def _dispatches(code) -> bool:
+    """Whether the code object `code` makes its request through `dispatch` and touches no connection method."""
+    names = set(code.co_names)
+    return 'dispatch' in names and not names & (_ENVELOPE | _BYTE_LEVEL)
+
+
+def _manager_requests_dispatch() -> bool:
+    """Whether every manager request outside the serve loop and a proxy's calls goes through `dispatch`."""
+    funcs = (BaseManager.connect, BaseManager._create, BaseManager._debug_info, BaseManager._number_of_objects,
+             BaseManager._finalize_manager, BaseProxy._connect, BaseProxy._incref, BaseProxy._decref, AutoProxy)
+    methods = [const for const in BaseManager.register.__code__.co_consts
+               if inspect.iscode(const) and '_create' in const.co_names]
+    return bool(methods) and all(_dispatches(func.__code__) for func in funcs) and all(map(_dispatches, methods))
+
+
 # The CPython multiprocessing privates the in-process serve loop relies on, each with a check of its
 # presence and shape. Checks read signatures and compiled names only; none binds a socket.
 _INTERNALS: Final[Tuple[Tuple[str, Callable[[], bool]], ...]] = (
@@ -464,6 +634,8 @@ _INTERNALS: Final[Tuple[Tuple[str, Callable[[], bool]], ...]] = (
     ('Server.__init__ sets listener, address, mutex, id_to_obj, registry and authkey',
      lambda: {'listener', 'address', 'mutex', 'id_to_obj', 'registry', 'authkey'} <= set(_names(Server.__init__))),
     ('Server._handle_request(c)', lambda: _parameters(Server._handle_request) == ['self', 'c']),
+    ('Server._handle_request takes the request from recv after the challenge, then looks its name up',
+     lambda: {'deliver_challenge', 'answer_challenge', 'recv', 'getattr'} <= set(_names(Server._handle_request))),
     ('Server.handle_request(conn)', lambda: _parameters(Server.handle_request) == ['self', 'conn']),
     ('Server.serve_client(conn)', lambda: _parameters(Server.serve_client) == ['self', 'conn']),
     ('Server.shutdown(c)', lambda: _parameters(Server.shutdown) == ['self', 'c']),
@@ -505,6 +677,32 @@ _INTERNALS: Final[Tuple[Tuple[str, Callable[[], bool]], ...]] = (
     ('convert_to_error produces RemoteError', lambda: isinstance(convert_to_error('#TRACEBACK', ''), RemoteError)),
     ('BaseProxy._callmethod caches a connection per thread (_tls.connection)',
      lambda: {'_tls', 'connection'} <= set(_names(BaseProxy._callmethod))),
+    ('dispatch, Server._handle_request, Server.serve_client and BaseProxy._callmethod use only send and recv',
+     lambda: all(map(_sends_through_envelope, (dispatch, Server._handle_request, Server.serve_client,
+                                                BaseProxy._callmethod)))),
+    ('Server.accept_connection and Server.shutdown reply with send',
+     lambda: 'send' in _names(Server.accept_connection) and 'send' in _names(Server.shutdown)),
+    ("Every other manager and proxy request goes through dispatch", _manager_requests_dispatch),
+    ('Server.serve_client sends #RETURN, #ERROR, #PROXY, #TRACEBACK and #UNSERIALIZABLE, and ends on EOFError',
+     lambda: ({'#RETURN', '#ERROR', '#PROXY', '#TRACEBACK', '#UNSERIALIZABLE'} <= _strings(Server.serve_client)
+              and 'EOFError' in _names(Server.serve_client))),
+    ('Server._handle_request sends #RETURN and #TRACEBACK',
+     lambda: {'#RETURN', '#TRACEBACK'} <= _strings(Server._handle_request)),
+    ('convert_to_error reads #ERROR, #TRACEBACK and #UNSERIALIZABLE',
+     lambda: {'#ERROR', '#TRACEBACK', '#UNSERIALIZABLE'} <= _strings(convert_to_error)),
+    ('BaseProxy._callmethod reads #RETURN and #PROXY', lambda: {'#RETURN', '#PROXY'} <= _strings(BaseProxy._callmethod)),
+    ('Server.public names the nine manager requests',
+     lambda: set(Server.public) == {'shutdown', 'create', 'accept_connection', 'get_methods', 'debug_info',
+                                    'number_of_objects', 'dummy', 'incref', 'decref'}),
+    ('The authentication challenge uses send_bytes and recv_bytes, not send and recv',
+     lambda: all({'send_bytes', 'recv_bytes'} <= set(_names(func)) and not set(_names(func)) & _ENVELOPE
+                 for func in (deliver_challenge, answer_challenge))),
+    ('_ConnectionBase.send and recv frame through _send_bytes and _recv_bytes',
+     lambda: ({'_check_closed', '_check_writable', '_send_bytes'} <= set(_names(_ConnectionBase.send))
+              and {'_check_closed', '_check_readable', '_recv_bytes'} <= set(_names(_ConnectionBase.recv)))),
+    ('Token(typeid, address, id)',
+     lambda: Token.__slots__ == ('typeid', 'address', 'id')
+     and _parameters(Token.__init__) == ['self', 'typeid', 'address', 'id']),
 )
 
 
@@ -600,12 +798,33 @@ def _complete_handshake(ssl_sock: ssl.SSLSocket, deadline_at: float) -> None:
     ssl_sock.settimeout(None)
 
 
-class _InProcessServer(Server):
+class _ManagerServer(Server):
+    """
+    The stock :class:`multiprocessing.managers.Server`, but each connection's first request is checked
+    explicitly: unless it names one of the manager's public requests (:data:`PUBLIC_REQUESTS`), the
+    connection refuses it as a message outside the vocabulary and closes, before the stock handler sees
+    it. The check holds under any interpreter flags, including Python's optimisation flag.
+
+    A queue manager's server is always this class: in a process of its own or built by ``get_server``
+    (``SecureManager._Server``), and in-process (:class:`_InProcessServer`).
+    """
+
+    def _handle_request(self: _ManagerServer, c) -> None:
+        """Serve a connection's first request as the stock server does, taking it through
+        :meth:`_EnvelopeCodec._recv_request`."""
+        c.recv = c._recv_request
+        super()._handle_request(c)
+
+
+class _InProcessServer(_ManagerServer):
     """
     A :class:`multiprocessing.managers.Server` served by daemon threads of the calling process.
 
-    Construction (bind and listen) and per-connection request handling are the stock ones, so the
-    wire protocol, authentication handshake and TLS layer are exactly those of a forked manager.
+    Construction (bind and listen) and per-connection request handling are those of
+    :class:`_ManagerServer`, so the manager protocol, authentication handshake, codec, TLS layer and the
+    check of each connection's first request are exactly those of a forked manager. A connection that
+    refuses a message outside the queue vocabulary closes itself and ends its handler; it is logged
+    once, naming the peer, and the other connections are served as before.
     The accept loop is our own: unlike ``serve_forever`` it never exits the process or touches
     ``sys.stdout``/``sys.stderr``, and :meth:`stop` releases the port and cuts live connections
     without waiting on any thread.
@@ -805,7 +1024,8 @@ class _InProcessServer(Server):
                         f'{REFUSAL_WARNING_INTERVAL:g} seconds are logged at DEBUG')
 
     def handle_request(self: _InProcessServer, conn, peer: Optional[Tuple[str, int]] = None) -> None:
-        """Serve one connection, then forget and close it; log a client refused as too old."""
+        """Serve one connection, then forget and close it; log a connection refused for a message outside
+        the queue vocabulary, or a client refused as too old."""
         try:
             self._handle_request(conn)
         except SystemExit:
@@ -815,6 +1035,9 @@ class _InProcessServer(Server):
             with self._lock:
                 self._live.discard(conn)
             conn.close()
+            refusal = getattr(conn, 'refusal', None)
+            if refusal is not None:
+                log.warning(f'Refused a queue connection from {_peer_text(peer)}: {refusal}')
             if getattr(_refusals, 'too_old', False):
                 _refusals.too_old = False
                 where = f'{peer[0]}:{peer[1]}' if isinstance(peer, tuple) and len(peer) == 2 else 'unknown peer'
@@ -1007,9 +1230,24 @@ class SecureManager(BaseManager):
     serializer so that the stock multiprocessing machinery automatically picks our
     :class:`SecureListener` and :func:`secure_client` for both the server-side listener and
     every per-proxy RPC connection. When ``tls`` is ``None`` (or inactive), selects the
-    ``hypershell-plain`` serializer: the stock cleartext listener and client, with Nagle's
-    algorithm off on every connection.
+    ``hypershell-plain`` serializer: the cleartext listener and client, with Nagle's algorithm
+    off on every connection. Either way every message is encoded with the queue's codec
+    (:mod:`hypershell.core.codec`), and no other serializer is accepted. Its server, in a process of
+    its own, in-process or built by :meth:`get_server`, refuses a connection whose first request is not
+    one of the manager's public requests, under any interpreter flags.
+
+    The client-side refusals of what a server offers belong to :class:`QueueClient`: code that uses
+    this class directly as a client should register each type with an explicit proxy type and list of
+    methods.
+
+    .. versionchanged:: 2.9.0
+       Messages are encoded with the queue's codec, not pickled, and a ``serializer`` other than
+       these two raises :class:`ValueError`.
     """
+
+    # The server of a manager started in a process of its own (built by BaseManager._run_server) or built by
+    # get_server for its caller to run
+    _Server = _ManagerServer
 
     def __init__(self: SecureManager,
                  address: Optional[Tuple[str, int]] = None,
@@ -1017,10 +1255,34 @@ class SecureManager(BaseManager):
                  *,
                  tls: Optional[TLSConfig] = None,
                  **kwargs: Any) -> None:
-        """Initialize with optional `tls`; flip to TLS serializer only when `tls` is active."""
+        """Initialize with optional `tls`; flip to TLS serializer only when `tls` is active.
+
+        Raises:
+            ValueError: `serializer` is given and is neither of the queue's own two.
+        """
         self._tls = tls if (tls is not None and tls.is_active()) else None
-        kwargs.setdefault('serializer', TLS_SERIALIZER if self._tls is not None else PLAIN_SERIALIZER)
+        serializer = kwargs.setdefault('serializer', TLS_SERIALIZER if self._tls is not None else PLAIN_SERIALIZER)
+        if serializer not in (TLS_SERIALIZER, PLAIN_SERIALIZER):
+            raise ValueError(f'A queue manager speaks only {TLS_SERIALIZER!r} or {PLAIN_SERIALIZER!r}, '
+                             f'not {serializer!r}')
         super().__init__(address=address, authkey=authkey, **kwargs)
+
+    def get_server(self: SecureManager) -> _ManagerServer:
+        """A server for this manager's registry, address, key and serializer, for the caller to run.
+
+        As :meth:`BaseManager.get_server`, but the server is this manager's own server class.
+
+        Raises:
+            ProcessError: the manager has already started or has shut down.
+        """
+        if self._state.value != State.INITIAL:
+            if self._state.value == State.STARTED:
+                raise ProcessError('Already started server')
+            elif self._state.value == State.SHUTDOWN:
+                raise ProcessError('Manager has shut down')
+            else:
+                raise ProcessError('Unknown state {!r}'.format(self._state.value))
+        return self._Server(self._registry, self._address, self._authkey, self._serializer)
 
     def start(self: SecureManager,
               initializer: Optional[Callable[..., Any]] = None,
@@ -1140,8 +1402,7 @@ class QueueInterface(SecureManager, ABC):
     def __init__(self: QueueInterface, config: QueueConfig) -> None:
         """Initialize queue interface."""
         self.config = config
-        # `tls` is forwarded to SecureManager: when None or inactive, the queue speaks the stock
-        # cleartext wire, preserving the existing default.
+        # `tls` is forwarded to SecureManager: when None or inactive, the queue speaks cleartext.
         super().__init__(address=(self.config.host, self.config.port),
                          authkey=self.config.auth.encode('ascii'), tls=self.config.tls)
 
@@ -1170,6 +1431,66 @@ QUEUE_EXPOSED: Final[Tuple[str, ...]] = ('empty', 'full', 'get', 'get_nowait', '
 
 # Methods a remote client may call on the dispatcher.
 DISPATCH_EXPOSED: Final[Tuple[str, ...]] = ('request', 'takes_submissions', 'topology', 'handback')
+
+
+def _proxy_method(name: str) -> Callable[..., Any]:
+    """A proxy method that calls the remote method `name`."""
+    def method(self: BaseProxy, /, *args: Any, **kwds: Any) -> Any:
+        return self._callmethod(name, args, kwds)
+    method.__name__ = method.__qualname__ = name
+    return method
+
+
+@cache
+def _proxy_type(typeid: str, names: Tuple[str, ...]) -> Type[BaseProxy]:
+    """The proxy class for `typeid` with one method for each of `names`, which are always a client's own."""
+    namespace: Dict[str, Any] = {name: _proxy_method(name) for name in names}
+    namespace['_exposed_'] = names
+    return type(f'QueueProxy[{typeid}]', (BaseProxy, ), namespace)
+
+
+class _ClientProxy:
+    """
+    The proxy type a queue client registers for one type id: it builds each proxy from the client's own
+    method names, never from the names its server sends.
+
+    The manager calls it, as it would call a proxy class, with a new object's token and the method names
+    the server offers for it (``exposed``). Those names are only compared with the client's own (as a set,
+    since the proxy's methods and their order are the client's): anything but a tuple of names, or a name
+    outside the client's own, is refused with :class:`QueueVersionError` before any proxy exists. The
+    proxy has each of the client's own methods that the server offers: all of them from a server of this
+    version, fewer from one that offers fewer (a caller that looks such a method up goes without it).
+    """
+
+    def __init__(self: _ClientProxy, typeid: str, names: Tuple[str, ...]) -> None:
+        """Keep the client's own `names` for `typeid` and build the proxy class that has all of them."""
+        self.typeid = typeid
+        self.names = names
+        _proxy_type(typeid, names)
+
+    def __call__(self: _ClientProxy, token: Token, serializer: str, manager: Optional[BaseManager] = None,
+                 authkey: Optional[bytes] = None, exposed: Any = None, incref: bool = True,
+                 manager_owned: bool = False) -> BaseProxy:
+        """A proxy for `token` with the client's own methods that `exposed` offers.
+
+        Raises:
+            QueueVersionError: `exposed` is not a tuple of names, or offers a name outside the client's own.
+        """
+        if (type(exposed) is not tuple or any(type(name) is not str for name in exposed)
+                or not set(exposed) <= set(self.names)):
+            raise QueueVersionError(f'Server at {_peer_text(token.address)} offers methods on {self.typeid} '
+                                    f'that this version does not; run matching server and client versions')
+        names = tuple(name for name in self.names if name in exposed)
+        return _proxy_type(self.typeid, names)(token, serializer, manager=manager, authkey=authkey,
+                                               incref=incref, manager_owned=manager_owned)
+
+
+# The proxy type a queue client registers for each object its server creates.
+_CLIENT_PROXIES: Final[Dict[str, _ClientProxy]] = {
+    **{f'_get_{name}': _ClientProxy(f'_get_{name}', QUEUE_EXPOSED)
+       for name in ('scheduled', 'completed', 'heartbeat', 'confirmed')},
+    '_get_dispatch': _ClientProxy('_get_dispatch', DISPATCH_EXPOSED),
+}
 
 
 def _provider(obj: Any) -> Callable[[], Any]:
@@ -1274,15 +1595,13 @@ class QueueClient(QueueInterface):
         """Connect to server using unique client ID for token generation.
 
         The first queue is created with this client's work-request protocol, so a server that does
-        not speak it is found before anything else is done. The proxies' finalizer is
-        :func:`_decref`: in a process that serves queues itself, a decref finalized on the server
-        side is sent by the decref sender.
+        not speak it is found before anything else is done. Each proxy is built from this client's own
+        method names (see :class:`_ClientProxy`); a server that offers any other is refused with
+        :class:`QueueVersionError`. The proxies' finalizer is :func:`_decref`: in a process that serves
+        queues itself, a decref finalized on the server side is sent by the decref sender.
         """
-        self.register('_get_scheduled')
-        self.register('_get_completed')
-        self.register('_get_heartbeat')
-        self.register('_get_confirmed')
-        self.register('_get_dispatch')
+        for typeid, proxytype in _CLIENT_PROXIES.items():
+            self.register(typeid, proxytype=proxytype, exposed=proxytype.names)
         super().connect()
         self._dispatcher_lock = threading.Lock()
         try:

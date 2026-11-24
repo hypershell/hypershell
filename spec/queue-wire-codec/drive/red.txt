@@ -1,0 +1,77 @@
+# queue-wire-codec: tests that must fail on the base build (894bccb0, whose src is develop's) for what they check.
+# Checked by the landed checker, read-only, from the repository root:
+#   RED_LIST=spec/queue-wire-codec/drive/red.txt RED_BASE_REV=894bccb0 sh spec/relay-hardening/drive/red_check.sh
+# One pytest node id per line. Each test fails on the base by an assertion: a session whose ends unpickle
+# what they receive (recorded, then asserted), a frame the base answers instead of refusing, a client
+# that connects where it must be refused by name, a manager that accepts the stock serializers.
+
+# R1, R3: a whole session, TLS and cleartext, unpickles nothing.
+tests/test_queue_codec.py::test_session_unpickles_nothing[no-tls]
+tests/test_queue_codec.py::test_session_unpickles_nothing[tls]
+
+# R2: a frame outside the vocabulary closes its connection with one WARNING; a client refuses one as fatal.
+tests/test_queue_codec.py::test_server_refuses_frame_outside_vocabulary[no-tls-unknown-tag-first]
+tests/test_queue_codec.py::test_server_refuses_frame_outside_vocabulary[no-tls-unknown-tag-serving]
+tests/test_queue_codec.py::test_server_refuses_frame_outside_vocabulary[no-tls-two-key-tag-first]
+tests/test_queue_codec.py::test_server_refuses_frame_outside_vocabulary[no-tls-two-key-tag-serving]
+tests/test_queue_codec.py::test_server_refuses_frame_outside_vocabulary[no-tls-non-str-key-first]
+tests/test_queue_codec.py::test_server_refuses_frame_outside_vocabulary[no-tls-non-str-key-serving]
+tests/test_queue_codec.py::test_server_refuses_frame_outside_vocabulary[no-tls-bytes-above-ff-first]
+tests/test_queue_codec.py::test_server_refuses_frame_outside_vocabulary[no-tls-bytes-above-ff-serving]
+tests/test_queue_codec.py::test_server_refuses_frame_outside_vocabulary[no-tls-depth-9-first]
+tests/test_queue_codec.py::test_server_refuses_frame_outside_vocabulary[no-tls-depth-9-serving]
+tests/test_queue_codec.py::test_server_refuses_frame_outside_vocabulary[no-tls-65-elements-first]
+tests/test_queue_codec.py::test_server_refuses_frame_outside_vocabulary[no-tls-65-elements-serving]
+tests/test_queue_codec.py::test_server_refuses_frame_outside_vocabulary[no-tls-nan-first]
+tests/test_queue_codec.py::test_server_refuses_frame_outside_vocabulary[no-tls-nan-serving]
+tests/test_queue_codec.py::test_server_refuses_frame_outside_vocabulary[no-tls-bad-utf8-first]
+tests/test_queue_codec.py::test_server_refuses_frame_outside_vocabulary[no-tls-bad-utf8-serving]
+tests/test_queue_codec.py::test_server_refuses_frame_outside_vocabulary[no-tls-bad-json-first]
+tests/test_queue_codec.py::test_server_refuses_frame_outside_vocabulary[no-tls-bad-json-serving]
+tests/test_queue_codec.py::test_server_refuses_frame_outside_vocabulary[no-tls-trailing-data-first]
+tests/test_queue_codec.py::test_server_refuses_frame_outside_vocabulary[no-tls-trailing-data-serving]
+tests/test_queue_codec.py::test_server_refuses_frame_outside_vocabulary[no-tls-empty-first]
+tests/test_queue_codec.py::test_server_refuses_frame_outside_vocabulary[no-tls-empty-serving]
+tests/test_queue_codec.py::test_server_refuses_frame_outside_vocabulary[tls-unknown-tag-first]
+tests/test_queue_codec.py::test_server_refuses_frame_outside_vocabulary[tls-unknown-tag-serving]
+tests/test_queue_codec.py::test_server_refuses_frame_outside_vocabulary[tls-two-key-tag-first]
+tests/test_queue_codec.py::test_server_refuses_frame_outside_vocabulary[tls-two-key-tag-serving]
+tests/test_queue_codec.py::test_server_refuses_frame_outside_vocabulary[tls-non-str-key-first]
+tests/test_queue_codec.py::test_server_refuses_frame_outside_vocabulary[tls-non-str-key-serving]
+tests/test_queue_codec.py::test_server_refuses_frame_outside_vocabulary[tls-bytes-above-ff-first]
+tests/test_queue_codec.py::test_server_refuses_frame_outside_vocabulary[tls-bytes-above-ff-serving]
+tests/test_queue_codec.py::test_server_refuses_frame_outside_vocabulary[tls-depth-9-first]
+tests/test_queue_codec.py::test_server_refuses_frame_outside_vocabulary[tls-depth-9-serving]
+tests/test_queue_codec.py::test_server_refuses_frame_outside_vocabulary[tls-65-elements-first]
+tests/test_queue_codec.py::test_server_refuses_frame_outside_vocabulary[tls-65-elements-serving]
+tests/test_queue_codec.py::test_server_refuses_frame_outside_vocabulary[tls-nan-first]
+tests/test_queue_codec.py::test_server_refuses_frame_outside_vocabulary[tls-nan-serving]
+tests/test_queue_codec.py::test_server_refuses_frame_outside_vocabulary[tls-bad-utf8-first]
+tests/test_queue_codec.py::test_server_refuses_frame_outside_vocabulary[tls-bad-utf8-serving]
+tests/test_queue_codec.py::test_server_refuses_frame_outside_vocabulary[tls-bad-json-first]
+tests/test_queue_codec.py::test_server_refuses_frame_outside_vocabulary[tls-bad-json-serving]
+tests/test_queue_codec.py::test_server_refuses_frame_outside_vocabulary[tls-trailing-data-first]
+tests/test_queue_codec.py::test_server_refuses_frame_outside_vocabulary[tls-trailing-data-serving]
+tests/test_queue_codec.py::test_server_refuses_frame_outside_vocabulary[tls-empty-first]
+tests/test_queue_codec.py::test_server_refuses_frame_outside_vocabulary[tls-empty-serving]
+tests/test_queue_codec.py::test_client_refuses_reply_outside_vocabulary[no-tls]
+tests/test_queue_codec.py::test_client_refuses_reply_outside_vocabulary[tls]
+tests/test_queue_codec.py::test_link_fails_at_once_on_reply_outside_vocabulary[no-tls]
+tests/test_queue_codec.py::test_link_fails_at_once_on_reply_outside_vocabulary[tls]
+
+# R6: both connection classes decode with the codec; the manager takes only its own serializers.
+tests/test_queue_codec.py::test_connections_decode_with_the_codec
+tests/test_queue_codec.py::test_secure_manager_refuses_other_serializers[pickle]
+tests/test_queue_codec.py::test_secure_manager_refuses_other_serializers[xmlrpclib]
+
+# R5: peers of a release before 2.9.0a10 are refused by name, both ways, and the launch ends at once.
+tests/test_queue_codec.py::test_old_peer_client_is_refused_by_name[no-tls]
+tests/test_queue_codec.py::test_old_peer_client_is_refused_by_name[tls]
+tests/test_queue_codec.py::test_old_peer_refused_whatever_the_environment
+tests/test_queue_codec.py::test_old_peer_server_is_refused_by_name[no-tls]
+tests/test_queue_codec.py::test_old_peer_server_is_refused_by_name[tls]
+tests/test_queue_codec.py::test_old_peer_server_fails_link_at_once[no-tls]
+tests/test_queue_codec.py::test_old_peer_server_fails_link_at_once[tls]
+tests/test_dispatch_version.py::test_old_peer_stock_client_is_refused_while_new_client_works
+tests/test_cluster_launch.py::test_old_peer_client_refused_under_new_launcher[launcher]
+tests/test_cluster_launch.py::test_old_peer_client_refused_under_new_launcher[ssh]

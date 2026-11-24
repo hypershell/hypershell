@@ -16,11 +16,12 @@ Subcommands:
                                         builds, TLS on and off: identical normalised task tables,
                                         groups run in order, clean exits, and byte-identical
                                         ``--help`` output (unless ``--skip-help``).
-    skew    --new REF --old REF...      Version skew on the work-request protocol, TLS on and off:
-                                        an old client against a new server exits within the bound,
-                                        is logged as too old, and a concurrent new client finishes
-                                        every task; a new client against an old server exits
-                                        non-zero within the bound with one version error.
+    skew    --new REF --old REF...      Version skew against a release before 2.9.0a10, TLS on and
+                                        off: an old client against a new server exits within the
+                                        bound, the server logs its refusal naming the older queue
+                                        framing, and a concurrent new client finishes every task; a
+                                        new client against an old server exits non-zero within the
+                                        bound with one version error naming the older framing.
     gate    --base REF --feature REF    Throughput and footprint, interleaved and repeated; with
                                         ``--min-ratio R`` a config passes only if the feature's
                                         median is at least R times the base's.
@@ -390,6 +391,10 @@ def client_args(site: Site) -> List[str]:
     return ['client', '-H', 'localhost', '-p', str(site.port), *site.tls_args()]
 
 
+OLDER_FRAMING = 'queue framing of a release before 2.9.0a10'
+"""What both sides name when a peer of a release before 2.9.0a10 is refused."""
+
+
 def old_client_new_server(new: Path, old: Path, label: str, tls: bool, args: argparse.Namespace) -> bool:
     """An old client is turned away in bounded time while a new client finishes every task."""
     site = Site(args.workdir, f'skew-old-client-{label}', tls)
@@ -408,12 +413,13 @@ def old_client_new_server(new: Path, old: Path, label: str, tls: bool, args: arg
         for proc in procs:
             kill_group(proc)
     log_text = (site.path / 'server.log').read_text(errors='replace')
-    refused = log_text.count('Client too old')
+    refused = sum('Refused a queue connection from' in line and OLDER_FRAMING in line
+                  for line in log_text.splitlines())
     rows = site.rows()
     finished = len(rows) == args.tasks and all(r['exit_status'] == 0 and r['completion_time'] for r in rows)
     passed = old_rc not in ('timeout', 0) and refused >= 1 and new_rc == 0 and server_rc == 0 and finished
     print(f'skew old client {label} -> new server, tls={"on" if tls else "off"}: old client rc {old_rc} '
-          f'in {old_s:.1f} s (bound {args.bound:g}), "too old" logged {refused}x, new client rc {new_rc}, '
+          f'in {old_s:.1f} s (bound {args.bound:g}), refusal logged {refused}x, new client rc {new_rc}, '
           f'server rc {server_rc}, {sum(r["exit_status"] == 0 for r in rows)}/{args.tasks} tasks done '
           f'-> {"PASS" if passed else "FAIL"}')
     return passed
@@ -434,7 +440,7 @@ def new_client_old_server(new: Path, old: Path, label: str, tls: bool, args: arg
             kill_group(proc)
     lines = (site.path / 'new-client.log').read_text(errors='replace').splitlines()
     critical = [line for line in lines if line.startswith('CRITICAL')]
-    named = len(critical) == 1 and 'work-request protocol' in critical[0]
+    named = len(critical) == 1 and OLDER_FRAMING in critical[0]
     passed = rc not in ('timeout', 0) and named
     print(f'skew new client -> old server {label}, tls={"on" if tls else "off"}: rc {rc} in {seconds:.1f} s '
           f'(bound {args.bound:g}), critical lines {len(critical)}'

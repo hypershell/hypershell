@@ -4,8 +4,10 @@
 """Version skew on the work-request protocol: old clients are refused, old servers are named.
 
 An old client is one that registers only the four queues and creates `_get_scheduled()` with no
-argument first, as every release before the work-request protocol does. An old server is one whose
-registry serves only the four queues.
+argument first, as every release before the work-request protocol does; here it speaks this release's
+queue framing, so the protocol check itself is what refuses it. An old server is one whose registry
+serves only the four queues. A client of a release before 2.9.0a10 speaks the earlier, pickle framing
+and is refused before it reaches the protocol check.
 """
 
 
@@ -45,12 +47,20 @@ def config(port: int = 0) -> QueueConfig:
     return QueueConfig(host='127.0.0.1', port=port, auth=AUTH, size=2)
 
 
-class OldClient(BaseManager):
-    """A client of a release before the work-request protocol: four queues, `_get_scheduled()` first."""
+class OldClient(SecureManager):
+    """A client without the work-request protocol: four queues, `_get_scheduled()` first, in this release's framing."""
 
 
 for _name in NAMES:
     OldClient.register(f'_get_{_name}')
+
+
+class StockClient(BaseManager):
+    """A client of a release before 2.9.0a10: the same queues over the pickle framing."""
+
+
+for _name in NAMES:
+    StockClient.register(f'_get_{_name}')
 
 
 @fixture
@@ -86,7 +96,7 @@ def ask(dispatcher, wait: float = 0.0) -> dict:
 def test_dispatcher_remote_surface_is_pinned() -> None:
     """A remote client may call exactly `request`, `takes_submissions`, `topology` and `handback`, nothing else.
 
-    The surface is pickle-framed RPC: adding a method to it or dropping one must change this test, both
+    The surface is the queue's RPC: adding a method to it or dropping one must change this test, both
     the declared tuple and the surface a connected client is handed.
     """
     surface = ('request', 'takes_submissions', 'topology', 'handback')
@@ -130,6 +140,35 @@ def test_old_client_is_refused_while_new_client_works(records: List[logging.LogR
         time.sleep(0.2)
         assert len(too_old(records)) == 1
         assert 'work-request protocol' in too_old(records)[0].getMessage()
+
+
+@mark.unit
+def test_old_peer_stock_client_is_refused_while_new_client_works(records: List[logging.LogRecord]) -> None:
+    """A client of a release before 2.9.0a10 is refused at its first request with one error naming the version
+    mismatch, before the work-request protocol check; the server logs one WARNING naming it and serves a new
+    client meanwhile."""
+    with QueueServer(config()) as server:
+        server.dispatcher.stage(DEFAULT_ZONE_ID, [('t1', '{"id": "t1"}')])
+        new = QueueClient(config(server.address[1]))
+        new.connect()
+        old = StockClient(address=('127.0.0.1', server.address[1]), authkey=AUTH.encode(), serializer='pickle')
+        start = time.monotonic()
+        with pytest.raises(RuntimeError, match='before 2.9.0a10'):
+            old.connect()
+        assert time.monotonic() - start < 5
+        assert [task['id'] for task in ask(new.dispatcher)['tasks']] == ['t1']
+        assert wait_for(lambda: refused(records))
+        time.sleep(0.2)
+    warnings = refused(records)
+    assert len(warnings) == 1 and 'before 2.9.0a10' in warnings[0]
+    assert warnings[0].startswith('Refused a queue connection from 127.0.0.1:')
+    assert too_old(records) == []
+
+
+def refused(records: List[logging.LogRecord]) -> List[str]:
+    """The refusals of a connection among `records`."""
+    return [r.getMessage() for r in records
+            if r.levelno == logging.WARNING and r.getMessage().startswith('Refused a queue connection')]
 
 
 def provider(obj):

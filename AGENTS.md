@@ -186,7 +186,8 @@ share the same queue objects. That loop leans on CPython privates; `tests/test_q
 `TestPrivateInternals` pins them. Remote clients see a pinned nine-method surface (`QUEUE_EXPOSED`)
 on the queues and a pinned four-method surface (`DISPATCH_EXPOSED`: `request`,
 `takes_submissions`, `topology` and `handback`) on the dispatcher; `tests/test_dispatch_version.py` pins the latter, so a
-method added to or dropped from that pickle-framed RPC surface fails a test.
+method added to or dropped from that RPC surface fails a test. Every message on it is encoded by the
+queue's codec (`core/codec.py`): JSON over a closed vocabulary of plain values, never pickled.
 
 **Two modes change the picture — check for them before assuming DB behavior:**
 - `in_memory` (in-memory SQLite): the `Scheduler` is `None` and the server **skips all DB
@@ -389,8 +390,8 @@ seen they steer every polling FSM toward shutdown. **Do not add stray `reset_sig
   handshake are handled by threads of the server process itself (not a forked manager child). The
   server's TLS context lives on its own listener, never in the process-wide slot that clients
   install (`core/tls.py` `install_process_context`), so a same-process client with another TLS
-  config cannot affect it. The wire, auth and TLS behaviour are those of the stock manager,
-  unchanged. A failure to start serving (unsupported CPython internals, bind or listen error)
+  config cannot affect it. The framing, auth and TLS behaviour are those of the stock manager;
+  each message inside the framing is the queue codec's (see *Wire format*). A failure to start serving (unsupported CPython internals, bind or listen error)
   raises `QueueServerError` from `QueueServer.start`, which `ServerThread.start` re-raises. Since
   every connection's descriptor lives in the server process, the accept loop refuses a connection
   that would use the last `RESERVE` descriptors below the soft open-file limit (one WARNING per
@@ -412,17 +413,36 @@ seen they steer every polling FSM toward shutdown. **Do not add stray `reset_sig
   count). Every other decref is the stock one, on the finalizing thread. A forked child drops the marks and waiting decrefs it inherits.
 - **Every queue TCP connection sets `TCP_NODELAY` on both ends where the platform allows it**
   (`core/queue.py` `_no_delay`): TLS in `SecureListener.accept` and `secure_client`, cleartext
-  through the `hypershell-plain` serializer's `(Listener, Client)` pair. The cleartext pair reaches
-  the stock connection's socket through a duplicated descriptor (skipped where there is none, as on
-  Windows) and puts back the descriptor's blocking mode, which a process default socket timeout
-  would otherwise clear. The client writes twice before a read (the handshake's last message, then
+  in `_PlainListener.accept` and `_plain_client`, each handing over a `_PlainConnection`. The
+  listener reaches the stock connection's socket through a duplicated descriptor (skipped where there
+  is none, as on Windows) and puts back the descriptor's blocking mode, which a process default
+  socket timeout would otherwise clear; the client dials its own blocking socket. The client writes twice before a read (the handshake's last message, then
   its first request); the server does so only under TLS 1.3 (its session tickets, then the
   challenge). With Nagle's algorithm on, that second write waits out the peer's delayed ACK (about
   40 ms on Linux) on every new connection. It is a socket option only; the wire is unchanged.
-- **Wire format:** the multiprocessing `BaseManager` RPC **framing is `pickle`** (an RCE
-  surface — a party who reaches the port *and* holds the key, or an active MITM in `insecure`
-  mode, can do more than enqueue tasks). HyperShell's **payloads are JSON** (`core/types`,
-  `serialize_tasks`, `heartbeat.pack`). Both facts matter; don't conflate them.
+- **Wire format:** the multiprocessing `BaseManager` RPC envelope (each request, reply and proxy
+  token) is encoded by **`core/codec.py`**: JSON over a closed vocabulary (`None`, `bool`, `int`,
+  finite `float`, `str`, `bytes` as one code point per byte, tuple, `list`, `str`-keyed `dict`,
+  `Token`, `queue.Empty`/`queue.Full`/`RemoteError`; any other exception crosses as `RemoteError`
+  text), at most 8 containers deep and 64 elements wide. Both connection classes override only
+  `send`/`recv` (`_EnvelopeCodec`); the 4-byte framing and the HMAC challenge are the stock ones.
+  A message outside the vocabulary closes its connection: a server logs one WARNING naming the peer
+  and serves the rest; a client raises `QueueVersionError` (fatal, exit status 5). A server's
+  connection takes its first request through `_recv_request` (armed by `_ManagerServer`, the server
+  class of every queue manager): one not naming a `Server.public` request is refused the same way,
+  checked explicitly so it holds under `python -O`. Never rely on an `assert` for a peer's input. A
+  `RemoteError` carries at least one text; one without is refused. A pickle frame
+  (first byte `0x80`, a release before 2.9.0a10) is never decoded: a server answers it with the one
+  fixed `OLD_PEER_REPLY` and closes; a client raises `QueueVersionError`. Nothing re-enables pickle
+  decoding. A `QueueClient` builds every proxy from its own method lists (`QUEUE_EXPOSED`,
+  `DISPATCH_EXPOSED`) through `_ClientProxy`, never `AutoProxy`: the method names a server's `create`
+  reply offers are only compared with the client's own, and any outside them raise `QueueVersionError`
+  (a server offering fewer gets a proxy with fewer, which the relay's `getattr` lookups of `topology`
+  and `handback` rely on). A `#PROXY` reply on a client's connection, as a tuple or as a list, is
+  refused like a message outside the vocabulary, since a queue client never asks for one. Never
+  register a client typeid without its own method list. HyperShell's **payloads are JSON** too
+  (`core/types`, `serialize_tasks`, `heartbeat.pack`), carried as opaque `bytes`/`str` leaves of the
+  envelope: two layers, don't conflate them. A peer holding the key can still call the exposed queue and dispatcher methods.
 - **No mTLS** — the server authenticates to the client, the client authenticates via the
   shared key; there is no client-certificate identity (`verify_mode=CERT_NONE`).
 - **Distributed-TLS pitfall:** `'<auto>'` only works on a single host / shared filesystem. A
@@ -468,8 +488,8 @@ seen they steer every polling FSM toward shutdown. **Do not add stray `reset_sig
 - **`cluster/launch.py` `client_launch()` is the one client-invocation builder** for every
   mode that starts clients as processes (`RemoteCluster`, `AutoScalingCluster`, `SSHCluster`):
   it owns the shared client options and the key handoff, so a change to launched-client
-  arguments goes there (and only options a 2.9.0a4 client accepts may be emitted; a contract
-  test pins this). One value is a sanctioned exception: `plain_rate` emits a whole `-R` rate as an
+  arguments goes there (and only options a 2.9.0a4 client accepts may be emitted, the option
+  floor; a contract test pins this, though the oldest client that can connect is 2.9.0a10). One value is a sanctioned exception: `plain_rate` emits a whole `-R` rate as an
   integer word, which a 2.9.0a4 client reads, and a fractional one as a plain decimal, which needs
   a client of 2.9.0 or later. `LocalCluster` runs its clients in-process and builds no argv. In JSON
   mode, clients must be sent `DEFAULT_TEMPLATE` (never the user template) to avoid double
@@ -688,8 +708,9 @@ compatibility until v3, but are never referenced.
   and shutdown/sentinel ordering.
 - **`client.py`** — FSMs, process-global resource counters under `executor_lock`, sticky
   `RECEIVED`, shutdown order — and no dedicated test file.
-- **`core/queue.py` + `core/tls.py`** — pickle-framed RPC (RCE surface); `SecureConnection`
-  framing must stay byte-compatible with `multiprocessing.connection`; per-process TLS context
+- **`core/queue.py` + `core/codec.py` + `core/tls.py`** — the RPC envelope's codec sits under every
+  queue message (closed vocabulary; never unpickle a peer's bytes); `SecureConnection` and
+  `_PlainConnection` framing must stay byte-compatible with `multiprocessing.connection`; per-process TLS context
   install; no mTLS; keep the post-handshake fingerprint check.
 - **`core/fsm.py|thread.py|signal.py`** — load-bearing, untested; the vestigial `__should_halt`
   flag and sticky global `RECEIVED` are subtle.
