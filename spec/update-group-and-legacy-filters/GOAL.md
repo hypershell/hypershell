@@ -133,7 +133,8 @@ Each is a change from `develop` `03a02bd8` and from 2.8.x.
 - **Applying the filters in the single-task form** (C1): the conditional write is the filtered
   form's job.
 - **Other columns.** `hs update` also stores `x` in `exit_status`, `attempt`, `cores`, `memory` and
-  `timeout` (reproduced, exit 0). This cycle is the group only; C3 proposes a seed.
+  `timeout` (reproduced, exit 0). This cycle is the group only (C3); typed writes to those
+  columns are the seed `issues/update-typed-columns.md` (2.9.0), filed by the foreman.
 - **A `group` tag.** `hs update group:x` writes a tag named `group`, not the column, and a retry
   copies it as a tag (`Task.new_retry`). Unchanged.
 - **Rows already stored** with a non-integer or out-of-range group are not migrated or refused; the
@@ -149,14 +150,13 @@ Each is a change from `develop` `03a02bd8` and from 2.8.x.
 
 ## Clarifications
 
-Proposed in shaping on 2026-11-24 by the shaping agent, who could not ask the maintainer. Items
-marked `[NEEDS CLARIFICATION]` await the foreman's gate.
+Proposed in shaping on 2026-11-24 by the shaping agent, who could not ask the maintainer. C1–C3,
+marked for the gate in shaping, were resolved at the GOAL gate on 2026-11-24 (below).
 
 - **C0 — One GOAL for both seeds**, slug `update-group-and-legacy-filters`, kind `fix`, appetite
   `small`, target 2.9.0 for 2.9.0a10 (foreman's brief, 2026-11-24). Both seeds marked
   `adopted:update-group-and-legacy-filters`.
-- **C1 — Apply or refuse.** `[NEEDS CLARIFICATION: does the single-task form apply the selection
-  options, or refuse them?]` Options: **(a) refuse, exit 2** (R3 as written); **(b) apply**, writing
+- **C1 — Apply or refuse. Resolved 2026-11-24** (maintainer): **(a) refuse, exit 2.** Options were: **(a) refuse, exit 2** (R3 as written); **(b) apply**, writing
   the task only when it matches, which still has to refuse or define `-l`, `-s` and `--desc` on one
   task, and has to say what a non-match reports. **Recommended: (a).** It is #119's ruling for the
   same form with the action options: same check, same place, same status. The seed's concern, that
@@ -164,21 +164,22 @@ marked `[NEEDS CLARIFICATION]` await the foreman's gate.
   the target is 2.9.0, a minor (C5). The guard the user wanted already exists in the filtered form
   (`-w "id == ID"`, verified on `develop`), so (b) would give a legacy form a second way to do it,
   with new semantics to document and test.
-- **C2 — Which options R3 refuses.** `[NEEDS CLARIFICATION: refuse -l, -s and --desc too, and keep
-  -f accepted?]` The seed lists `-l` and `-s` among the filters, and omits `--desc`, which is
+- **C2 — Which options R3 refuses. Resolved 2026-11-24** (foreman, under the maintainer's mandate):
+  all thirteen selection options are refused, and `-f/--no-confirm` stays accepted. The seed lists `-l` and `-s` among the filters, and omits `--desc`, which is
   dropped the same way (reproduced). **Recommended:** refuse all thirteen selection options
   (including `-l`, `-s` and `--desc`, which mean nothing for one task), and keep accepting
   `-f/--no-confirm`, which selects nothing and which the single-task form never needed (it does not
   prompt); refusing it would break scripts that pass `-f` by habit for no safety gain. Alternative:
   refuse only the filters that change what matches (`-w`, `-t`, `-g` and the aliases), and leave
   `-l`, `-s` and `--desc` ignored.
-- **C3 — Other integer columns.** `[NEEDS CLARIFICATION: group only, or every integer column?]`
+- **C3 — Other integer columns. Resolved 2026-11-24** (maintainer): **(a)**, the group only here.
   `exit_status=x`, `attempt=x`, `cores=x`, `memory=x` and `timeout=x` are stored as text too (found
   while verifying). Options: **(a) the group only here, and the foreman files a seed** for typed
   writes to every column; **(b) extend R1–R2 to every integer column.** **Recommended: (a).**
   `memory` and `timeout` have their own grammars at submit time (`4G`, `1:30:00`), so which text
   `hs update` should take for them is a design question, and `cores`, `memory` and `timeout` feed
-  dispatch: that is beyond a small appetite and beyond either seed.
+  dispatch: that is beyond a small appetite and beyond either seed. The foreman files the seed
+  `update-typed-columns`, target 2.9.0.
 - **C4 — Exit status 2 for R2** (the seed's direction): a group change is a command-line argument,
   refused as `-t group:x` and `-g x` are at submit time (#118 C7), and as #119's refusals are. The
   values accepted and refused are #118's (C5 there: `1e3`, `true` and `0x10` refused), so `group=1e3`
@@ -198,6 +199,21 @@ marked `[NEEDS CLARIFICATION]` await the foreman's gate.
   … with the single-task form ID FIELD VALUE"); whether a group refusal and a selection-option
   refusal given together are reported in one message; how R3 tells a selection option was given
   (argparse defaults are `[]`, `None` or `False`).
+
+**Ruled at the GOAL gate** (2026-11-24). Approved by the foreman, gate judge under the maintainer's
+mandate, with the maintainer's own rulings on C1 and C3.
+
+- **C1 (maintainer, 2026-11-24):** refuse, exit 2. The single-task form does not apply selection
+  options; R3 stands as written.
+- **C2:** refuse all thirteen selection options, `-l`, `-s` and `--desc` included, and keep
+  `-f/--no-confirm` accepted. This follows from C1 and leaves no option silently ignored.
+- **C3 (maintainer, 2026-11-24):** this cycle covers `group` only. `exit_status`, `attempt`,
+  `cores`, `memory` and `timeout` go to a new seed, `update-typed-columns`, target 2.9.0, filed by
+  the foreman.
+- **C4–C6:** settled as written: exit status 2 for R2, release 2.9.0, and the single-task group
+  change in R1–R2.
+
+The contract is locked; `hs-plan` designs against it.
 
 ## Related materials
 
