@@ -106,10 +106,10 @@ phases:
     900 uv run --python 3.12 --group docs sphinx-build -W --keep-going -q -E -b html
     docs "${TMPDIR:-/tmp}/docs-html-ugl"
 review:
-  last_reviewed_commit: ''
-  verdict: none
+  last_reviewed_commit: 1d097603
+  verdict: approved
   blocked_reason: ''
-  cycle: 0
+  cycle: 1
 ---
 # TECH.md — `hs update` writes only an integer group, and the single-task form refuses the filters it would ignore
 
