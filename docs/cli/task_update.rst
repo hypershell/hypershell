@@ -63,7 +63,12 @@ Description
    as ``hs submit -g`` does, in the 32-bit range. Any other value exits with status 2 before anything
    is counted, asked or written, and no other change given with it is written. Before, a text,
    fractional or out-of-range group was stored on SQLite, ``1e3`` and ``true`` were stored as 1000
-   and 1, and ``none``, ``null`` and ``nan`` failed with exit status 5 and a traceback.
+   and 1, and ``none``, ``null`` and ``nan`` failed with exit status 5 and a traceback. The
+   single-task form ``hs update ID FIELD VALUE`` with an option that selects tasks (``-w``, ``-t``,
+   ``-g``, ``-l``, ``-s``, ``--desc``, ``-F``, ``-S``, ``-C``, ``-R``, ``-X``, ``--retries`` or
+   ``--signal``) exits with status 2, naming each, and writes nothing; before, it ignored the options
+   and wrote the task. To write a task only if it matches, use the filtered form,
+   ``hs update FIELD=VALUE -w "id == ID" -F``.
 
 .. versionchanged:: 2.9.0
    :pr:`111`: on SQLite, ``-t``/``--with-tag`` with several tag names and no values requires every

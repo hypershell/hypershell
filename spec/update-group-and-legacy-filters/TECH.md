@@ -7,7 +7,7 @@ appetite: small
 status: in_progress
 branch: fix/update-group-and-legacy-filters
 base: develop
-current_phase: P3
+current_phase: P4
 last_updated: '2026-11-24'
 phases:
 - id: P1
@@ -56,7 +56,7 @@ phases:
     -ge 9 && grep -q ''tests/test_update_group.py'' .github/workflows/tests.yml'
 - id: P3
   name: The single-task form refuses selection options (R3, R4, R6 part)
-  status: pending
+  status: done
   satisfies:
   - R3
   - R4
@@ -65,7 +65,7 @@ phases:
   - P2
   parallel: false
   hammerable: false
-  hill: uphill
+  hill: downhill
   verify: sh spec/update-client-retry/drive/bound.sh 1800 uv run pytest -q -p no:cacheprovider
     tests/test_update_refusals.py tests/test_update.py tests/test_contended_recovery.py
     tests/test_main.py && sh spec/update-client-retry/drive/bound.sh 300 .agents/factory/bin/temp_site.sh
@@ -216,14 +216,14 @@ anything else with exit 2 before counting, asking or writing; the help and docs 
 **Goal:** `hs update ID FIELD VALUE` with any of the thirteen selection options exits 2 naming each,
 with or without `-f`, and writes nothing; everything else behaves as before; the help and docs say so.
 
-- [ ] `task.py`: the `(attribute, name)` constant and the identity tests (PLAN §2.2) in `run()`'s
+- [x] `task.py`: the `(attribute, name)` constant and the identity tests (PLAN §2.2) in `run()`'s
       single-task refusal, action options first; the `-w "id == ID"` hint when a selection option is
       named; #119's message unchanged for action options alone.
-- [ ] `UPDATE_HELP`, `docs/_include/task_update_desc.rst`, `docs/_include/task_update_help.rst`
+- [x] `UPDATE_HELP`, `docs/_include/task_update_desc.rst`, `docs/_include/task_update_help.rst`
       ("Legacy Mode"): PLAN §2.3's single-task sentences.
-- [ ] `docs/cli/task_update.rst`: P2's entry gains the options sentence (options ignored and the
+- [x] `docs/cli/task_update.rst`: P2's entry gains the options sentence (options ignored and the
       task written, before).
-- [ ] `ugl_drive.sh`: `legacy` mode.
+- [x] `ugl_drive.sh`: `legacy` mode.
 - **Verify:** see frontmatter: the refusal tests and neighbours; the `legacy` drive; the phrases in
   all three files; no `hs task `; the docs build with `-W`.
 - **Touches:** `src/hypershell/task.py`, `docs/_include/task_update_desc.rst`,

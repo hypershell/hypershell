@@ -975,6 +975,10 @@ UPDATE_HELP = f"""\
   and VALUE as positional arguments remains valid.
   The single-task form takes no --cancel, --revert, --delete or --remove-tag;
   given one, it exits with status 2 and writes nothing.
+  The single-task form takes no option that selects tasks (-w, -t, -g, -l, -s,
+  --desc, -F, -S, -C, -R, -X, --retries, --signal); given one, it exits with
+  status 2 and writes nothing. To write a task only if it matches, use the
+  filtered form: hs update FIELD=VALUE -w "id == ID" -F.
 
 Arguments:
   ARGS...                    Assignment pairs for update.
@@ -1000,6 +1004,33 @@ Options:
   -f, --no-confirm           Do not ask for confirmation.
   -h, --help                 Show this message and exit.\
 """
+
+
+SELECTION_OPTIONS: Final[List[Tuple[str, str]]] = [
+    ('where_clauses', '-w/--where'),
+    ('taglist', '-t/--with-tag'),
+    ('group_filter', '-g/--group'),
+    ('limit', '-l/--limit'),
+    ('order_by', '-s/--order-by'),
+    ('order_desc', '--desc'),
+    ('show_failed', '-F/--failed'),
+    ('show_succeeded', '-S/--succeeded'),
+    ('show_completed', '-C/--completed'),
+    ('show_remaining', '-R/--remaining'),
+    ('show_cancelled', '-X/--cancelled'),
+    ('retry_filter', '--retries'),
+    ('signal_filter', '--signal'),
+]
+"""The options of `hs update` that select tasks, as (attribute, name); the single-task form takes none."""
+
+
+def option_given(value: Any) -> bool:
+    """True when an option's parsed `value` is not its default (`[]`, `None` or `False`); `0` is given."""
+    if isinstance(value, bool):
+        return value is True
+    if isinstance(value, list):
+        return value != []
+    return value is not None
 
 
 def change_value(field: str, text: str) -> Any:
@@ -1090,8 +1121,11 @@ class TaskUpdateApp(Application, SearchableMixin):
             options = [name for name, given in (('--cancel', self.cancel_mode), ('--revert', self.revert_mode),
                                                 ('--delete', self.delete_mode), ('--remove-tag', self.remove_tag))
                        if given]
-            if options:
-                raise ArgumentError(f'Cannot use {", ".join(options)} with the single-task form ID FIELD VALUE')
+            selection = [name for attribute, name in SELECTION_OPTIONS if option_given(getattr(self, attribute))]
+            if options or selection:
+                hint = ' (to write a task only if it matches: hs update FIELD=VALUE -w "id == ID")' if selection else ''
+                raise ArgumentError(f'Cannot use {", ".join(options + selection)} '
+                                    f'with the single-task form ID FIELD VALUE{hint}')
         elif self.delete_mode and (self.update_args or self.remove_tag):
             words = [*self.update_args, *(['--remove-tag', *self.remove_tag] if self.remove_tag else [])]
             raise ArgumentError(f'Cannot use --delete with changes (given: {" ".join(words)})')

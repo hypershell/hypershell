@@ -52,7 +52,25 @@ group)
     pass 'group=07 stores 7, and hs list -g 7 finds it'
     ;;
 legacy)
-    fail 'not built'
+    id=$(field id n:0)
+    hs update "$id" args 'echo changed' -g 99 -w 'exit_status == 7' --limit 1 -F 2> err.txt; status=$?
+    [ "$status" -eq 2 ] || fail "single-task form with selection options exited $status, not 2: $(cat err.txt)"
+    for name in -g/--group -w/--where -l/--limit -F/--failed; do
+        grep -q -- "$name" err.txt || fail "message does not name $name: $(cat err.txt)"
+    done
+    grep -qF -- '-w "id == ID"' err.txt || fail "message does not show the filtered form: $(cat err.txt)"
+    [ "$(field args n:0)" = 'echo 0' ] || fail 'single-task form with selection options wrote the task'
+    pass "hs update ID args 'echo changed' -g 99 -w 'exit_status == 7' --limit 1 -F exits 2, nothing written"
+    hs update "$id" args 'echo changed' -f 2> err.txt || fail "single-task form with -f exited $?: $(cat err.txt)"
+    [ "$(field args n:0)" = 'echo changed' ] || fail 'single-task form with -f did not write'
+    pass "hs update ID args 'echo changed' -f writes"
+    id=$(field id n:1)
+    hs update args='echo guarded' -w "id == $id" -F -f 2> err.txt || fail "guarded write exited $?: $(cat err.txt)"
+    [ "$(field args n:1)" = 'echo 1' ] || fail 'filtered form with -F wrote a task that never ran'
+    hs update args='echo guarded' -w "id == $id" -R -f 2> err.txt || fail "guarded write exited $?: $(cat err.txt)"
+    [ "$(field args n:1)" = 'echo guarded' ] || fail 'filtered form with -R did not write the task'
+    [ "$(field args n:2)" = 'echo 2' ] || fail 'filtered form with -w "id == ID" wrote another task'
+    pass 'hs update FIELD=VALUE -w "id == ID" writes the task only when it matches'
     ;;
 *)
     fail "unknown mode (group or legacy)"

@@ -37,3 +37,7 @@ The legacy interface for updating a single task with the `ID`, `FIELD`,
 and `VALUE` as positional arguments remains valid.
 The single-task form takes no ``--cancel``, ``--revert``, ``--delete`` or ``--remove-tag``;
 given one, it exits with status 2 and writes nothing.
+The single-task form takes no option that selects tasks (``-w``, ``-t``, ``-g``, ``-l``, ``-s``,
+``--desc``, ``-F``, ``-S``, ``-C``, ``-R``, ``-X``, ``--retries``, ``--signal``); given one, it exits
+with status 2 and writes nothing. To write a task only if it matches, use the filtered form:
+``hs update FIELD=VALUE -w "id == ID" -F``.
