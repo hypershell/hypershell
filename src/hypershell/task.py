@@ -46,7 +46,7 @@ from hypershell.core.exceptions import (handle_exception, handle_exception_silen
 from hypershell.core.logging import Logger, HOSTNAME
 from hypershell.core.remote import SSHConnection
 from hypershell.core.signal import exit_status_for_signal
-from hypershell.core.types import smart_coerce, JSONData, to_json_type, parse_time
+from hypershell.core.types import smart_coerce, JSONData, to_json_type, ranged
 from hypershell.core.pretty_print import format_tag, format_json, format_bytes, format_source
 from hypershell.core.tag import Tag
 from hypershell.data.core import Session
@@ -345,7 +345,7 @@ class TaskWaitApp(Application):
     interface.add_argument('uuid')
 
     interval: int = DEFAULT_INTERVAL
-    interface.add_argument('-n', '--interval', type=parse_time, default=interval)
+    ranged(interface, '-n', '--interval', setting='option.interval', default=interval)
 
     print_info: bool = False
     print_status: bool = False
@@ -430,7 +430,7 @@ class TaskRunApp(Application):
     interface.add_argument('argv', nargs='+')
 
     interval: int = DEFAULT_INTERVAL
-    interface.add_argument('-n', '--interval', type=parse_time, default=interval)
+    ranged(interface, '-n', '--interval', setting='option.interval', default=interval)
 
     taglist: List[str] = []
     interface.add_argument('-t', '--tag', nargs='+', dest='taglist')
@@ -654,7 +654,7 @@ class TaskSearchApp(Application, SearchableMixin):
     show_count: bool = False
     guard_interface = interface.add_mutually_exclusive_group()
     guard_interface.add_argument('--all', action='store_true', dest='show_all')
-    guard_interface.add_argument('-l', '--limit', type=int, default=None)
+    ranged(guard_interface, '-l', '--limit', setting='option.limit', default=None)
     guard_interface.add_argument('-c', '--count', action='store_true', dest='show_count')
 
     show_failed: bool = False
@@ -672,10 +672,10 @@ class TaskSearchApp(Application, SearchableMixin):
     # NOTE: --finished retained for backwards compatibility
 
     group_filter: Optional[int] = None
-    interface.add_argument('-g', '--group', type=int, default=None, dest='group_filter')
+    ranged(interface, '-g', '--group', setting='option.group', default=None, dest='group_filter')
 
     part_filter: Optional[int] = None
-    interface.add_argument('--part', type=int, default=None, dest='part_filter')
+    ranged(interface, '--part', setting='option.part', default=None, dest='part_filter')
 
     retry_filter: bool = False
     interface.add_argument('--retries', action='store_true', dest='retry_filter')
@@ -1021,7 +1021,7 @@ class TaskUpdateApp(Application, SearchableMixin):
     interface.add_argument('--desc', action='store_true', dest='order_desc')
 
     limit: int = None
-    interface.add_argument('-l', '--limit', type=int, default=None)
+    ranged(interface, '-l', '--limit', setting='option.limit', default=None)
 
     show_failed: bool = False
     show_completed: bool = False
@@ -1036,7 +1036,7 @@ class TaskUpdateApp(Application, SearchableMixin):
     search_alias_interface.add_argument('-X', '--cancelled', action='store_true', dest='show_cancelled')
 
     group_filter: Optional[int] = None
-    interface.add_argument('-g', '--group', type=int, default=None, dest='group_filter')
+    ranged(interface, '-g', '--group', setting='option.group', default=None, dest='group_filter')
 
     retry_filter: bool = False
     interface.add_argument('--retries', action='store_true', dest='retry_filter')

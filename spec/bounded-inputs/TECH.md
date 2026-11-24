@@ -6,7 +6,7 @@ appetite: big
 status: in_progress
 branch: fix/bounded-inputs
 base: develop
-current_phase: P2
+current_phase: P3
 last_updated: '2026-11-24'
 phases:
 - id: P1
@@ -30,7 +30,7 @@ phases:
 - id: P2
   name: 'The table, the parsers and every option: SETTINGS beside KEYS, one parser
     per kind, RangedOption on all 59 numeric options, the advisory tier, help snippets'
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
@@ -42,7 +42,7 @@ phases:
   - P1
   parallel: false
   hammerable: false
-  hill: uphill
+  hill: downhill
   verify: test -n "$HS_TEST_POSTGRES" && python3 spec/submit-input-checks/drive/bounded.py
     2400 uv run pytest -q -p no:cacheprovider tests/test_bounded_table.py tests/test_bounded_parsers.py
     tests/test_bounded_options.py tests/test_group_integer.py tests/test_submit.py
@@ -256,25 +256,37 @@ passes there (the guards).
 **Goal:** `SETTINGS` holds every range and advisory limit; one parser per kind; every numeric option of
 every command reads through it, refuses with the R4 line (exit 2) and advises once.
 
-- [ ] `core/config_schema.py`: `Range`, the classes and `SETTINGS` (PLAN § 2.1), with this file's R1
+- [x] `core/config_schema.py`: `Range`, the classes and `SETTINGS` (PLAN § 2.1), with this file's R1
       changes; the duration and size grammar moved in from `core/types.py`, the size exact; the
       whole-number length check; `parse_setting`, `Range.parse`, `SettingError`, `shown`, `advise`
       and its pending queue (flushed by `HyperShellApp.main` once logging is up).
-- [ ] `core/types.py`: `parse_time`, `parse_bytes`, `parse_delay`, `parse_period`, `parse_rate` as
+- [x] `core/types.py`: `parse_time`, `parse_bytes`, `parse_delay`, `parse_period`, `parse_rate` as
       wrappers over the entries (messages in the R4 form); `RATE_MINIMUM` from `RATE`;
       `RangedOption` and `ranged(...)` raising cmdkit's `ArgumentError`.
-- [ ] `data/model.py`: `GROUP_MIN`/`GROUP_MAX` from `GROUP`; `parse_group`/`ensure_group` keep name,
+- [x] `data/model.py`: `GROUP_MIN`/`GROUP_MAX` from `GROUP`; `parse_group`/`ensure_group` keep name,
       signature and `TaskGroupError`, the body the table's parser (PLAN § 2.6).
-- [ ] Every numeric option to `ranged(...)` (research 01's 59, by command and destination):
+- [x] Every numeric option to `ranged(...)` (research 01's 59, by command and destination):
       `submit.py`, `server.py`, `client.py`, `cluster/__init__.py`, `relay/__init__.py`, `task.py`
       (`hs list -l/-g/--part`, `hs update -l/-g`, `hs wait`/`hs run -n`). Remove the option checks the
       table replaces (`client.py:1786-1790` becomes the floor of `hs client`'s `-T`/`-W` entries,
       the relay's size < 1, the option halves of `check_arguments`); keep the relations.
-- [ ] Help snippets (`docs/_include/*_help.rst`) give each ranged option's range and advisory limit;
+- [x] Help snippets (`docs/_include/*_help.rst`) give each ranged option's range and advisory limit;
       the `versionchanged:: 2.9.0` above each `.. include::` in `docs/cli/*.rst`; completions unchanged
       (`-N` still offers 0, PLAN § 5.1).
-- [ ] Amend tests only where the GOAL changed the behaviour they pin; the red list's option lines,
+- [x] Amend tests only where the GOAL changed the behaviour they pin; the red list's option lines,
       the table and parser tests, the option advisory tests and the help-page docs test pass.
+- **Built (P2 notes):** `Range` keeps a few fields beyond PLAN § 2.1 (`least` for the rate's least non-zero
+  value, `rounds_to` for the period, `signed` for the delay's random form, `per` for the rate's unit, `detail` for
+  the delay's forms). A refusal of a value that is not of its kind at all adds the kind's forms after the value
+  (`; a duration is …`), so the duration, size and delay messages still list them. The `parse_*` wrappers take a
+  `name` (by default `duration`, `size`, `rate`, `autoscale.period`). Tests amended where the GOAL changed the
+  behaviour they pin: a numeric `task.timeout` of `1.5` reads as given (the `Fraction` case dropped); `-n 0` is
+  refused (`test_seconds_option_parsed`); a launched delay past the longest delay is refused by the client option
+  (`test_launched_delay_is_plain_decimal`); the relay's size refusal is the one form (`test_relay_fsm.py`). Two P1
+  test setups fixed: `test_option_advised_once` starts its server with a key, and `-c 1025` on `hs cluster` runs
+  with no output (the host has fewer cores; the task is refused for resources, as before). `bounds_drive.sh`: its
+  refusal count reads the pattern with `grep -e` (a name starting `-c` was taken for an option) and strips the
+  CSV's carriage return.
 - **Verify:** the frontmatter `verify:` (the new table, parser and option suites; the option, help and parser tests of the touched suites; guards;
   `bounds_drive.sh options` and `advise`).
 - **Touches:** `src/hypershell/core/config_schema.py`, `core/types.py`, `data/model.py`, `submit.py`,

@@ -16,11 +16,15 @@ Options
 ``-p``, ``--port`` *NUM*
     Port number (default: 50001).
 
+    Range: 1 to 65,535.
+
     This is an arbitrary choice and simply must be an available port. The default option chosen
     here is typically available on most platforms and is not expected by any known major software.
 
 ``-b``, ``--bundlesize`` *NUM*
     Size of task bundle (default: 1).
+
+    Range: 1 to 2,147,483,647.
 
     The default value allows for greater concurrency and responsiveness on small scales. This is
     used by the `submit` thread to accumulate bundles for either database commits and/or publishing
@@ -36,6 +40,8 @@ Options
 ``-w``, ``--bundlewait`` *SEC*
     Time to wait before flushing tasks (default: 5).
 
+    Range: 0 s to 2,147,483,647 s.
+
     Specify a number of seconds, units ``d``, ``h``, ``m`` and ``s`` in that order, whole or
     fractional (e.g., ``30s``, ``5m``, ``1h30m``, ``1.5h``), or a Slurm time ``MM:SS``,
     ``HH:MM:SS``, ``D-HH``, ``D-HH:MM`` or ``D-HH:MM:SS`` (e.g., ``1:30``). A fraction of a
@@ -50,6 +56,8 @@ Options
 ``-Q``, ``--poll`` *SEC*
     Polling interval between database queries if no tasks are available (default: 30).
 
+    Range: 0 s to 2,147,483,647 s.
+
     Specify a number of seconds, units ``d``, ``h``, ``m`` and ``s`` in that order, whole or
     fractional (e.g., ``30s``, ``5m``, ``1h30m``, ``1.5h``), or a Slurm time ``MM:SS``,
     ``HH:MM:SS``, ``D-HH``, ``D-HH:MM`` or ``D-HH:MM:SS`` (e.g., ``1:30``). A fraction of a
@@ -63,6 +71,8 @@ Options
 
 ``-r``, ``--max-retries`` *NUM*
     Auto-retry failed tasks (default: 0).
+
+    Range: 0 to 32,766. Above 99 it runs with a warning.
 
     If a database is in use, then there is an opportunity to automatically retry failed tasks. A
     task is considered to have failed if it has a non-zero exit status. Setting this value greater
@@ -83,6 +93,8 @@ Options
 ``-c``, ``--task-cores`` *NUM*
     Number of CPU cores required per task (default: none).
 
+    Range: 0 (unconstrained) to 32,767. Above 1,024 it runs with a warning.
+
     When an input *FILE* is provided, a `submit` thread is launched to read and submit tasks.
     This option sets the default core requirement for all submitted tasks.
     Individual tasks can override this with inline comments (e.g., ``#HYPERSHELL: cores:8``).
@@ -91,6 +103,8 @@ Options
 
 ``-m``, ``--task-memory`` *MEM*
     Amount of memory required per task (default: none).
+
+    Range: 0 bytes (unconstrained) to 9,223,372,036,854,775,807 bytes.
 
     When an input *FILE* is provided, a `submit` thread is launched to read and submit tasks.
     This option sets the default memory requirement for all submitted tasks.
@@ -103,6 +117,8 @@ Options
 
 ``-W``, ``--task-timeout`` *SEC*
     Task-level walltime limit in seconds (default: none).
+
+    Range: 0 s to 2,147,483,647 s.
 
     When an input *FILE* is provided, a `submit` thread is launched to read and submit tasks.
     This option sets the default timeout for all submitted tasks. Individual
@@ -185,11 +201,15 @@ Options
 ``-F``, ``--factor`` *VALUE*
     Scaling factor (default: 1).
 
+    Range: 0.000001 to 1,000,000,000. Above 100 it runs with a warning.
+
     The dimensionless multiple of the average task duration that ``--autoscaling=dynamic`` compares
     each zone's estimated time to completion against (its *task pressure*), as for the `cluster`.
 
 ``-P``, ``--period`` *SEC*
     Scaling period, greater than zero (default: 60).
+
+    Range: 0 s (exclusive) to 2,147,483,647 s. Above 3,600 s it runs with a warning.
 
     Specify a number of seconds, units ``d``, ``h``, ``m`` and ``s`` in that order, whole or
     fractional (e.g., ``30s``, ``5m``, ``1h30m``, ``1.5h``), or a Slurm time ``MM:SS``,

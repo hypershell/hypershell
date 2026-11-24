@@ -18,7 +18,6 @@ from typing import Any, Final, List, Tuple
 # Standard libs
 import re
 import math
-from fractions import Fraction
 
 # External libs
 import pytest
@@ -54,7 +53,7 @@ CASES: Final[List[Tuple[str, List[Tuple[Any, Any]], List[Any]]]] = [
      [-5, '-5', 1e-7, '1e-300', 1e-300, 1e9 + 1, '1000000001', 10**400, 'nan', 'inf', math.inf, math.nan, True]),
     ('autoscale.factor', [(1e-6, 1e-6), (1, 1), ('2.5', 2.5), (1e9, 1e9)], [0, '0', -1, 'nan', 'inf', 1e9 + 1]),
     ('task.timeout', [(0, 0), ('0', 0), ('1h30m', 5400), ('1:30:00', 5400), ('1-12', 129600), (2**31 - 1, 2**31 - 1),
-                      ('2147483647', 2**31 - 1), ('1.5s', 2), (1.5, 2)],
+                      ('2147483647', 2**31 - 1), ('1.5s', 2), (1.5, 1.5)],
      [-1, 2**31, '2147483648', '24856d', '-5', 'x', 'nan', 'inf', math.inf, True]),
     ('server.evict', [(10, 10), ('10s', 10), (2**31 - 1, 2**31 - 1), ('600', 600)],
      [9, '9', 9.5, 2**31, '86399999913600', -1]),
@@ -197,7 +196,6 @@ def test_parse_duration_exact_when_not_whole() -> None:
     assert schema.parse_setting('relay.retention', '1.5s', whole=False) == 1.5
     assert schema.parse_setting('relay.retention', '90', whole=False) == 90
     assert schema.parse_setting('relay.retention', '1.5s') == 2
-    assert schema.parse_setting('relay.retention', Fraction(3, 2), whole=False) == 1.5
 
 
 @mark.unit

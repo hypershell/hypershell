@@ -32,7 +32,7 @@ from tests import create_taskfile
 from tests.conftest import free_port
 from tests.bounded_checks import hs_cli, write_config
 from tests.test_config_set_types import config_set, written
-from tests.test_env_config import child_env, run_bounded, start_server, stop_server
+from tests.test_env_config import DIGIT_KEY, child_env, run_bounded, start_server, stop_server
 
 
 LOOPBACK: Final[List[str]] = ['--no-tls', '-H', '127.0.0.1']
@@ -77,7 +77,8 @@ def test_option_advised_once_cluster(temp_site: Path, options: List[str], name: 
     """The run goes on and exits 0, with one WARNING naming the option, the value and the advisory limit."""
     rc, stdout, stderr = cluster_run(temp_site, *options)
     assert rc == exit_status.success, stderr[-4000:]
-    assert stdout.split() == ['hi'], stdout
+    # A task that needs more cores than the host has is refused for resources, as before; the run completes.
+    assert stdout.split() == ([] if options[0] == '-c' else ['hi']), stdout
     assert_advised_once(stderr, name, value, limit)
 
 
@@ -91,7 +92,7 @@ def test_option_advised_once(temp_site: Path, case: str) -> None:
         assert rc == exit_status.success, stderr[-4000:]
         assert_advised_once(stderr, '-F/--factor', "'101'", '100')
         return
-    env = child_env(site)
+    env = child_env(site, HYPERSHELL_SERVER_AUTH=DIGIT_KEY)
     taskfile = create_taskfile(site, ['echo one', 'echo two'])
     server = start_server(site, env, str(taskfile))
     try:

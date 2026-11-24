@@ -71,7 +71,7 @@ from hypershell.core.config import (config, default, find_available_ports, AUTH_
 from hypershell.core.config_schema import Kind, FORMS, read_value
 from hypershell.core.tls import (TLSConfig, TLSError, DEFAULT_HANDSHAKE, handshake_seconds,
                                  from_namespace as tls_from_namespace)
-from hypershell.core.types import parse_bytes, parse_time, parse_period, UnitError
+from hypershell.core.types import parse_period, UnitError, ranged
 from hypershell.core.logging import Logger
 from hypershell.core.fsm import State, StateMachine
 from hypershell.core.thread import Thread, join_waking
@@ -1834,21 +1834,21 @@ class ServerApp(Application):
     interface.add_argument('filepath', nargs='?', default=None)
 
     bundlesize: int = config.server.bundlesize
-    interface.add_argument('-b', '--bundlesize', type=int, default=bundlesize)
+    ranged(interface, '-b', '--bundlesize', setting='server.bundlesize', default=bundlesize)
 
     bundlewait: int = config.submit.bundlewait
-    interface.add_argument('-w', '--bundlewait', type=parse_time, default=bundlewait)
+    ranged(interface, '-w', '--bundlewait', setting='submit.bundlewait', default=bundlewait)
 
     task_cores: Optional[int] = config.task.cores or None
     task_memory: Optional[int] = config.task.memory or None
     task_timeout: Optional[int] = config.task.timeout or None
-    interface.add_argument('-c', '--task-cores', type=int, default=task_cores)
-    interface.add_argument('-m', '--task-memory', type=parse_bytes, default=task_memory)
-    interface.add_argument('-W', '--task-timeout', type=parse_time, default=task_timeout)
+    ranged(interface, '-c', '--task-cores', setting='task.cores', default=task_cores)
+    ranged(interface, '-m', '--task-memory', setting='task.memory', default=task_memory)
+    ranged(interface, '-W', '--task-timeout', setting='task.timeout', default=task_timeout)
 
     eager_mode: bool = config.server.eager
     max_retries: int = configured_retries()
-    interface.add_argument('-r', '--max-retries', type=int, default=max_retries)
+    ranged(interface, '-r', '--max-retries', setting='option.max_retries', default=max_retries)
     interface.add_argument('--eager', action='store_true', dest='eager_mode', default=eager_mode)
 
     forever_mode: bool = False
@@ -1862,17 +1862,19 @@ class ServerApp(Application):
     autoscaling_period: int = config.autoscale.period
     interface.add_argument('-A', '--autoscaling', nargs='?', default=None,
                            const=config.autoscale.policy, dest='autoscaling_policy')
-    interface.add_argument('-F', '--factor', type=float, default=autoscaling_factor, dest='autoscaling_factor')
-    interface.add_argument('-P', '--period', type=parse_period, default=autoscaling_period, dest='autoscaling_period')
+    ranged(interface, '-F', '--factor', setting='autoscale.factor', default=autoscaling_factor,
+           dest='autoscaling_factor')
+    ranged(interface, '-P', '--period', setting='autoscale.period', default=autoscaling_period,
+           dest='autoscaling_period')
 
     poll: int = config.server.poll
-    interface.add_argument('-Q', '--poll', type=parse_time, default=poll)
+    ranged(interface, '-Q', '--poll', setting='server.poll', default=poll)
 
     host: str = config.server.bind
     interface.add_argument('-H', '--bind', default=host, dest='host')
 
     port: int = config.server.port
-    interface.add_argument('-p', '--port', type=int, default=port)
+    ranged(interface, '-p', '--port', setting='server.port', default=port)
 
     auth: Optional[str] = None  # The key is resolve_auth('server') (see run)
     refuse_key_option(interface)
@@ -1974,7 +1976,7 @@ class ServerApp(Application):
             # A number from the configuration is not parsed by the option.
             self.autoscaling_period = parse_period(self.autoscaling_period)
         except UnitError as error:
-            raise ArgumentError(f'autoscale.period: {error}') from error
+            raise ArgumentError(str(error)) from error
         if self.autoscaling_policy is not None:
             self.check_autoscaling()
         if self.filepath and self.forever_mode:

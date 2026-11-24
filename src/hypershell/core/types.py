@@ -6,25 +6,28 @@
 
 # Type annotations
 from __future__ import annotations
-from typing import Final, List, Dict, Optional, overload, Union, TypeAlias
+from typing import Any, Final, List, Dict, Optional, Tuple, overload, Union, TypeAlias
 
 # Standard libs
-import re
 import json
-import math
-from fractions import Fraction
-from argparse import ArgumentTypeError
+from argparse import Action, ArgumentParser, ArgumentTypeError
+from dataclasses import dataclass
 from datetime import datetime
 
+# External libs
+from cmdkit.cli import ArgumentError
+
 # Internal libs
-from hypershell.core.config_schema import read_number
+from hypershell.core.config_schema import (SETTINGS, DURATION, SIZE, PERIOD, RATE, DELAY, Range, SettingError,
+                                           parse_setting, advise, match_seconds, TIME_FORMS, MEMORY_FORMS,
+                                           DELAY_RANDOM_FORM)
 
 # Public interface
 __all__ = [
     'smart_coerce', 'NoneType', 'JSONData', 'ExtendedValue',
     'to_json_type', 'from_json_type', 'serialize', 'deserialize',
     'parse_bytes', 'parse_time', 'parse_delay', 'parse_period', 'parse_rate', 'RATE_MINIMUM', 'RATE_FORMS',
-    'UnitError',
+    'UnitError', 'RangedOption', 'ranged', 'TIME_FORMS', 'MEMORY_FORMS', 'DELAY_RANDOM_FORM',
 ]
 
 
@@ -90,96 +93,55 @@ def deserialize(data: bytes) -> JSONData:
 
 
 class UnitError(ValueError, ArgumentTypeError):
-    """A size or duration that is not in an accepted form.
+    """A size, duration, period, rate or delay outside its range or not in an accepted form.
 
     It is a ValueError for callers that parse values directly, and an ArgumentTypeError so that
-    argparse shows its message (naming the value and the accepted forms) instead of a generic one.
+    argparse shows its message (naming the value, the range and the accepted forms) as written.
     """
 
 
-# The whole value must match: a number, then optionally K, M, G or T, alone or followed by
-# B or iB, or a bare B. Every unit is a power of 1024, in any case.
-MEMORY_PATTERN: Final[re.Pattern] = re.compile(r'(?P<num>\d+(?:\.\d+)?)\s*(?P<unit>[KMGT](?:I?B)?|B)?',
-                                               re.IGNORECASE)
-MEMORY_SCALES: Final[Dict[str, int]] = {
-    'B': 1,
-    'KB': 1024,
-    'MB': 1024 * 1024,
-    'GB': 1024 * 1024 * 1024,
-    'TB': 1024 * 1024 * 1024 * 1024,
-}
-MEMORY_FORMS: Final[str] = ('a number of bytes, optionally with a unit K, M, G or T (powers of 1024), '
-                            'alone or followed by B or iB, in any case (e.g., 2048, 512M, 16G, 16GB, 1.5GiB)')
+# Read by `hypershell.core.config` for its duration keys.
+_match_seconds = match_seconds
 
 
-def parse_bytes(value: str) -> int:
-    """Parse memory string to integer bytes (e.g., '512MB', '16G', '1.5GiB')."""
-    if match := MEMORY_PATTERN.fullmatch(str(value).strip()):
-        unit = (match.group('unit') or 'B').upper()
-        return int(float(match.group('num')) * MEMORY_SCALES[unit if unit == 'B' else f'{unit[0]}B'])
-    else:
-        raise UnitError(f'Memory size {value!r} is not valid: expected {MEMORY_FORMS}')
+def _parsed(entry: Range, value: Any, name: str, whole: bool = True) -> Any:
+    """`value` read by `entry` with the refusal named `name`, raised as :class:`UnitError`."""
+    try:
+        return entry.parse(value, name, whole=whole)
+    except SettingError as error:
+        raise UnitError(str(error)) from None
 
 
-# A duration is a bare number of seconds, unit components in the order d, h, m, s (each at most
-# once, whole or fractional, in any case), or one of Slurm's --time forms with a colon or a dash.
-TIME_NUMBER: Final[str] = r'\d+(?:\.\d+)?'
-TIME_SECONDS_PATTERN: Final[re.Pattern] = re.compile(rf'(?P<s>{TIME_NUMBER})')
-TIME_UNITS_PATTERN: Final[re.Pattern] = re.compile(
-    rf'(?:(?P<d>{TIME_NUMBER})d)?(?:(?P<h>{TIME_NUMBER})h)?(?:(?P<m>{TIME_NUMBER})m)?(?:(?P<s>{TIME_NUMBER})s)?',
-    re.IGNORECASE)
-TIME_CLOCK_PATTERN: Final[re.Pattern] = re.compile(r'(?:(?P<h>\d+):)?(?P<m>\d+):(?P<s>\d+)')
-TIME_DAYS_PATTERN: Final[re.Pattern] = re.compile(r'(?P<d>\d+)-(?P<h>\d+)(?::(?P<m>\d+)(?::(?P<s>\d+))?)?')
-TIME_SCALES: Final[Dict[str, int]] = {
-    's': 1,
-    'm': 60,
-    'h': 60 * 60,
-    'd': 60 * 60 * 24,
-}
-TIME_FORMS: Final[str] = ('a number of seconds, units d, h, m and s in that order, whole or fractional '
-                          '(e.g., 90, 45s, 90m, 1h30m, 1.5h, 1d12h), or a Slurm time MM:SS, HH:MM:SS, D-HH, '
-                          'D-HH:MM or D-HH:MM:SS (e.g., 90:00, 1:30:00, 1-12)')
-
-# The forms are tried in this order; the first to match the whole text gives the duration.
-TIME_PATTERNS: Final[tuple[re.Pattern, ...]] = (TIME_SECONDS_PATTERN, TIME_UNITS_PATTERN,
-                                                  TIME_CLOCK_PATTERN, TIME_DAYS_PATTERN)
-
-# A start-up delay takes the duration forms, and one leading '-' for a random wait up to that duration.
-DELAY_RANDOM_FORM: Final[str] = 'a leading - waits a random time up to that duration (e.g., --delay-start=-10m)'
+def _text(value: Any) -> str | int:
+    """`value` as text, as the parsers below read it, but an integer as given (it may be too wide for text)."""
+    return value if isinstance(value, int) and not isinstance(value, bool) else str(value)
 
 
-def _match_seconds(text: str) -> Optional[Fraction]:
-    """The exact number of seconds in a duration written in full, or None if it is not one."""
-    for pattern in TIME_PATTERNS:
-        if text and (match := pattern.fullmatch(text)):
-            return sum(Fraction(num) * TIME_SCALES[unit] for unit, num in match.groupdict().items() if num is not None)
-    return None
+def parse_bytes(value: str | int, name: str = 'size') -> int:
+    """Bytes in a size (e.g., '512MB', '16G', '1.5GiB'), exact, from 0 to 2**63 - 1; the refusal is named `name`."""
+    return _parsed(SIZE, _text(value), name)
 
 
-def parse_time(value: str) -> int:
-    """Parse duration string to integer seconds, rounded up (e.g., '1h30m', '1.5h', '1:30:00' -> 5400)."""
-    seconds = _match_seconds(str(value).strip())
-    if seconds is None:
-        raise UnitError(f'Duration {value!r} is not valid: expected {TIME_FORMS}')
-    return math.ceil(seconds)
+def parse_time(value: str | int, name: str = 'duration') -> int:
+    """Whole seconds in a duration, rounded up (e.g., '1h30m', '1.5h', '1:30:00' -> 5400), from 0 to 2**31 - 1.
+
+    The refusal is named `name`.
+    """
+    return _parsed(DURATION, _text(value), name)
 
 
-def parse_period(value: str | int | float) -> int | float:
+def parse_period(value: str | int | float, name: str = 'autoscale.period') -> int | float:
     """Seconds in a scaling period: a string as parse_time reads it, a number as given; it must be greater than zero.
 
     A number below one second is one second, as a string below one second rounds up to one;
     a value that is neither a string nor a number is returned as given.
     """
-    seconds = parse_time(value) if isinstance(value, str) else value
-    if isinstance(seconds, (int, float)):
-        if not seconds > 0:
-            raise UnitError(f'Period {value!r} is not valid: must be greater than zero')
-        if seconds < 1:
-            return 1
-    return seconds
+    if not isinstance(value, (str, int, float)):
+        return value
+    return _parsed(PERIOD, value, name)
 
 
-RATE_MINIMUM: Final[float] = 1e-6
+RATE_MINIMUM: Final[float] = RATE.least
 """Smallest rate other than 0 a client takes, in tasks per second (one task in about 11.6 days).
 
 A client waits `1 / (rate / threads)` seconds between tasks on each thread, held as a `timedelta`,
@@ -187,30 +149,63 @@ which holds at most 86,399,999,913,600 seconds. At this floor the wait overflows
 threads, twenty times the most thread ids a Linux host gives a process (4,194,304).
 """
 
-RATE_FORMS: Final[str] = f'0 (no limit) or at least {RATE_MINIMUM:.6f} tasks per second in size'
-"""What a rate under the floor is refused in favour of."""
+RATE_FORMS: Final[str] = RATE.bounds
+"""The range a rate is refused in favour of."""
 
 
-def parse_rate(value: str) -> int | float:
-    """Tasks per second: a whole or decimal number, finite (e.g., '5', '0.5'); a whole word stays an integer.
+def parse_rate(value: str, name: str = 'rate') -> int | float:
+    """Tasks per second: a whole or decimal number (e.g., '5', '0.5'); a whole word stays an integer.
 
-    A rate other than 0 under RATE_MINIMUM in size is refused.
+    It is 0 (no limit), or from RATE_MINIMUM to 1,000,000,000.
     """
-    if (rate := read_number(str(value))) is None:
-        raise UnitError(f'Rate {value!r} is not valid: expected a number')
-    if 0 < abs(rate) < RATE_MINIMUM:
-        raise UnitError(f'Rate {value!r} is not valid: expected {RATE_FORMS}')
-    return rate
+    return _parsed(RATE, _text(value), name)
 
 
-def parse_delay(value: str) -> float:
-    """Parse start-up delay to seconds, unrounded; a leading '-' marks the random form ('-10m' -> -600.0)."""
-    text = str(value).strip()
-    random_form = text.startswith('-')
-    seconds = _match_seconds(text[1:] if random_form else text)
+def parse_delay(value: str, name: str = 'duration') -> float:
+    """Parse start-up delay to seconds, unrounded; a leading '-' marks the random form ('-10m' -> -600.0).
+
+    A value not in a duration's form is refused with the message the duration gives for the same
+    text, then the random form.
+    """
     try:
-        if seconds is not None:
-            return -float(seconds) if random_form else float(seconds)
-    except OverflowError:
-        pass
-    raise UnitError(f'Duration {value!r} is not valid: expected {TIME_FORMS}; {DELAY_RANDOM_FORM}')
+        return float(DELAY.parse(_text(value), name))
+    except SettingError as error:
+        if error.out_of_range:
+            raise UnitError(f'{error}; {DELAY_RANDOM_FORM}') from None
+        message = DURATION.refusal(name, error.value, out_of_range=False)
+        raise UnitError(f'{message}; {DELAY_RANDOM_FORM}') from None
+
+
+@dataclass(frozen=True)
+class RangedOption:
+    """The type of a numeric option: reads its text by the entry `setting` of the table, named `name`.
+
+    A value the entry refuses stops the command with the one refusal line (cmdkit's `ArgumentError`,
+    printed as written, exit 2); a value past the entry's advisory limit is taken with one warning.
+    """
+
+    setting: str
+    name: str
+
+    def __call__(self: RangedOption, text: str) -> Any:
+        """The option's value read from `text`."""
+        try:
+            value = parse_setting(self.setting, text, name=self.name)
+        except SettingError as error:
+            raise ArgumentError(str(error)) from None
+        advise(self.setting, value, self.name, given=text)
+        return value
+
+    @property
+    def entry(self: RangedOption) -> Range:
+        """The option's entry in the table."""
+        return SETTINGS[self.setting]
+
+
+def ranged(interface: ArgumentParser, *flags: str, setting: str, hidden: Tuple[str, ...] = (), **options: Any) -> Action:
+    """Declare a numeric option of `interface` that reads through the entry `setting` of the table.
+
+    The option is named in a refusal by its `flags` joined with `/`, less any `hidden` alias.
+    """
+    name = '/'.join(flag for flag in flags if flag not in hidden)
+    return interface.add_argument(*flags, type=RangedOption(setting, name), **options)

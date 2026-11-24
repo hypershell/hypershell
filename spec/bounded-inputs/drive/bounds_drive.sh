@@ -43,7 +43,7 @@ refused() {
     want=$1; name=$2; shift 2
     "$@" > out.txt 2> err.txt < /dev/null; status=$?
     [ "$status" -eq "$want" ] || fail "$* exited $status, not $want: $(tail -n 3 err.txt)"
-    [ "$(grep -c "$name: expected .* from .* to .*, given " err.txt)" -eq 1 ] || fail "$*: no one refusal of $name: $(tail -n 3 err.txt)"
+    [ "$(grep -c -e "$name: expected .* from .* to .*, given " err.txt)" -eq 1 ] || fail "$*: no one refusal of $name: $(tail -n 3 err.txt)"
     grep -q Traceback err.txt && fail "$*: traceback: $(tail -n 3 err.txt)"
     pass "$* exits $want, one line naming $name"
 }
@@ -82,7 +82,7 @@ options)
     refused 2 '-T/--timeout' hs client -T 0 --no-tls -H 127.0.0.1 -p "$(free_port)"
     hs submit -c 32767 -W 2147483647 echo b 2> err.txt || fail "in-range submit refused: $(tail -n 3 err.txt)"
     count 1
-    [ "$(hs list cores timeout --csv 2> /dev/null | tail -n 1)" = '32767,2147483647' ] \
+    [ "$(hs list cores timeout --csv 2> /dev/null | tail -n 1 | tr -d '\r')" = '32767,2147483647' ] \
         || fail "stored: $(hs list cores timeout --csv)"
     pass 'hs submit -c 32767 -W 2147483647 stores both bounds'
     cluster t.in --no-db -N 0 -P 0.5 > out.txt 2> err.txt || fail "-N 0 -P 0.5 refused: $(tail -n 3 err.txt)"

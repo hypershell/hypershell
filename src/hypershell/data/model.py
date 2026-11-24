@@ -36,6 +36,7 @@ from hypershell.core.logging import Logger, HOSTNAME, INSTANCE
 from hypershell.core.heartbeat import Heartbeat
 from hypershell.core.types import (JSONData, to_json_type, from_json_type, serialize, deserialize,
                                    parse_bytes, parse_time, UnitError)
+from hypershell.core.config_schema import SETTINGS, SettingError
 from hypershell.core.uuid import uuid
 from hypershell.core.tag import Tag
 from hypershell.data.core import schema, Session
@@ -61,10 +62,10 @@ DEFAULT_TASK_GROUP: Final[int] = 0
 TAG_MARKER: Final[re.Pattern] = re.compile(r'#\s*HYPERSHELL:?')
 """The inline tag marker: found anywhere on a line, with or without its colon."""
 
-GROUP_MIN: Final[int] = -2**31
+GROUP_MIN: Final[int] = SETTINGS['option.group'].low
 """Lowest task group: the range of PostgreSQL's `INTEGER`, held on every database."""
 
-GROUP_MAX: Final[int] = 2**31 - 1
+GROUP_MAX: Final[int] = SETTINGS['option.group'].high
 """Highest task group."""
 
 
@@ -107,12 +108,11 @@ def ensure_group(value: Any, text: Optional[str] = None) -> int:
 
 
 def parse_group(text: str) -> int:
-    """The task group written as `text`, by the rule of `-g/--group`: what `int()` takes, within range."""
+    """The task group written as `text`, by the rule of `-g/--group`: a whole number, within range."""
     try:
-        value = int(text)
-    except (TypeError, ValueError):
-        raise TaskGroupError(text) from None
-    return ensure_group(value, text=text)
+        return SETTINGS['option.group'].parse(text, 'group')
+    except SettingError as error:
+        raise TaskGroupError(text, out_of_range=error.out_of_range) from None
 
 
 def tag_text(tokens: List[str], name: str) -> Optional[str]:

@@ -24,8 +24,7 @@ from cmdkit.cli import Interface, ArgumentError
 from hypershell.core.config import config, blame, find_available_ports, config_seconds, PARAM_UNSET
 from hypershell.core.tls import (TLSConfig, TLSError, DEFAULT_HANDSHAKE, handshake_seconds,
                                  from_namespace as tls_from_namespace)
-from hypershell.core.types import (parse_bytes, parse_time, parse_delay, parse_period, parse_rate, UnitError,
-                                   RATE_MINIMUM, RATE_FORMS)
+from hypershell.core.types import parse_period, UnitError, RATE_MINIMUM, RATE_FORMS, ranged
 from hypershell.core.logging import Logger
 from hypershell.core.template import DEFAULT_TEMPLATE
 from hypershell.core.exceptions import get_shared_exception_mapping
@@ -148,27 +147,28 @@ class ClusterApp(Application):
     interface.add_argument('--from-json', default=from_json, dest='from_json')
 
     num_threads: int = DEFAULT_NUM_THREADS
-    interface.add_argument('-N', '--num-threads', '--num-tasks', type=int, default=num_threads, dest='num_threads')
+    ranged(interface, '-N', '--num-threads', '--num-tasks', setting='relay.num_threads', hidden=('--num-tasks', ),
+           default=num_threads, dest='num_threads')
     # NOTE: --num-tasks maintained for backwards compatibility
 
     template: str = DEFAULT_TEMPLATE
     interface.add_argument('-t', '--template', default=template)
 
     bundlesize: int = config.server.bundlesize
-    interface.add_argument('-b', '--bundlesize', type=int, default=bundlesize)
+    ranged(interface, '-b', '--bundlesize', setting='server.bundlesize', default=bundlesize)
 
     bundlewait: int = config.submit.bundlewait
-    interface.add_argument('-w', '--bundlewait', type=parse_time, default=bundlewait)
+    ranged(interface, '-w', '--bundlewait', setting='submit.bundlewait', default=bundlewait)
 
     delay_start: float = DEFAULT_DELAY
-    interface.add_argument('-d', '--delay-start', type=parse_delay, default=delay_start)
+    ranged(interface, '-d', '--delay-start', setting='option.delay', default=delay_start)
 
     zone: Optional[str] = None
     interface.add_argument('--zone', default=None)
 
     eager_mode: bool = config.server.eager
     max_retries: int = configured_retries()
-    interface.add_argument('-r', '--max-retries', type=int, default=max_retries)
+    ranged(interface, '-r', '--max-retries', setting='option.max_retries', default=max_retries)
     interface.add_argument('--eager', action='store_true', dest='eager_mode', default=eager_mode)
 
     in_memory: bool = False
@@ -181,7 +181,7 @@ class ClusterApp(Application):
     interface.add_argument('--no-confirm', action='store_true')
 
     poll: int = config.server.poll
-    interface.add_argument('-Q', '--poll', type=parse_time, default=poll)
+    ranged(interface, '-Q', '--poll', setting='server.poll', default=poll)
 
     forever_mode: bool = False
     interface.add_argument('--forever', action='store_true', dest='forever_mode')
@@ -222,7 +222,7 @@ class ClusterApp(Application):
     interface.add_argument('--advertise', default=None)
 
     port: int = config.server.port
-    interface.add_argument('-p', '--port', default=port, type=int)
+    ranged(interface, '-p', '--port', setting='server.port', default=port)
 
     capture: bool = False
     output_path: str = None
@@ -236,27 +236,27 @@ class ClusterApp(Application):
 
     cores: Optional[int] = config.task.cores or None
     memory: Optional[int] = config.task.memory or None
-    interface.add_argument('-c', '--cores', type=int, default=cores)
-    interface.add_argument('-m', '--memory', type=parse_bytes, default=memory)
+    ranged(interface, '-c', '--cores', setting='task.cores', default=cores)
+    ranged(interface, '-m', '--memory', setting='task.memory', default=memory)
 
     client_cores: Optional[int] = config.client.cores or None
     client_memory: Optional[int] = config.client.memory or None
-    interface.add_argument('-C', '--client-cores', type=int, default=client_cores)
-    interface.add_argument('-M', '--client-memory', type=parse_bytes, default=client_memory)
+    ranged(interface, '-C', '--client-cores', setting='client.cores', default=client_cores)
+    ranged(interface, '-M', '--client-memory', setting='client.memory', default=client_memory)
 
     ratelimit: Optional[float] = config.client.ratelimit or None
-    interface.add_argument('-R', '--ratelimit', type=parse_rate, default=ratelimit)
+    ranged(interface, '-R', '--ratelimit', setting='client.ratelimit', default=ratelimit)
 
     failure_path: str = None
     interface.add_argument('-f', '--failures', default=None, dest='failure_path')
 
     task_timeout: Optional[int] = config.task.timeout or None
     client_timeout: Optional[int] = config.client.timeout or None
-    interface.add_argument('-W', '--task-timeout', type=parse_time, default=task_timeout, dest='task_timeout')
-    interface.add_argument('-T', '--timeout', type=parse_time, default=client_timeout, dest='client_timeout')
+    ranged(interface, '-W', '--task-timeout', setting='task.timeout', default=task_timeout, dest='task_timeout')
+    ranged(interface, '-T', '--timeout', setting='client.timeout', default=client_timeout, dest='client_timeout')
 
     task_signalwait: int = config.task.signalwait
-    interface.add_argument('-S', '--signalwait', type=parse_time, default=task_signalwait, dest='task_signalwait')
+    ranged(interface, '-S', '--signalwait', setting='task.signalwait', default=task_signalwait, dest='task_signalwait')
 
     autoscaling_policy: str = None
     autoscaling_factor: float = config.autoscale.factor
@@ -266,11 +266,16 @@ class ClusterApp(Application):
     autoscaling_initial: int = config.autoscale.size.init
     interface.add_argument('-A', '--autoscaling', nargs='?', default=None,
                            const=config.autoscale.policy, dest='autoscaling_policy',)
-    interface.add_argument('-F', '--factor', type=float, default=autoscaling_factor, dest='autoscaling_factor')
-    interface.add_argument('-P', '--period', type=parse_period, default=autoscaling_period, dest='autoscaling_period')
-    interface.add_argument('-X', '--min-size', type=int, default=autoscaling_minimum, dest='autoscaling_minimum')
-    interface.add_argument('-Y', '--max-size', type=int, default=autoscaling_maximum, dest='autoscaling_maximum')
-    interface.add_argument('-I', '--init-size', type=int, default=autoscaling_initial, dest='autoscaling_initial')
+    ranged(interface, '-F', '--factor', setting='autoscale.factor', default=autoscaling_factor,
+           dest='autoscaling_factor')
+    ranged(interface, '-P', '--period', setting='autoscale.period', default=autoscaling_period,
+           dest='autoscaling_period')
+    ranged(interface, '-X', '--min-size', setting='autoscale.size.min', default=autoscaling_minimum,
+           dest='autoscaling_minimum')
+    ranged(interface, '-Y', '--max-size', setting='autoscale.size.max', default=autoscaling_maximum,
+           dest='autoscaling_maximum')
+    ranged(interface, '-I', '--init-size', setting='autoscale.size.init', default=autoscaling_initial,
+           dest='autoscaling_initial')
 
     tls: Optional[TLSConfig] = None
     tls_enabled: bool = True
@@ -387,7 +392,7 @@ class ClusterApp(Application):
             # A number from the configuration is not parsed by the option.
             self.autoscaling_period = parse_period(self.autoscaling_period)
         except UnitError as error:
-            raise ArgumentError(f'autoscale.period: {error}') from error
+            raise ArgumentError(str(error)) from error
         self.evict_after = check_evict(config_seconds('server', 'evict'))
         self.eager_mode = configured_eager(self.eager_mode)
         if isinstance(self.ratelimit, float) and not math.isfinite(self.ratelimit):

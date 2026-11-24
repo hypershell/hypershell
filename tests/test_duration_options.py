@@ -197,6 +197,10 @@ def test_launched_delay_is_plain_decimal(delay_start: float, word: str) -> None:
     assert launched_delay(delay_start) == word
     assert 'e' not in word.lower()
     assert float(word) == delay_start
+    if abs(delay_start) > 2_147_483_647:  # Past the longest delay the client option refuses it (2.9.0)
+        with raises(ArgumentError):
+            ClientApp.interface.parse_args(['-d', word])
+        return
     assert ClientApp.interface.parse_args(['-d', word]).delay_start == delay_start
 
 
@@ -226,7 +230,8 @@ SECONDS_OPTIONS: Final[List[tuple[type, List[str], str, str]]] = [
 ]
 
 
-# Each whole-second value and its seconds; a zero period is refused instead (tests/test_period_floor.py).
+# Each whole-second value and its seconds; a zero period is refused instead (tests/test_period_floor.py), and so
+# is a zero interval, which polls without rest (tests/test_bounded_options.py).
 SECONDS_PARSED: Final[List[tuple[str, int]]] = [('30s', 30), ('5m', 300), ('1h30m', 5400), ('1.5h', 5400), ('1:30', 90),
                                                 ('1:30:00', 5400), ('1-12', 129600), ('90', 90), ('0.5', 1), ('0', 0)]
 
@@ -234,7 +239,7 @@ SECONDS_PARSED: Final[List[tuple[str, int]]] = [('30s', 30), ('5m', 300), ('1h30
 @mark.unit
 @mark.parametrize('app, args, option, dest, value, expected', [
     (*option, *case) for option in SECONDS_OPTIONS for case in SECONDS_PARSED
-    if not (option[3] == 'autoscaling_period' and case[1] == 0)
+    if not (option[3] in ('autoscaling_period', 'interval') and case[1] == 0)
 ])
 def test_seconds_option_parsed(app: type, args: List[str], option: str, dest: str, value: str, expected: int) -> None:
     """Every whole-second duration option reads seconds, units and Slurm times, rounded up."""

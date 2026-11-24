@@ -53,7 +53,6 @@ import functools
 import threading
 from enum import Enum
 from datetime import datetime
-from argparse import ArgumentTypeError
 from dataclasses import dataclass
 from queue import Queue, Empty as QueueEmpty, Full as QueueFull
 from multiprocessing import AuthenticationError
@@ -73,13 +72,13 @@ from hypershell.core.queue import (QueueClient, QueueConfig, QueueSubmitRefused,
                                   DEFAULT_LOCAL_TIMEOUT, DEFAULT_REMOTE_TIMEOUT)
 from hypershell.core.thread import Thread, join_waking
 from hypershell.core.template import Template, DEFAULT_TEMPLATE
-from hypershell.core.types import JSONData, parse_bytes, parse_time
+from hypershell.core.types import JSONData, ranged
 from hypershell.core.pretty_print import format_tag
 from hypershell.core.tag import Tag
 from hypershell.core.exceptions import (handle_exception, handle_disconnect,
                                         handle_address_unknown, HostAddressInfo, get_shared_exception_mapping)
 from hypershell.data.model import (Task, Source, Zone, DIRECT_SOURCE_ID, STDIN_SOURCE_ID, DEFAULT_TASK_GROUP,
-                                   TaskGroupInfo, TaskGroupError, ensure_group, parse_group, tag_text,
+                                   TaskGroupInfo, TaskGroupError, ensure_group, tag_text,
                                    serialize_tasks, zone_name)
 from hypershell.data import initdb, checkdb, DATABASE_DIALECT, DATABASE_ENABLED
 
@@ -1461,14 +1460,6 @@ def validate_json_groups(records: List[dict]) -> None:
                 raise error.at(f'record {index}') from error
 
 
-def group_option(text: str) -> int:
-    """The `-g/--group` option's type: a task group by :func:`~hypershell.data.model.parse_group` (else exit 2)."""
-    try:
-        return parse_group(text)
-    except TaskGroupError as error:
-        raise ArgumentTypeError(str(error)) from error
-
-
 def refuse_below_reached_group(groups: List[Optional[int]], reached: Optional[int], *,
                                skip: Optional[set] = None,
                                fingerprints: Optional[Callable[[], List[str]]] = None) -> None:
@@ -1583,24 +1574,24 @@ class SubmitApp(Application):
     interface.add_argument('--from-json', default=from_json, dest='from_json')
 
     bundlesize: int = config.submit.bundlesize
-    interface.add_argument('-b', '--bundlesize', type=int, default=bundlesize)
+    ranged(interface, '-b', '--bundlesize', setting='submit.bundlesize', default=bundlesize)
 
     bundlewait: int = config.submit.bundlewait
-    interface.add_argument('-w', '--bundlewait', type=parse_time, default=bundlewait)
+    ranged(interface, '-w', '--bundlewait', setting='submit.bundlewait', default=bundlewait)
 
     template: str = DEFAULT_TEMPLATE
     interface.add_argument('--template', default=template)
 
     cores: Optional[int] = config.task.cores or None
     memory: Optional[int] = config.task.memory or None
-    interface.add_argument('-c', '--cores', type=int, default=cores)
-    interface.add_argument('-m', '--memory', type=parse_bytes, default=memory)
+    ranged(interface, '-c', '--cores', setting='task.cores', default=cores)
+    ranged(interface, '-m', '--memory', setting='task.memory', default=memory)
 
     timeout: Optional[int] = config.task.timeout or None
-    interface.add_argument('-W', '--timeout', type=parse_time, default=timeout)
+    ranged(interface, '-W', '--timeout', setting='task.timeout', default=timeout)
 
     group: Optional[int] = None
-    interface.add_argument('-g', '--group', type=group_option, default=group)
+    ranged(interface, '-g', '--group', setting='option.group', default=group)
 
     repeat_mode: bool = False
     interface.add_argument('--repeat', action='store_true', dest='repeat_mode')
@@ -1618,7 +1609,7 @@ class SubmitApp(Application):
     queue_auth: Optional[str] = None  # The key is resolve_auth('server') (see run)
     interface.add_argument('-q', '--queue', action='store_true', dest='queue_mode')
     interface.add_argument('-H', '--host', default=queue_server, dest='queue_server')
-    interface.add_argument('-p', '--port', type=int, default=queue_port, dest='queue_port')
+    ranged(interface, '-p', '--port', setting='server.port', default=queue_port, dest='queue_port')
     refuse_key_option(interface, advice=SUBMIT_KEY_ADVICE)
 
     tls: Optional[TLSConfig] = None
