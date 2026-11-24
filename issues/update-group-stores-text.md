@@ -1,5 +1,5 @@
 ---
-status: unshaped
+status: adopted:update-group-and-legacy-filters
 kind: fix
 appetite: small
 target: 2.9.0

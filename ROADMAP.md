@@ -237,7 +237,7 @@ share its lookup) · Refs: `cluster/__init__.py` and `relay/__init__.py` (`adver
 `hs update` accepts any value for `group` and stores it, so a text group reaches the scheduler even after submit-time validation (`submit-input-checks`) refuses one. Apply the submit-time integer rule to `hs update group=…`, refusing with exit 2 before anything is written.
 
 *Target: 2.9.0 · Horizon: near-term, small · Depends on: — · Refs: `spec/submit-input-checks/GOAL.md` (Non-goals)*
-**Seed:** [`issues/update-group-stores-text.md`](issues/update-group-stores-text.md) · *status: unshaped*
+**Seed:** [`issues/update-group-stores-text.md`](issues/update-group-stores-text.md) · *status: adopted:update-group-and-legacy-filters*
 
 ## An empty `logging.style` makes every command exit 3 until the file is hand-edited
 
@@ -330,7 +330,7 @@ by `update-client-retry`'s shaping, which takes the same form's action options.
 
 *Target: 2.9.0 · Horizon: near-term, small · Depends on: — (sequence after `update-client-retry`,
 same routing) · Refs: `issues/update-legacy-tag-lost-write.md`*
-**Seed:** [`issues/update-legacy-form-ignores-filters.md`](issues/update-legacy-form-ignores-filters.md) · *status: unshaped*
+**Seed:** [`issues/update-legacy-form-ignores-filters.md`](issues/update-legacy-form-ignores-filters.md) · *status: adopted:update-group-and-legacy-filters*
 
 ## Every numeric setting has one declared range, one parser and one error
 
