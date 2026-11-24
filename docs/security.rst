@@ -146,9 +146,14 @@ TLS.
 The :class:`hypershell.core.queue.SecureManager` class selects this serializer when an active
 :class:`hypershell.core.tls.TLSConfig` is supplied. If TLS is disabled (or no configuration
 is found), ``SecureManager`` selects the ``'hypershell-plain'`` serializer instead. Its pair is
-the stock listener and client, with ``TCP_NODELAY`` set on each TCP connection where the
-platform allows it. The framing, the handshake, and every byte on the wire are those of a stock
-``BaseManager``, so cleartext deployments remain supported for constrained environments.
+a cleartext listener and client, with ``TCP_NODELAY`` set on each TCP connection where the
+platform allows it, so cleartext deployments remain supported for constrained environments.
+
+On both pairs the message framing (a length prefix on each message) and the authentication
+handshake are those of a stock ``BaseManager``. Each message inside that framing — every request,
+reply and proxy reference — is encoded by *HyperShell*'s own codec, as JSON over a closed set of
+plain values (see :ref:`Limitations <security-limitations>`, item 2); neither end ever unpickles
+what its peer sends.
 
 |
 
@@ -390,6 +395,8 @@ certificate is checked against ``servername`` instead, and fingerprint pinning c
 
 |
 
+.. _security-limitations:
+
 Limitations
 ^^^^^^^^^^^
 
@@ -399,12 +406,40 @@ Understanding these properties matters most for deployments on untrusted network
    authentication key authenticates the *client* to the server; TLS authenticates the
    *server* to the client. There is no certificate-based client identity.
 
-2. **Pickle-serialized RPC.** The queue is built on Python's multiprocessing managers, whose
-   RPC serializes objects with ``pickle`` in both directions. The authentication key and
-   (non-``insecure``) TLS peer verification are the controls that gate this channel: a party
-   that holds the key and reaches the server — or, in ``insecure`` mode, an active
-   man-in-the-middle — can do more than enqueue tasks. Keep the key secret, keep peer
+2. **Closed RPC vocabulary.** The queue is built on Python's multiprocessing managers, but its
+   messages are not pickled. Each end decodes every message it receives into a small, closed set
+   of plain values — ``None``, booleans, numbers, text, bytes, tuples, lists, text-keyed
+   dictionaries, the manager's object references, and the two queue exceptions (empty and full)
+   and remote errors — and refuses anything else: a message outside that set closes its
+   connection (a server logs one warning naming the peer and goes on serving its other
+   clients; a client stops with a version error). A server refuses in the same way a connection
+   whose first request is not one of the manager's public requests, under any interpreter flags. A
+   client also stops with a version error at a server that offers any method outside its own lists
+   of the queue's methods. Neither end
+   unpickles bytes its peer sends, and a client builds its proxies from its own method lists, so
+   neither can make the other run code through the transport itself.
+
+   This bounds what a peer can do, without making it trustworthy. A party that holds the key and
+   reaches the server — or, in ``insecure`` mode, an active man-in-the-middle — can still call the
+   operations the queue exposes: put tasks on the queue, take tasks from it, and report results.
+   A server (or whoever can act as one) still hands its clients the commands they run. The
+   vocabulary gives no per-peer identity beyond the one shared key, does not bind authentication to
+   the TLS channel, adds no transport-level denial-of-service controls (item 4), and does not make
+   a client safe against a compromised server's commands. Keep the key secret, keep peer
    verification enabled, and treat every host that holds the key as inside the trust boundary.
+
+   .. versionchanged:: 2.9.0
+      The queue's messages are encoded as a closed vocabulary of plain values, no longer pickled.
+      A server or client of 2.9.0a10 or later cannot connect to one of 2.9.0a9 or earlier, in
+      either direction: a newer server logs one warning naming the older peer, which exits at once
+      with a message naming the version mismatch; a newer client, relay or ``hs submit`` exits at
+      once with one error naming the older server's framing. Run matching versions on every host.
+      A client builds its proxies from its own method lists and stops with a version error at a
+      server that offers any other method.
+      :class:`hypershell.core.queue.SecureManager` accepts only its own two serializers. The
+      client-side refusals above belong to HyperShell's own queue client: code that uses
+      ``SecureManager`` directly as a client should register each type with an explicit proxy type
+      and list of methods.
 
 3. **Self-signed by default; single-leaf trust.** The auto-generated certificate is
    self-signed (not chained to a public CA), valid for ten years, and has no revocation path;

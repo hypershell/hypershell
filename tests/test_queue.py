@@ -17,9 +17,11 @@ import socket
 import _thread
 import threading
 import multiprocessing as mp
-from multiprocessing import util
-from multiprocessing.connection import Listener, Client, Connection, answer_challenge, deliver_challenge
-from multiprocessing.managers import Server, BaseManager, State, AutoProxy, RemoteError, convert_to_error
+from multiprocessing import util, managers, ProcessError
+from multiprocessing.connection import (Listener, Client, Connection, _ConnectionBase, answer_challenge,
+                                        deliver_challenge)
+from multiprocessing.managers import (Server, BaseManager, BaseProxy, State, AutoProxy, RemoteError, Token,
+                                      convert_to_error, dispatch)
 
 # External libs
 from pytest import fixture, mark, raises, skip
@@ -224,7 +226,7 @@ class TestPrivateInternals:
         manager = queue_module.SecureManager(address=('127.0.0.1', 0), authkey=AUTH.encode())
         manager._serve_in_process({'_get_thing': (provide, queue_module.QUEUE_EXPOSED, None, AutoProxy)})
         try:
-            class Caller(BaseManager):
+            class Caller(queue_module.SecureManager):
                 pass
 
             Caller.register('_get_thing')
@@ -240,6 +242,153 @@ class TestPrivateInternals:
     def test_convert_to_error(self) -> None:
         """``convert_to_error`` turns a ``#TRACEBACK`` reply into ``RemoteError``."""
         assert isinstance(convert_to_error('#TRACEBACK', 'text'), RemoteError)
+
+    # The manager's RPC envelope: every request, reply and token crosses a queue connection only through
+    # the connection's `send` and `recv`, which a queue connection replaces with its own codec.
+
+    ENVELOPE: tuple = ('send', 'recv')
+    BYTE_LEVEL: tuple = ('send_bytes', 'recv_bytes', 'dumps', 'loads', '_ForkingPickler')
+
+    @staticmethod
+    def strings(code) -> set:
+        """The string constants of `code`, read through nested tuples and nested code objects."""
+        found = set()
+        pending = list(code.co_consts)
+        while pending:
+            const = pending.pop()
+            if isinstance(const, str):
+                found.add(const)
+            elif isinstance(const, tuple):
+                pending.extend(const)
+            elif hasattr(const, 'co_consts'):
+                pending.extend(const.co_consts)
+        return found
+
+    def test_envelope_crosses_through_send_and_recv(self) -> None:
+        """The manager sends and receives every envelope with the connection's `send` and `recv`, and never
+        touches the bytes or the pickler itself there."""
+        for func in (dispatch, Server._handle_request, Server.serve_client, BaseProxy._callmethod):
+            names = set(func.__code__.co_names)
+            assert set(self.ENVELOPE) <= names, func.__qualname__
+            assert not names & set(self.BYTE_LEVEL), func.__qualname__
+        for func in (Server.accept_connection, Server.shutdown):
+            assert 'send' in func.__code__.co_names, func.__qualname__
+
+    def test_other_manager_calls_go_through_dispatch(self) -> None:
+        """Every other request the manager and its proxies make goes through `dispatch`."""
+        register = [const for const in BaseManager.register.__code__.co_consts if hasattr(const, 'co_names')]
+        codes = [func.__code__ for func in (BaseManager.connect, BaseManager._create, BaseManager._debug_info,
+                                            BaseManager._number_of_objects, BaseManager._finalize_manager,
+                                            BaseProxy._connect, BaseProxy._incref, BaseProxy._decref, AutoProxy)]
+        for code in codes + [code for code in register if '_create' in code.co_names]:
+            names = set(code.co_names)
+            assert 'dispatch' in names, code.co_qualname
+            assert not names & {*self.ENVELOPE, *self.BYTE_LEVEL}, code.co_qualname
+
+    def test_reply_kinds(self) -> None:
+        """The reply kinds HyperShell's codec carries are the ones the manager sends and reads."""
+        replies = {'#RETURN', '#ERROR', '#PROXY', '#TRACEBACK', '#UNSERIALIZABLE'}
+        assert replies <= self.strings(Server.serve_client.__code__)
+        assert {'#RETURN', '#TRACEBACK'} <= self.strings(Server._handle_request.__code__)
+        assert {'#ERROR', '#TRACEBACK', '#UNSERIALIZABLE'} <= self.strings(convert_to_error.__code__)
+        assert {'#RETURN', '#PROXY'} <= self.strings(BaseProxy._callmethod.__code__)
+        assert 'EOFError' in Server.serve_client.__code__.co_names
+        assert set(Server.public) == {'shutdown', 'create', 'accept_connection', 'get_methods', 'debug_info',
+                                      'number_of_objects', 'dummy', 'incref', 'decref'}
+
+    def test_challenge_uses_bytes(self) -> None:
+        """The authentication challenge reads and writes raw bytes, never the envelope's `send` and `recv`."""
+        for func in (deliver_challenge, answer_challenge):
+            names = set(func.__code__.co_names)
+            assert {'send_bytes', 'recv_bytes'} <= names, func.__name__
+            assert not names & set(self.ENVELOPE), func.__name__
+
+    def test_connection_envelope_is_over_the_framing(self) -> None:
+        """A stock connection's `send` and `recv` frame through `_send_bytes` and `_recv_bytes`, which a queue
+        connection keeps when it replaces them."""
+        assert {'_check_closed', '_check_writable', '_send_bytes'} <= set(_ConnectionBase.send.__code__.co_names)
+        assert {'_check_closed', '_check_readable', '_recv_bytes'} <= set(_ConnectionBase.recv.__code__.co_names)
+
+    def test_token(self) -> None:
+        """A manager token is a type id, an address and an object id."""
+        assert Token.__slots__ == ('typeid', 'address', 'id')
+        assert queue_module._parameters(Token.__init__) == ['self', 'typeid', 'address', 'id']
+
+    def test_forked_server_serves_through_handle_request(self) -> None:
+        """A manager run in a process of its own builds its server from its class's ``_Server``, and the
+        stock ``handle_request`` serves each connection through ``_handle_request``."""
+        assert '_Server' in queue_module._names(BaseManager._run_server)
+        assert '_handle_request' in queue_module._names(Server.handle_request)
+
+    def test_get_server_builds_a_stock_server(self, monkeypatch) -> None:
+        """``BaseManager.get_server`` checks the manager's state as the queue manager's own ``get_server`` does,
+        then builds the stock ``Server`` from the manager's registry, address, key and serializer, in that order,
+        as the queue manager's builds its own server class."""
+        built = []
+
+        class Recorder:
+            def __init__(self, *args, **kwargs) -> None:
+                built.append((args, kwargs))
+
+        monkeypatch.setattr(managers, 'Server', Recorder)
+        monkeypatch.setattr(queue_module.SecureManager, '_Server', Recorder)
+        stock = BaseManager(address=('127.0.0.1', 0), authkey=b'x' * 16)
+        own = queue_module.SecureManager(address=('127.0.0.1', 0), authkey=b'x' * 16)
+        assert isinstance(BaseManager.get_server(stock), Recorder) and isinstance(own.get_server(), Recorder)
+        assert built == [((stock._registry, stock._address, stock._authkey, stock._serializer), {}),
+                         ((own._registry, own._address, own._authkey, own._serializer), {})]
+        for value in (State.STARTED, State.SHUTDOWN, 'unknown'):
+            stock._state.value = own._state.value = value
+            with raises(ProcessError) as stock_error:
+                BaseManager.get_server(stock)
+            with raises(ProcessError) as own_error:
+                own.get_server()
+            assert str(own_error.value) == str(stock_error.value)
+
+    def test_serve_client_survives_other_receive_errors(self) -> None:
+        """An error other than `EOFError` from `recv` leaves the serve loop running on the same connection (so
+        a queue connection that refuses a message closes itself), and `EOFError` ends it."""
+        received, sent = [], []
+
+        class Scripted:
+            def recv(self):
+                received.append(None)
+                raise ValueError('not a message') if len(received) == 1 else EOFError
+
+            def send(self, obj):
+                sent.append(obj)
+
+        server = Server({}, ('127.0.0.1', 0), b'x' * 16, 'pickle')
+        try:
+            server.stop_event = threading.Event()
+            with raises(SystemExit):
+                server.serve_client(Scripted())
+        finally:
+            server.listener.close()
+        assert len(received) == 2
+        assert [kind for kind, _ in sent] == ['#TRACEBACK'] and 'not a message' in sent[0][1]
+
+    def test_session_carries_reply_kinds(self, monkeypatch) -> None:
+        """A queue session carries the reply kinds HyperShell meets: a return, an error a method raised (a
+        timed get), and a traceback (a create refused for want of the work-request protocol)."""
+        sent = []
+        real = Connection._send_bytes
+
+        def record(conn, buf) -> None:
+            sent.append(bytes(buf))
+            return real(conn, buf)
+
+        monkeypatch.setattr(Connection, '_send_bytes', record)
+        with QueueServer(make_config()) as server:
+            client = connect('127.0.0.1', server.address[1])
+            with raises(queue.Empty):
+                client.scheduled.get(timeout=TIMEOUT)
+            with raises(RemoteError, match='too old'):
+                client._get_scheduled()
+            client.completed.put(b'x', timeout=WAIT)
+            assert server.completed.get(timeout=WAIT) == b'x'
+        kinds = {kind for kind in (b'#RETURN', b'#ERROR', b'#TRACEBACK') if any(kind in buf for buf in sent)}
+        assert kinds == {b'#RETURN', b'#ERROR', b'#TRACEBACK'}
 
     def test_proxy_connection_per_thread(self) -> None:
         """``BaseProxy._callmethod`` keeps one connection per thread, cached at ``_tls.connection``."""
@@ -373,14 +522,14 @@ def test_no_delay_connection_keeps_blocking_mode(default_timeout: float, blockin
 
 @mark.unit
 def test_plain_listener_under_default_timeout(default_timeout: float) -> None:
-    """The cleartext listener hands over a blocking connection, so a stock client's handshake and
+    """The cleartext listener hands over a blocking connection, so a cleartext client's handshake and
     first exchange go through, as with a manager's server (no `authkey` on the listener)."""
     authkey = AUTH.encode()
     replies = []
     with queue_module._PlainListener(('127.0.0.1', 0)) as listener:
 
         def dial() -> None:
-            with Client(listener.address, authkey=authkey) as conn:
+            with queue_module._plain_client(listener.address, authkey=authkey) as conn:
                 replies.append(conn.recv())
 
         thread = threading.Thread(target=dial, daemon=True)
@@ -397,9 +546,9 @@ def test_plain_listener_under_default_timeout(default_timeout: float) -> None:
 @mark.unit
 def test_plain_client_under_default_timeout(default_timeout: float) -> None:
     """The cleartext client dials a blocking connection, so its handshake and first exchange with a
-    stock listener (no `authkey`, as a manager's server) go through."""
+    cleartext listener (no `authkey`, as a manager's server) go through."""
     authkey = AUTH.encode()
-    with Listener(('127.0.0.1', 0)) as listener:
+    with queue_module._PlainListener(('127.0.0.1', 0)) as listener:
 
         def serve() -> None:
             with listener.accept() as conn:

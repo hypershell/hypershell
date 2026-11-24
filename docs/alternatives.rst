@@ -823,9 +823,10 @@ and Pegasus's domain; *HyperShell* relies on the shared/remote filesystem. Its r
 is a single coordination point — but task state lives in the database and is recovered across
 a restart, evicted clients have their in-flight tasks reverted and rerun elsewhere, and the
 autoscaler relaunches clients automatically, so the failure modes are bounded and
-self-healing rather than fatal. And while the manager's RPC *framing* uses Python ``pickle``
-(a consequence of building on the standard-library multiprocessing managers; the task and
-heartbeat *payloads* themselves are JSON), the queue is **encrypted and authenticated by
+self-healing rather than fatal. The queue builds on the standard-library multiprocessing
+managers, but carries only plain data: every message is decoded into a closed vocabulary of
+plain values and nothing a peer sends is unpickled (the task and heartbeat payloads themselves
+are JSON). The queue is also **encrypted and authenticated by
 default** — a self-signed certificate is generated on first
 start and a fresh authentication key is minted per cluster invocation, so the common case is
 secure with no operator action (disable only with ``--no-tls``, which we do not recommend).

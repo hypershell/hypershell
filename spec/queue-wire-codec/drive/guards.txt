@@ -1,0 +1,28 @@
+# queue-wire-codec: tests that hold on the base build and must keep holding (the pins and the restated tests).
+# Run from the repository root:
+#   sh spec/submit-input-checks/drive/run_list.sh spec/queue-wire-codec/drive/guards.txt 1200
+
+# R9: the manager's envelope internals (and the rest of the in-process server's), pinned.
+tests/test_queue.py::TestPrivateInternals
+
+# R7: restated against a peer that speaks this release's framing; what each checks is unchanged.
+tests/test_dispatch_version.py::test_old_client_is_refused_while_new_client_works
+tests/test_queue.py::test_plain_listener_under_default_timeout
+tests/test_queue.py::test_plain_client_under_default_timeout
+
+# R7: the pinned surfaces and the version checks beside them.
+tests/test_dispatch_version.py::test_dispatcher_remote_surface_is_pinned
+tests/test_dispatch_version.py::test_old_server_dispatcher_has_no_topology
+tests/test_dispatch_version.py::test_new_client_against_old_server_names_the_mismatch
+tests/test_dispatch_version.py::test_client_command_against_old_server_exits_with_one_error
+tests/test_queue.py::test_exposed_methods
+tests/test_queue.py::test_sentinel_reaches_remote_consumer
+tests/test_queue.py::test_remote_get_empty_raises
+tests/test_queue.py::test_remote_put_full_raises
+
+# R7: the launch keeps the 2.9.0a4 option floor.
+tests/test_cluster_launch.py::test_launch_contract_uses_only_known_client_options
+tests/test_cluster_launch.py::test_launch_contract_matches_tagged_client
+
+# Q1: the forked manager keeps working through the shared serializer pair.
+tests/test_queue_tls.py::test_secure_manager_subprocess_roundtrip

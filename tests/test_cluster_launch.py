@@ -968,10 +968,16 @@ def test_ssh_mode_launches_each_host_with_every_client_option(options: Dict[str,
 
 
 CONTRACT_TAG: Final[str] = '2.9.0a4'
-"""The oldest client release a 2.9 launch must start (an older client cannot join a 2.9 server)."""
+"""The release whose client options a 2.9 launch keeps to: its option floor.
+
+The launch emits only options a 2.9.0a4 client accepts, as it always has. The oldest client that can
+connect is 2.9.0a10: an earlier one speaks the queue's earlier, pickle framing and is refused at its
+first request, so a launch that starts the tag's client ends with that refusal (see
+`test_old_peer_client_refused_under_new_launcher`)."""
 
 # Every `hs client` option the 2.9.0a4 client accepts, and whether it takes a value. Written from
-# `git show 2.9.0a4:src/hypershell/client.py`; the launch may emit nothing outside this set.
+# `git show 2.9.0a4:src/hypershell/client.py`; the launch may emit nothing outside this set (the option
+# floor), though only a client of 2.9.0a10 or later can connect.
 CONTRACT_CLIENT_OPTIONS: Final[Dict[str, bool]] = {
     '-N': True, '--num-threads': True, '--num-tasks': True, '-H': True, '--host': True,
     '-p': True, '--port': True, '-k': True, '--auth': True, '-t': True, '--template': True,
@@ -1095,18 +1101,32 @@ def assert_old_client_ran(records: List[Dict[str, Any]], old: StandIns) -> None:
         assert record['module'].startswith(src), f'client imported {record["module"]}'
 
 
+def assert_old_client_refused(run: Run, old: StandIns, temp_site: Path) -> None:
+    """Every client exited non-zero naming the server's refusal, the server logged the refusal, no task
+    ran, and the cluster ended through its launch watch with the runtime-error status."""
+    exits = [record for record in old.read() if record['role'] == 'exit']
+    assert exits, 'No client exited'
+    assert all(record['status'] != exit_status.success for record in exits), exits
+    assert 'speaks the queue framing of a release before 2.9.0a10' in run.stderr, run.stderr[-4000:]
+    assert 'Refused a queue connection from' in run.stderr, run.stderr[-4000:]
+    assert run.status == exit_status.runtime_error, run.stderr[-4000:]
+    assert 'every launched client has exited' in run.stderr, run.stderr[-4000:]
+    assert [status for _, status in task_results(old, temp_site)] == [None] * TASK_COUNT
+
+
 @mark.parametrize('mode', ['launcher', 'ssh'])
-def test_old_client_runs_under_new_launcher(old_client: StandIns, temp_site: Path, mode: str) -> None:
-    """A 2.9.0a4 client, unchanged, takes the key the launch hands it and completes the run."""
+def test_old_peer_client_refused_under_new_launcher(old_client: StandIns, temp_site: Path, mode: str) -> None:
+    """A 2.9.0a4 client, unchanged, takes the key the launch hands it, is refused at its first request as a
+    release before 2.9.0a10, and the cluster ends at once instead of waiting on it."""
     if mode == 'launcher':
         run = run_cluster(old_client, [f'--launcher={old_client.launcher}'], temp_site, False, None)
         key = assert_key_off_command_lines(old_client.read())
     else:
-        run = run_cluster(old_client, ['--ssh', SSH_HOSTS[0]], temp_site, False, None, until=ssh_failed(old_client))
+        run = run_cluster(old_client, ['--ssh', SSH_HOSTS[0]], temp_site, False, None)
         key = assert_ssh_key_off_command_lines(old_client.read())
     assert_key_not_in(key, run.stdout, run.stderr)
     assert_old_client_ran(old_client.read(), old_client)
-    assert_run_complete(run, old_client, temp_site)
+    assert_old_client_refused(run, old_client, temp_site)
 
 
 # A task step that writes its own environment, as JSON, to a private file named for its task.

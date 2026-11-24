@@ -215,8 +215,16 @@ subsystems.
 - **Auth is ALWAYS required.** Refuse the placeholder key `DEFAULT_AUTH = '<not-secure>'`; enforce
   `AUTH_MINIMUM_LENGTH` (≥16) and `AUTH_ALLOWED_CHARS`. Never weaken; never drop the authkey to
   "disable TLS" (pass `tls=None`).
-- Multiprocessing RPC framing is **pickle** (an RCE surface); HyperShell **payloads are JSON**. Both
-  facts matter — don't conflate them.
+- The multiprocessing RPC envelope is encoded by **`core/codec.py`**: JSON over a closed vocabulary,
+  never pickled; a message outside it closes its connection (server: one WARNING, others served;
+  client: fatal `QueueVersionError`), and so does a first request not naming a `Server.public`
+  request (`_ManagerServer`; an explicit check, never an `assert`, so it holds under `python -O`), and a pickle frame from a release before 2.9.0a10 is never
+  decoded (server: the fixed `OLD_PEER_REPLY`, then close). HyperShell **payloads are JSON** too,
+  carried as opaque leaves of the envelope. Two layers — don't conflate them.
+- A queue client builds every proxy from its **own** method lists (`_ClientProxy` over
+  `QUEUE_EXPOSED`/`DISPATCH_EXPOSED`), never `AutoProxy`: a server's offered names are only compared,
+  and one outside the client's lists, or a `#PROXY` reply (as a tuple or as a list), is a fatal
+  `QueueVersionError`. Never register a client typeid without its own method list.
 - **No mTLS** (`verify_mode=CERT_NONE`); keep the post-handshake fingerprint check.
 - `'<auto>'` TLS materials only work single-host / shared FS; cert/key are **not** forwarded to
   launched clients (only `--no-tls` is propagated).
@@ -258,7 +266,8 @@ subsystems.
   ssh's stdin (forced `-T`, bare `-n` dropped) for `--ssh`, whose `--env` exports are built from
   the variables by name (`ssh_env_exports()`: every key variable dropped first by
   `is_key_variable()`, every value `shlex.quote`d), never by filtering words — and only options a
-  2.9.0a4 client accepts may be emitted (contract test); the one sanctioned bend is a fractional
+  2.9.0a4 client accepts may be emitted (the option floor, a contract test; the oldest client that
+  can connect is 2.9.0a10); the one sanctioned bend is a fractional
   `-R` rate (`plain_rate`: a whole rate is an integer word, a fraction a plain decimal that needs a
   client of 2.9.0 or later). The Open MPI forwarding
   (`OMPI_MCA_mca_base_env_list`, or `-x` beside a

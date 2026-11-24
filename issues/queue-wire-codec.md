@@ -1,5 +1,5 @@
 ---
-status: unshaped
+status: adopted:queue-wire-codec
 kind: feature
 appetite: big
 target: 2.9.0
