@@ -6,12 +6,12 @@ appetite: small
 status: in_progress
 branch: fix/client-host-default-from-bind
 base: develop
-current_phase: P1
+current_phase: P2
 last_updated: '2026-11-23'
 phases:
 - id: P1
   name: Tests first, strict xfail where the fix is missing (tests only)
-  status: pending
+  status: done
   satisfies:
   - R7
   depends_on: []
@@ -138,29 +138,29 @@ See [`.agents/factory/templates/TECH.md`](../../.agents/factory/templates/TECH.m
 a strict xfail with reason `client-host-default P2`; the rest pass. Nothing changes outside
 `tests/` and `spec/`.
 
-- [ ] New `tests/test_client_host_default.py`. Its module docstring states the rule in the order of
+- [x] New `tests/test_client_host_default.py`. Its module docstring states the rule in the order of
   GOAL R3.
   - **The rule** (`@mark.unit`, xfail P2). Import it as
     `client_host = getattr(config_module, 'client_host', None)` so collection survives.
     Build each `Configuration` with a local `layered(**layers)` over `default`, as
     `tests/test_client_bundle_keys.py:31` does. Rows:
-    - [ ] `seed`: `local` has `bind="0.0.0.0"` and `host="login00.example.edu"` → `login00.example.edu`.
-    - [ ] `host` over `advertise`: `env` has `advertise`, `local` has `host` → the host.
-    - [ ] `advertise` over a specific `bind` → `adv.example`.
-    - [ ] Specific `bind` `10.0.0.5` → `10.0.0.5`.
-    - [ ] `bind` `0.0.0.0`, and `""` → `localhost`.
-    - [ ] Nothing given → `localhost`.
-    - [ ] `host="localhost"` with `advertise` and `bind` set → `localhost`.
-    - [ ] `advertise=""` and `"<none>"` from a file, with `bind` `10.0.0.5` → `10.0.0.5`.
-    - [ ] `host_env` naming a variable that is set (`monkeypatch.setenv`) → its value.
-    - [ ] `host_eval="echo login00.example.edu"` → `login00.example.edu`.
-    - [ ] `advertise_env` (set), with `bind` `10.0.0.5` → its value.
-    - [ ] `host_env` naming an unset variable raises `ConfigurationError`, and the message names
+    - [x] `seed`: `local` has `bind="0.0.0.0"` and `host="login00.example.edu"` → `login00.example.edu`.
+    - [x] `host` over `advertise`: `env` has `advertise`, `local` has `host` → the host.
+    - [x] `advertise` over a specific `bind` → `adv.example`.
+    - [x] Specific `bind` `10.0.0.5` → `10.0.0.5`.
+    - [x] `bind` `0.0.0.0`, and `""` → `localhost`.
+    - [x] Nothing given → `localhost`.
+    - [x] `host="localhost"` with `advertise` and `bind` set → `localhost`.
+    - [x] `advertise=""` and `"<none>"` from a file, with `bind` `10.0.0.5` → `10.0.0.5`.
+    - [x] `host_env` naming a variable that is set (`monkeypatch.setenv`) → its value.
+    - [x] `host_eval="echo login00.example.edu"` → `login00.example.edu`.
+    - [x] `advertise_env` (set), with `bind` `10.0.0.5` → its value.
+    - [x] `host_env` naming an unset variable raises `ConfigurationError`, and the message names
       `server.host_env`.
-    - [ ] `host` given only in the `_` layer (`Configuration.update`) → that host.
-    - [ ] Across all the rows above, the result is never `'<none>'`.
+    - [x] `host` given only in the `_` layer (`Configuration.update`) → that host.
+    - [x] Across all the rows above, the result is never `'<none>'`.
   - **`WILDCARD_BINDS`** (`@mark.unit`, xfail P2):
-    - [ ] `hypershell.core.config.WILDCARD_BINDS is hypershell.cluster.launch.WILDCARD_BINDS`.
+    - [x] `hypershell.core.config.WILDCARD_BINDS is hypershell.cluster.launch.WILDCARD_BINDS`.
   - **The readers** (`@mark.integration`). One child interpreter per case, cached for the module,
     via `config_repr` (`tests/test_env_config.py:84`) under the `temp_site` fixture, with
     `file_layer` (`tests/test_config_unread.py:36`) for file cases. The child evaluates a tuple:
@@ -172,41 +172,41 @@ a strict xfail with reason `client-host-default P2`; the rest pass. Nothing chan
     Parametrize by reader × case. Mark a (reader, case) row xfail P2 only where HEAD differs (see
     [`research/02-tests.md`](research/02-tests.md), matrix). Case ids include `seed` and
     `advertise`. Cases:
-    - [ ] `seed` by file, and `seed-env` by environment.
-    - [ ] `host` over `advertise`.
-    - [ ] `advertise` over a specific `bind`.
-    - [ ] `advertise` by environment, with a wildcard `bind`.
-    - [ ] A specific `bind`.
-    - [ ] A wildcard `bind`.
-    - [ ] An empty `bind` from a file, and one from the environment.
-    - [ ] Nothing given.
-    - [ ] `host` given as `localhost`.
-    - [ ] A file's empty or `<none>` `advertise`.
-    - [ ] `HYPERSHELL_SERVER_HOST_ENV`.
-  - [ ] **`-H` wins** (R2, `@mark.integration`, passes on HEAD). The file gives `host`, `advertise`
+    - [x] `seed` by file, and `seed-env` by environment.
+    - [x] `host` over `advertise`.
+    - [x] `advertise` over a specific `bind`.
+    - [x] `advertise` by environment, with a wildcard `bind`.
+    - [x] A specific `bind`.
+    - [x] A wildcard `bind`.
+    - [x] An empty `bind` from a file, and one from the environment.
+    - [x] Nothing given.
+    - [x] `host` given as `localhost`.
+    - [x] A file's empty or `<none>` `advertise`.
+    - [x] `HYPERSHELL_SERVER_HOST_ENV`.
+  - [x] **`-H` wins** (R2, `@mark.integration`, passes on HEAD). The file gives `host`, `advertise`
     and `bind`. `-H x.example` reaches `ClientApp.host` and, with `-q`, `SubmitApp.queue_server`.
-  - [ ] **API defaults** (R5, `@mark.integration`, passes on HEAD). One child, with the seed file and
+  - [x] **API defaults** (R5, `@mark.integration`, passes on HEAD). One child, with the seed file and
     `HYPERSHELL_SERVER_ADVERTISE=adv.example`. These are all `'localhost'`:
     - `hypershell.client.DEFAULT_HOST` and `hypershell.submit.DEFAULT_HOST`;
     - `QueueConfig().host` and `hypershell.server.DEFAULT_BIND`;
-    - the host in the `address` default (`inspect.signature`) of `ClientThread.new` and
-      `run_client`.
-  - [ ] **The Python API source** (R5, `@mark.unit`, xfail P2). `QueueConfig`'s `host` field default
+    - the host in the `address` default (`inspect.signature`) of `ClientThread` (its `__init__`,
+      which `ClientThread.new` passes its arguments to) and `run_client`.
+  - [x] **The Python API source** (R5, `@mark.unit`, xfail P2). `QueueConfig`'s `host` field default
     is the built-in `default.server.host`. Check it with `dataclasses.fields`, by value and by
     asserting that `core/queue.py`'s source has no `default.server.bind`.
-  - [ ] **Server side** (R6, `@mark.integration`, passes on HEAD). The seed file is given. The `-H`
+  - [x] **Server side** (R6, `@mark.integration`, passes on HEAD). The seed file is given. The `-H`
     defaults of `ServerApp` and `ClusterApp`, built with the least arguments each needs, are
     `0.0.0.0`.
   - **Help and docs** (`@mark.unit`, xfail P2):
-    - [ ] The `-H` entry in `ClientApp.interface` help text and in `SubmitApp`'s names
+    - [x] The `-H` entry in `ClientApp.interface` help text and in `SubmitApp`'s names
       `server.host` and `server.advertise`.
-    - [ ] So do the `-H` entries of `docs/_include/client_help.rst` and `submit_help.rst`.
-    - [ ] `parse_reference` (`tests/test_config_schema.py`) finds `.host`, `.advertise` and `.bind`
+    - [x] So do the `-H` entries of `docs/_include/client_help.rst` and `submit_help.rst`.
+    - [x] `parse_reference` (`tests/test_config_schema.py`) finds `.host`, `.advertise` and `.bind`
       in `[server]`. `.host`'s text names `.advertise` and `.bind`, and `.advertise`'s and
       `.bind`'s name `client`.
-    - [ ] `docs/cli/client.rst` and `docs/cli/submit.rst` each have a `versionchanged:: 2.9.0`
+    - [x] `docs/cli/client.rst` and `docs/cli/submit.rst` each have a `versionchanged:: 2.9.0`
       whose body names `-H`, above the `.. include::`.
-- [ ] Nothing changes outside `tests/` and `spec/`.
+- [x] Nothing changes outside `tests/` and `spec/`.
 - **Verify:** see the frontmatter. It fences against `b88a09ae`, and the new file passes with strict
   xfails, `seed` and `advertise` rows among them and no XPASS.
 - **Touches:** `tests/test_client_host_default.py`.
