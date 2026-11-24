@@ -4,10 +4,10 @@ title: hs update writes only an integer group, and the single-task form refuses 
   filters it would ignore
 kind: fix
 appetite: small
-status: in_progress
+status: in_review
 branch: fix/update-group-and-legacy-filters
 base: develop
-current_phase: P4
+current_phase: done
 last_updated: '2026-11-24'
 phases:
 - id: P1
@@ -79,7 +79,7 @@ phases:
 - id: P4
   name: 'Gate: the whole suite serially, PostgreSQL, the red list, the drive, the
     docs'
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
@@ -91,7 +91,7 @@ phases:
   - P3
   parallel: false
   hammerable: false
-  hill: uphill
+  hill: downhill
   verify: test -n "$HS_TEST_POSTGRES" && env -u HS_TEST_POSTGRES sh spec/update-client-retry/drive/bound.sh
     5400 uv run pytest -q -p no:cacheprovider && sh spec/update-client-retry/drive/bound.sh
     2400 uv run pytest -q -p no:cacheprovider tests/test_update_group.py tests/test_group_integer.py
@@ -235,10 +235,10 @@ with or without `-f`, and writes nothing; everything else behaves as before; the
 **Goal:** nothing else broke; every red test is green; the red list is still red on `03a02bd8`; both
 drive modes pass; the docs build with `-W`.
 
-- [ ] Run the frontmatter verify (sandbox off, `HS_TEST_POSTGRES` exported): the whole suite with
+- [x] Run the frontmatter verify (sandbox off, `HS_TEST_POSTGRES` exported): the whole suite with
       `HS_TEST_POSTGRES` unset, then the PostgreSQL-aware update and group files with it set. Record
       counts and time in the commit body.
-- [ ] Release note: nothing to write here; `hs-publish` drafts the squash body from GOAL.md's two
+- [x] Release note: nothing to write here; `hs-publish` drafts the squash body from GOAL.md's two
       user-visible changes.
 - **Touches:** `spec/update-group-and-legacy-filters/TECH.md` only.
 
