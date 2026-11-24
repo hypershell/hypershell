@@ -223,7 +223,32 @@ form. **The table** is `bounded-inputs`' range table (`SETTINGS`), its parsers, 
 
   *Consequence, accepted by the maintainer:* a misspelled column is written as a tag instead of
   being refused. Without `-f` the prompt shows it; under `-f`, and in the single-task form, which
-  never prompts, it is written without one.
+  never prompts, it is written without one. *Amended by R17 (maintainer, 2026-11-24):* a
+  misspelling within one edit of a column is refused; only a farther one becomes a tag.
+
+**A near-miss column key is refused** (maintainer, 2026-11-24).
+
+- **R17** — IF, under R16, a `KEY=VALUE` in the filtered form, or `hs update ID KEY VALUE` in the
+  single-task form, has a KEY that is not a column of `Task` but is within one edit of a column
+  name, THEN `hs update` SHALL exit 2 before it counts the matching tasks, prints the count or
+  prompts, and SHALL write nothing, neither that change nor any other given with it; `-f` SHALL NOT
+  change this. *One edit* is Damerau distance 1 (an insertion, a deletion, a substitution, or a
+  swap of two adjacent characters), compared without regard to case, so `exit_stauts` and
+  `Exit_Status` (and any key equal to a column name ignoring case) are caught. Every column counts,
+  the short names included (`id`, `tag`, `zone`, `part`, `group`). The message SHALL name the key,
+  say it is not a task column, suggest the nearest column (every tie, if several), and say how to
+  set a tag by that name, for example:
+  `exit_stauts: not a task column; did you mean exit_status? To set a tag by that name, write
+  exit_stauts:VALUE`. `KEY:VALUE` SHALL never be checked: it always sets a tag, even when KEY is
+  close to or equal to a column name, and is the way to reach a tag whose name resembles a column.
+  Tests SHALL cover both forms and both backends: a transposition, an insertion, a deletion, a
+  substitution and a case-only difference; a short-name near-miss; a key two edits away, which
+  becomes a tag (R16); the `:` way out with a near-miss key and with an exact column name; and
+  nothing written on a refusal under `-f`. The help, `docs/_include/task_update_desc.rst` and the
+  release note SHALL state the rule and the `:` way out.
+
+  *Consequence, accepted by the maintainer:* a tag whose name is one edit from a column (`tags`,
+  `ip`, `groups`, `zones`) cannot be set by `KEY=VALUE`; it is refused, and `KEY:VALUE` sets it.
 
 ### User-visible changes (the release note)
 
@@ -258,8 +283,12 @@ Each is a change from `develop` `39834600` and from 2.8.x.
 10. **`KEY=VALUE` with a key that is not a task column is a tag change,** the same as `KEY:VALUE`, in
     both forms (`hs update ID KEY VALUE` too). Earlier releases refused it, exit 2 (`Unrecognized
     task field`, `Invalid field name`). The prompt shows each change as a column or a tag.
-    *Affects:* a misspelled column (`exit_stauts=0`) is now written as a tag instead of refused;
-    check the prompt, and take care under `-f` and in the single-task form, which do not prompt.
+    *Affects:* a misspelled column more than one edit from any column is now written as a tag
+    instead of refused; check the prompt, and take care under `-f` and in the single-task form,
+    which do not prompt.
+11. **A key one edit from a column is refused** (`exit_stauts=0`, `Exit_Status=0`, `tags=x`), exit 2,
+    naming the key and the nearest column, with nothing written. `KEY:VALUE` always sets a tag, and
+    is the way to set a tag whose name is close to a column's.
 
 ## Non-goals (no-gos)
 
@@ -415,6 +444,13 @@ Approved. Rulings, with who made each:
   is where it shows.
 
 No R-ID was renumbered; R16 is appended. The contract is locked; `hs-plan` designs against it.
+
+- **C12 (maintainer, 2026-11-24, amendment after the gate):** a `KEY=VALUE` whose key is not a
+  column but is within one edit (Damerau distance 1, case-insensitive) of a column name is refused,
+  exit 2, suggesting the nearest column and the `KEY:VALUE` way out; `KEY:VALUE` is never checked
+  (R17, appended). R16's misspelling consequence is amended: only a misspelling farther than one
+  edit becomes a tag. Short column names count, so `tags=`, `ip=`, `groups=` and `zones=` are
+  refused.
 
 ## Related materials
 
