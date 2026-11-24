@@ -235,6 +235,18 @@ naming a missing program still ends the relay.
 `relay/site.py`, `cluster/remote.py` (direct launches)*
 **Seed:** [`issues/relay-direct-launch-missing-program.md`](issues/relay-direct-launch-missing-program.md) · *status: unshaped*
 
+## `hs client` dials `server.bind`, not `server.host`
+
+`hs client` defaults `-H` to `server.bind` (`client.py:1657`), though the configuration reference
+says clients dial `server.host`, and `hs submit --queue` does. A shared configuration with
+`bind = "0.0.0.0"` and `host` set to the login node's name sends every client to `0.0.0.0`, its own
+node. The fix makes `server.host` the default, keeps `-H` over it, and decides at shaping whether a
+setup that relied on `bind` being dialled gets a fallback or a release note.
+
+*Target: 2.9.0 · Horizon: near-term, small · Depends on: — · Refs: `src/hypershell/client.py`,
+`core/queue.py` (`QueueConfig.host`); blocks the RCAC user guide's tier 3*
+**Seed:** [`issues/client-host-default-from-bind.md`](issues/client-host-default-from-bind.md) · *status: unshaped*
+
 ## `hs update group=…` stores a non-integer group
 
 `hs update` accepts any value for `group` and stores it, so a text group reaches the scheduler even after submit-time validation (`submit-input-checks`) refuses one. Apply the submit-time integer rule to `hs update group=…`, refusing with exit 2 before anything is written.
