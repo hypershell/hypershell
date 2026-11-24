@@ -3,10 +3,10 @@ slug: client-host-default-from-bind
 title: hs client dials server.host when no -H is given
 kind: fix
 appetite: small
-status: in_progress
+status: in_review
 branch: fix/client-host-default-from-bind
 base: develop
-current_phase: P3
+current_phase: done
 last_updated: '2026-11-23'
 phases:
 - id: P1
@@ -61,7 +61,7 @@ phases:
 - id: P3
   name: 'The release note; gate: the whole suite serially under 3.14 and 3.11, the
     docs'
-  status: pending
+  status: done
   satisfies: *id001
   depends_on:
   - P2
@@ -265,17 +265,17 @@ the rule in this same commit (invariants §12).
 **Goal:** the squash body says what changes for whom. The change holds together on both Pythons,
 with the docs.
 
-- [ ] Write `spec/client-host-default-from-bind/RELEASE-NOTE.md` (PLAN §2.5;
+- [x] Write `spec/client-host-default-from-bind/RELEASE-NOTE.md` (PLAN §2.5;
   [`research/03-docs.md`](research/03-docs.md) draft). The format is a heading, one context
   paragraph, `---`, then the plain-text body:
-  - [ ] One paragraph on the fix and the rule.
-  - [ ] A "Behaviour change:" paragraph covering the four configurations (`host` given;
+  - [x] One paragraph on the fix and the rule.
+  - [x] A "Behaviour change:" paragraph covering the four configurations (`host` given;
     `advertise` without `host`; only a specific `bind`; a wildcard `bind` with nothing else).
-  - [ ] That `-H`, the Python API defaults and `server.advertise`'s meaning for launched clients are
+  - [x] That `-H`, the Python API defaults and `server.advertise`'s meaning for launched clients are
     unchanged.
-  - [ ] That a `host_eval` no longer runs at every command's start.
-  - [ ] That an unset `_env` form is refused, naming the key.
-- [ ] Commit body: the suite totals per Python. Re-run a flaky failure once and record its node id
+  - [x] That a `host_eval` no longer runs at every command's start.
+  - [x] That an unset `_env` form is refused, naming the key.
+- [x] Commit body: the suite totals per Python. Re-run a flaky failure once and record its node id
   and both outcomes.
 - **Verify:** see the frontmatter (the release-note greps, the whole suite serially on 3.14 and
   3.11, and the Sphinx `-W` build).
