@@ -4,7 +4,7 @@ title: hs update writes only an integer group, and the single-task form refuses 
   filters it would ignore
 kind: fix
 appetite: small
-status: in_review
+status: done
 branch: fix/update-group-and-legacy-filters
 base: develop
 current_phase: done
