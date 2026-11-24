@@ -477,10 +477,14 @@ seen they steer every polling FSM toward shutdown. **Do not add stray `reset_sig
   `cluster/launch.py::advertised_host` gives: `--advertise`/`server.advertise` when given (remote
   `hs cluster` modes only), or for a relay's site clients `hs relay --advertise`/`relay.advertise`
   (never `server.advertise`), else the bind address, else this host's own `HOSTNAME` for a
-  wildcard (`0.0.0.0`) bind; whichever it is must be routable from clients. Only `ClusterApp` and
-  `RelayApp` read those keys; constructors take `advertise=`. A relay's site cluster computes the
-  address once (`AutoScalingCluster.advertised`), and every zone's `relay/site.py::zone_launch`
-  dials that, so no zone can be told another. The
+  wildcard (`0.0.0.0`) bind; whichever it is must be routable from clients. Of the launchers only
+  `ClusterApp` and `RelayApp` read those keys; constructors take `advertise=`. A client given no
+  `-H` (`hs client`, `hs submit --queue`, `QueueConfig.load()`) dials
+  `core/config.py::client_host`, read when the command starts: `server.host` when a layer gives it,
+  else `server.advertise`, else a specific `server.bind`, else `localhost`; no client-side default
+  reads `bind` directly, and the Python API defaults stay `localhost`. A relay's site cluster
+  computes the address once (`AutoScalingCluster.advertised`), and every zone's
+  `relay/site.py::zone_launch` dials that, so no zone can be told another. The
   `AutoScaler` never terminates clients (they self-exit on idle) and silently ignores
   `no_confirm`/`in_memory`/`forever`/`restart`.
 - **A cluster with every launched client gone and work left exits 5** (`ClusterLaunchError`).

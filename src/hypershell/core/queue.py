@@ -37,7 +37,7 @@ except ImportError:  # Not POSIX: no open-file limit to manage
     resource = None
 
 # Internal libs
-from hypershell.core.config import default, config as _config
+from hypershell.core.config import default, config as _config, client_host
 from hypershell.core.logging import Logger, close_inherited_slot_locks
 from hypershell.core.types import NoneType, serialize
 from hypershell.core.tls import (TLSConfig, TLSError, install_process_context, build_server_context,
@@ -1086,7 +1086,7 @@ class SecureManager(BaseManager):
 class QueueConfig:
     """Connection details for queue interface."""
 
-    host: str = default.server.bind
+    host: str = default.server.host
     port: int = default.server.port
     auth: str = default.server.auth
     size: int = default.server.queuesize
@@ -1104,7 +1104,7 @@ class QueueConfig:
         # any `[server.tls]` keys; from_namespace then treats that as "TLS off".
         tls_ns = _config.server.get('tls') if hasattr(_config.server, 'get') else None
         return cls.from_dict({
-            'host': _config.server.host,
+            'host': client_host(_config),
             'port': _config.server.port,
             'auth': _config.server.auth,
             'size': _config.server.queuesize,

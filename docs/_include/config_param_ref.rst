@@ -184,13 +184,34 @@
         to dial the bind address when it is one specific address, and this host's own name when
         it is *0.0.0.0*, unless ``.advertise`` names another.
 
+        A `client`, or ``submit --queue``, given no ``-H`` dials the bind address only when
+        neither ``.host`` nor ``.advertise`` is given and it is one specific address; otherwise
+        *localhost*.
+
+        .. only:: html
+
+            .. versionchanged:: 2.9.0
+               A `client` given neither ``.host`` nor ``.advertise`` dials it only when it is one
+               specific address, else *localhost*; ``submit --queue`` now does too.
+
     ``.host``
-        Host address that clients connect to (default: `localhost`).
+        Address that *clients* dial (default: by ``.advertise`` or ``.bind``).
 
         Counterpart to ``.bind``: where ``.bind`` is the local address the server listens on,
         ``.host`` is the address that `client` instances and queue-direct ``submit --queue``
-        dial to reach the server. Set this to the server's reachable hostname or address
-        when running clients on other machines.
+        dial when given no ``-H``. Set it to the server's reachable name when clients run on
+        other machines, so one shared file serves both, e.g. ``bind = "0.0.0.0"`` with
+        ``host = "login00.example.edu"``.
+
+        It counts as given when any configuration file or ``HYPERSHELL_SERVER_HOST`` gives it,
+        even as *localhost*. When none does, they dial ``.advertise`` if given, else ``.bind``
+        when it is one specific address, else *localhost*. The ``-H`` option takes precedence.
+
+        .. only:: html
+
+            .. versionchanged:: 2.9.0
+               `client` dials it; before, it dialled ``.bind``. Without it, `client` and
+               ``submit --queue`` dial ``.advertise`` or a specific ``.bind``.
 
     ``.advertise``
         Address the clients a `cluster` launches are told to dial (default: by ``.bind``).
@@ -199,13 +220,17 @@
         ``--launcher`` and ``--autoscaling``), for a name the clients must use that differs from
         the bind address, such as the name on the server's certificate. The ``--advertise``
         option takes precedence. A local `cluster`, whose clients are not launched, ignores it,
-        and so does a relay: its site *clients* are told ``relay.advertise`` instead. Its
+        and so does a relay: its site *clients* are told ``relay.advertise`` instead. A `client`
+        or ``submit --queue`` given no ``-H`` also dials it when ``.host`` is not given. Its
         environment form is ``HYPERSHELL_SERVER_ADVERTISE``.
 
         .. only:: html
 
             .. versionadded:: 2.9.0
                :pr:`107`
+
+            .. versionchanged:: 2.9.0
+               `client` and ``submit --queue`` dial it when ``.host`` is not given.
 
     ``.port``
         Port number (default: `50001`).

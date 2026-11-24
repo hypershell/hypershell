@@ -39,7 +39,7 @@ from cmdkit.config import Configuration, Namespace, ConfigurationError
 
 # Internal libs
 from hypershell.core import config as config_module
-from hypershell.core.config import default, PARAM_UNSET
+from hypershell.core.config import default, client_host, PARAM_UNSET
 from hypershell.core.queue import QueueConfig
 from hypershell.client import ClientApp
 from hypershell.submit import SubmitApp
@@ -47,14 +47,6 @@ from tests.test_env_config import config_repr
 from tests.test_config_unread import file_layer
 from tests.test_config_schema import parse_reference
 
-
-client_host = getattr(config_module, 'client_host', None)
-
-FIX: Final[str] = 'client-host-default P2'
-"""Reason of every test that needs the fix, removed when the fix lands."""
-
-NEEDS_FIX: Final = mark.xfail(strict=True, reason=FIX)
-"""Mark of a test, or a row, that fails until the fix lands."""
 
 REPO: Final[Path] = Path(__file__).resolve().parent.parent
 SEED_HOST: Final[str] = 'login00.example.edu'
@@ -99,7 +91,6 @@ RULE: Final[List] = [
 
 
 @mark.unit
-@NEEDS_FIX
 @mark.parametrize('layers, variables, expected', RULE)
 def test_client_host(monkeypatch: pytest.MonkeyPatch, layers: Dict[str, dict], variables: Dict[str, str],
                      expected: str) -> None:
@@ -110,7 +101,6 @@ def test_client_host(monkeypatch: pytest.MonkeyPatch, layers: Dict[str, dict], v
 
 
 @mark.unit
-@NEEDS_FIX
 def test_client_host_unset_env_form(monkeypatch: pytest.MonkeyPatch) -> None:
     """A `host_env` naming a variable that is not set is refused, and the message names the key."""
     monkeypatch.delenv('CHD_UNSET', raising=False)
@@ -119,7 +109,6 @@ def test_client_host_unset_env_form(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @mark.unit
-@NEEDS_FIX
 def test_client_host_update_layer() -> None:
     """A `host` given by an in-place update of the configuration counts as given."""
     base = layered(local=server(bind=SPECIFIC, advertise=ADVERTISE))
@@ -128,7 +117,6 @@ def test_client_host_update_layer() -> None:
 
 
 @mark.unit
-@NEEDS_FIX
 def test_client_host_never_unset_marker(monkeypatch: pytest.MonkeyPatch) -> None:
     """No configuration of the rule's rows, nor a file that writes the marker, has a client dial it."""
     monkeypatch.setenv('CHD_HOST', SEED_HOST)
@@ -141,7 +129,6 @@ def test_client_host_never_unset_marker(monkeypatch: pytest.MonkeyPatch) -> None
 
 
 @mark.unit
-@NEEDS_FIX
 def test_wildcard_binds_shared() -> None:
     """The client rule and the address `hs cluster` advertises share one set of wildcard binds."""
     from hypershell.cluster import launch
@@ -173,31 +160,26 @@ READER_NAMES: Final[Tuple[str, ...]] = ('client', 'submit', 'queue')
 SEED_FILE: Final[str] = f'[server]\nbind = "0.0.0.0"\nhost = "{SEED_HOST}"\n'
 """The seed's shared configuration file."""
 
-CASES: Final[Dict[str, Tuple[Optional[str], Dict[str, str], str, Tuple[str, ...]]]] = {
-    # case: (file text, variables, expected, readers that differ before the fix)
-    'seed': (SEED_FILE, {}, SEED_HOST, ('client', )),
-    'seed-env': (None, {'HYPERSHELL_SERVER_BIND': '0.0.0.0', 'HYPERSHELL_SERVER_HOST': SEED_HOST}, SEED_HOST,
-                 ('client', )),
+CASES: Final[Dict[str, Tuple[Optional[str], Dict[str, str], str]]] = {
+    # case: (file text, variables, expected)
+    'seed': (SEED_FILE, {}, SEED_HOST),
+    'seed-env': (None, {'HYPERSHELL_SERVER_BIND': '0.0.0.0', 'HYPERSHELL_SERVER_HOST': SEED_HOST}, SEED_HOST),
     'host-over-advertise': (f'[server]\nhost = "{SEED_HOST}"\n', {'HYPERSHELL_SERVER_ADVERTISE': ADVERTISE},
-                            SEED_HOST, ('client', )),
-    'advertise-over-bind': (f'[server]\nbind = "{SPECIFIC}"\nadvertise = "{ADVERTISE}"\n', {}, ADVERTISE,
-                            ('client', 'submit', 'queue')),
+                            SEED_HOST),
+    'advertise-over-bind': (f'[server]\nbind = "{SPECIFIC}"\nadvertise = "{ADVERTISE}"\n', {}, ADVERTISE),
     'advertise-env-wildcard-bind': (None, {'HYPERSHELL_SERVER_ADVERTISE': ADVERTISE,
-                                           'HYPERSHELL_SERVER_BIND': '0.0.0.0'}, ADVERTISE,
-                                    ('client', 'submit', 'queue')),
-    'specific-bind': (None, {'HYPERSHELL_SERVER_BIND': SPECIFIC}, SPECIFIC, ('submit', 'queue')),
-    'wildcard-bind': ('[server]\nbind = "0.0.0.0"\n', {}, 'localhost', ('client', )),
-    'empty-bind-file': ('[server]\nbind = ""\n', {}, 'localhost', ('client', )),
-    'empty-bind-env': (None, {'HYPERSHELL_SERVER_BIND': ''}, 'localhost', ()),
-    'nothing-given': (None, {}, 'localhost', ()),
+                                           'HYPERSHELL_SERVER_BIND': '0.0.0.0'}, ADVERTISE),
+    'specific-bind': (None, {'HYPERSHELL_SERVER_BIND': SPECIFIC}, SPECIFIC),
+    'wildcard-bind': ('[server]\nbind = "0.0.0.0"\n', {}, 'localhost'),
+    'empty-bind-file': ('[server]\nbind = ""\n', {}, 'localhost'),
+    'empty-bind-env': (None, {'HYPERSHELL_SERVER_BIND': ''}, 'localhost'),
+    'nothing-given': (None, {}, 'localhost'),
     'host-given-as-localhost': (f'[server]\nhost = "localhost"\nadvertise = "{ADVERTISE}"\nbind = "{SPECIFIC}"\n',
-                                {}, 'localhost', ('client', )),
-    'empty-advertise-file': (f'[server]\nadvertise = ""\nbind = "{SPECIFIC}"\n', {}, SPECIFIC,
-                             ('submit', 'queue')),
-    'unset-marker-advertise-file': (f'[server]\nadvertise = "{PARAM_UNSET}"\nbind = "{SPECIFIC}"\n', {}, SPECIFIC,
-                                    ('submit', 'queue')),
+                                {}, 'localhost'),
+    'empty-advertise-file': (f'[server]\nadvertise = ""\nbind = "{SPECIFIC}"\n', {}, SPECIFIC),
+    'unset-marker-advertise-file': (f'[server]\nadvertise = "{PARAM_UNSET}"\nbind = "{SPECIFIC}"\n', {}, SPECIFIC),
     'host-env-form': (None, {'HYPERSHELL_SERVER_HOST_ENV': 'CHD_HOST', 'CHD_HOST': SEED_HOST,
-                             'HYPERSHELL_SERVER_BIND': '0.0.0.0'}, SEED_HOST, ('client', )),
+                             'HYPERSHELL_SERVER_BIND': '0.0.0.0'}, SEED_HOST),
 }
 """Each configuration given to the readers: by file, by environment, or both."""
 
@@ -208,7 +190,7 @@ SEEN: Dict[str, Tuple[str, str, str]] = {}
 def read_case(site: Path, case: str) -> Tuple[str, str, str]:
     """The three readers' hosts for `case`, from one child in `site` (cached for the module)."""
     if case not in SEEN:
-        text, variables, _, _ = CASES[case]
+        text, variables, _ = CASES[case]
         variables = {**(file_layer(site, text) if text is not None else {}), **variables}
         rc, seen, stderr = config_repr(site, 'readers()', READERS, **variables)
         assert rc == exit_status.success, stderr
@@ -217,10 +199,9 @@ def read_case(site: Path, case: str) -> Tuple[str, str, str]:
 
 
 def reader_rows() -> List:
-    """Each (reader, case) row, marked where the reader differs before the fix."""
-    return [pytest.param(reader, case, expected, id=f'{reader}-{case}',
-                         marks=[NEEDS_FIX] if reader in differ else [])
-            for case, (_, _, expected, differ) in CASES.items() for reader in READER_NAMES]
+    """Each (reader, case) row."""
+    return [pytest.param(reader, case, expected, id=f'{reader}-{case}')
+            for case, (_, _, expected) in CASES.items() for reader in READER_NAMES]
 
 
 @mark.integration
@@ -273,7 +254,6 @@ def test_api_defaults_stay_localhost(temp_site: Path) -> None:
 
 
 @mark.unit
-@NEEDS_FIX
 def test_queue_config_default_from_host() -> None:
     """`QueueConfig`'s host default is the built-in `server.host`, and the queue module never names `bind`."""
     field, = [field for field in dataclasses.fields(QueueConfig) if field.name == 'host']
@@ -320,7 +300,6 @@ def rst_entry(path: Path, option: str) -> str:
 
 
 @mark.unit
-@NEEDS_FIX
 @mark.parametrize('app', [ClientApp, SubmitApp], ids=['client', 'submit'])
 def test_help_states_rule(app) -> None:
     """The `-H` entry of `--help` names `server.host` and `server.advertise`."""
@@ -329,7 +308,6 @@ def test_help_states_rule(app) -> None:
 
 
 @mark.unit
-@NEEDS_FIX
 @mark.parametrize('page', ['client_help.rst', 'submit_help.rst'])
 def test_help_page_states_rule(page: str) -> None:
     """The `-H` entry of the help page names `server.host` and `server.advertise`."""
@@ -338,7 +316,6 @@ def test_help_page_states_rule(page: str) -> None:
 
 
 @mark.unit
-@NEEDS_FIX
 def test_reference_states_rule() -> None:
     """`[server]` `.host` names its fallbacks, and `.advertise` and `.bind` say a `client` dials them."""
     reference = parse_reference()
@@ -353,7 +330,6 @@ MARKER: Final[re.Pattern] = re.compile(r'^\.\. versionchanged:: 2\.9\.0\n((?:   
 
 
 @mark.unit
-@NEEDS_FIX
 @mark.parametrize('command', ['client', 'submit'])
 def test_cli_page_marks_change(command: str) -> None:
     """The command's page marks the `-H` change above its generated help."""

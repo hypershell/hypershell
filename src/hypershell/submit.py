@@ -65,7 +65,8 @@ from cmdkit.cli import Interface, ArgumentError
 
 # Internal libs
 from hypershell.core.logging import Logger
-from hypershell.core.config import config, default, resolve_auth, refuse_key_option, AUTH_ENV, SERVER_KEY_SOURCES
+from hypershell.core.config import (config, default, resolve_auth, refuse_key_option, AUTH_ENV, SERVER_KEY_SOURCES,
+                                    client_host)
 from hypershell.core.fsm import State, StateMachine
 from hypershell.core.tls import TLSConfig, from_namespace as tls_from_namespace
 from hypershell.core.queue import (QueueClient, QueueConfig, QueueSubmitRefused,
@@ -1540,7 +1541,8 @@ Options:
       --repeat               Re-submit a known file's tasks again as a new source.
       --update               Submit only tasks not already present from a known file.
   -q, --queue                Submit to live queue instead of database (key from {AUTH_ENV} or server.auth).
-  -H, --host         ADDR    Hostname for server (default: {DEFAULT_HOST}). Used with --queue.
+  -H, --host         ADDR    Hostname for server, used with --queue (default: server.host, else
+                             server.advertise, else server.bind if one address, else localhost).
   -p, --port         NUM     Port number for server (default: {DEFAULT_PORT}). Used with --queue.
       --no-tls               Disable TLS for queue interface (not recommended).
       --tls-key              Path to TLS private key file (default: <auto>).
@@ -1611,7 +1613,7 @@ class SubmitApp(Application):
 
     queue: Optional[QueueConfig]
     queue_mode: bool = False
-    queue_server: str = config.server.host
+    queue_server: Optional[str] = None  # By client_host with --queue when not given (see check_arguments)
     queue_port: int = config.server.port
     queue_auth: Optional[str] = None  # The key is resolve_auth('server') (see run)
     interface.add_argument('-q', '--queue', action='store_true', dest='queue_mode')
@@ -1647,7 +1649,7 @@ class SubmitApp(Application):
     }
 
     def check_arguments(self: SubmitApp) -> None:
-        """Reject contradictory re-submission flags before doing any work."""
+        """Reject contradictory flags before doing any work; with --queue, settle the host it dials."""
         if self.update_mode and self.repeat_mode:
             raise ArgumentError('Cannot combine --update with --repeat')
         if self.zone is not None:
@@ -1657,6 +1659,8 @@ class SubmitApp(Application):
                 self.zone = zone_name(self.zone)
             except ValueError as error:
                 raise ArgumentError(str(error)) from error
+        if self.queue_mode and self.queue_server is None:
+            self.queue_server = client_host()
 
     def run(self: SubmitApp) -> None:
         """Run submit thread.

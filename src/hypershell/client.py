@@ -63,7 +63,7 @@ from hypershell.data.model import (Task, serialize_tasks, deserialize_tasks, zon
 from hypershell.core.heartbeat import Heartbeat, ClientState
 from hypershell.core.platform import default_path
 from hypershell.core.config import (default, config, load_task_env, SSH_GROUPS, resolve_auth, refuse_key_option,
-                                    AUTH_ENV, is_key_variable, config_seconds, blame)
+                                    AUTH_ENV, is_key_variable, config_seconds, blame, client_host)
 from hypershell.core.config_schema import Kind, read_value
 from hypershell.core.fsm import State, StateMachine
 from hypershell.core.pretty_print import format_bytes
@@ -1622,7 +1622,8 @@ Options:
                             HYPERSHELL_CLIENT_BUNDLESIZE when set, else server's).
   -w, --bundlewait    SEC   Wait before flushing tasks, none once idle; seconds, 30s, 5m or [D-]HH:MM:SS (default: client.bundlewait, {DEFAULT_BUNDLEWAIT}).
       --zone          NAME  Run only tasks of this zone (default: tasks without a zone).
-  -H, --host          ADDR  Hostname for server (default: {DEFAULT_HOST}).
+  -H, --host          ADDR  Hostname for server (default: server.host, else server.advertise,
+                            else server.bind if one address, else localhost).
   -p, --port          NUM   Port number for server (default: {DEFAULT_PORT}).
       --no-tls              Disable TLS for queue interface (not recommended).
       --tls-key             Path to TLS private key file (default: <auto>).
@@ -1654,7 +1655,7 @@ class ClientApp(Application):
     interface.add_argument('-N', '--num-threads', '--num-tasks', type=int, default=num_threads, dest='num_threads')
     # NOTE: --num-tasks maintained for backwards compatibility
 
-    host: str = config.server.bind
+    host: Optional[str] = None  # By client_host when not given (see check_args)
     interface.add_argument('-H', '--host', default=host)
 
     port: int = config.server.port
@@ -1787,6 +1788,8 @@ class ClientApp(Application):
         if self.task_timeout is not None and self.task_timeout <= 0:
             raise ArgumentError('Client --task-timeout should be positive integer')
         self.heartrate = config_seconds('client', 'heartrate')
+        if self.host is None:
+            self.host = client_host()
         if self.auth == DEFAULT_AUTH:
             log.warning('Using default authentication key - do not use this in production!')
         if not self.tls_enabled:

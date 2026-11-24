@@ -6,7 +6,7 @@ appetite: small
 status: in_progress
 branch: fix/client-host-default-from-bind
 base: develop
-current_phase: P2
+current_phase: P3
 last_updated: '2026-11-23'
 phases:
 - id: P1
@@ -27,7 +27,7 @@ phases:
 - id: P2
   name: 'One rule for every configured client dial: client_host, its three readers,
     help, docs, completion and agent docs'
-  status: pending
+  status: done
   satisfies: &id001
   - R1
   - R2
@@ -217,40 +217,40 @@ a strict xfail with reason `client-host-default P2`; the rest pass. Nothing chan
 Python API keeps `localhost` without naming `bind`. The docs, help, completion and agent docs state
 the rule in this same commit (invariants §12).
 
-- [ ] `src/hypershell/core/config.py`:
-  - [ ] Move `WILDCARD_BINDS` here.
-  - [ ] Add `client_host(base=None)` and the private form-then-layer helper (PLAN §2.1).
-  - [ ] Add both to `__all__`.
-  - [ ] Keep `default['server']['host'] = 'localhost'` as is.
-- [ ] `src/hypershell/cluster/launch.py`: import `WILDCARD_BINDS` from `core.config`. Keep it in
+- [x] `src/hypershell/core/config.py`:
+  - [x] Move `WILDCARD_BINDS` here.
+  - [x] Add `client_host(base=None)` and the private form-then-layer helper (PLAN §2.1).
+  - [x] Add both to `__all__`.
+  - [x] Keep `default['server']['host'] = 'localhost'` as is.
+- [x] `src/hypershell/cluster/launch.py`: import `WILDCARD_BINDS` from `core.config`. Keep it in
   `__all__`. `advertised_host` is unchanged.
-- [ ] `src/hypershell/client.py`:
-  - [ ] `host: Optional[str] = None`.
-  - [ ] In `check_args`: `if self.host is None: self.host = client_host()`.
-  - [ ] Replace `{DEFAULT_HOST}` in the `-H` help line with the rule, wrapped to the description
+- [x] `src/hypershell/client.py`:
+  - [x] `host: Optional[str] = None`.
+  - [x] In `check_args`: `if self.host is None: self.host = client_host()`.
+  - [x] Replace `{DEFAULT_HOST}` in the `-H` help line with the rule, wrapped to the description
     column.
-- [ ] `src/hypershell/submit.py`:
-  - [ ] `queue_server: Optional[str] = None`.
-  - [ ] In `check_arguments`: resolve it with `client_host()` when `queue_mode` and `None`.
-  - [ ] Update the `-H` help line in the same way.
-- [ ] `src/hypershell/core/queue.py`:
-  - [ ] `QueueConfig.host: str = default.server.host`.
-  - [ ] `load()` sets `'host': client_host(_config)`.
-- [ ] `src/hypershell/server.py`: `DEFAULT_BIND: Final[str] = default.server.bind`.
-- [ ] `docs/_include/client_help.rst` and `submit_help.rst`: update the `-H` entries (PLAN §2.4).
-- [ ] `docs/_include/config_param_ref.rst` `[server]`:
-  - [ ] `.host`: worded default and the rule.
-  - [ ] `.advertise` and `.bind`: the client sentence.
-  - [ ] `.. versionchanged:: 2.9.0` in `.. only:: html` blocks.
-- [ ] `docs/cli/client.rst` and `docs/cli/submit.rst`: a `.. versionchanged:: 2.9.0` above each
+- [x] `src/hypershell/submit.py`:
+  - [x] `queue_server: Optional[str] = None`.
+  - [x] In `check_arguments`: resolve it with `client_host()` when `queue_mode` and `None`.
+  - [x] Update the `-H` help line in the same way.
+- [x] `src/hypershell/core/queue.py`:
+  - [x] `QueueConfig.host: str = default.server.host`.
+  - [x] `load()` sets `'host': client_host(_config)`.
+- [x] `src/hypershell/server.py`: `DEFAULT_BIND: Final[str] = default.server.bind`.
+- [x] `docs/_include/client_help.rst` and `submit_help.rst`: update the `-H` entries (PLAN §2.4).
+- [x] `docs/_include/config_param_ref.rst` `[server]`:
+  - [x] `.host`: worded default and the rule.
+  - [x] `.advertise` and `.bind`: the client sentence.
+  - [x] `.. versionchanged:: 2.9.0` in `.. only:: html` blocks.
+- [x] `docs/cli/client.rst` and `docs/cli/submit.rst`: a `.. versionchanged:: 2.9.0` above each
   `.. include::`.
-- [ ] `share/zsh/site-functions/_hs`: the `hs client -H` description becomes `(default: by
+- [x] `share/zsh/site-functions/_hs`: the `hs client -H` description becomes `(default: by
   server.host)`.
-- [ ] `AGENTS.md` (the `advertised_host` paragraph) and `.agents/factory/invariants.md` §11: one
+- [x] `AGENTS.md` (the `advertised_host` paragraph) and `.agents/factory/invariants.md` §11: one
   sentence each for the client rule (`core/config.py::client_host`). Amend "only
   `ClusterApp`/`RelayApp` read" `advertise` to say clients given no `-H` read it too, through
   `client_host`.
-- [ ] Remove every `client-host-default P2` xfail marker.
+- [x] Remove every `client-host-default P2` xfail marker.
 - **Verify:** see the frontmatter. It runs the new file and the neighbouring config, client, submit,
   cluster-advertise and relay-advertise suites with no XPASS and no marker left. It also covers the
   source greps, the `--help` drive in a throwaway site with `HYPERSHELL_CONFIG_FILE` empty,

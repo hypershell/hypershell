@@ -52,9 +52,11 @@ Options
     file, and must match the server's.
 
 ``-H``, ``--host`` *ADDR*
-    Hostname or IP address for server (default: localhost).
+    Hostname or IP address for server (default: ``server.host``).
 
-    Only used with ``--queue`` mode to specify the server to connect to.
+    Only used with ``--queue`` mode to specify the server to connect to. With no ``-H``, it is
+    ``server.host`` when the configuration gives it, else ``server.advertise``, else
+    ``server.bind`` when it is one specific address, else *localhost*, as for `client`.
 
 ``-p``, ``--port`` *NUM*
     Port number for server (default: 50001).
