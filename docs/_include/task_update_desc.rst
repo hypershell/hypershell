@@ -2,6 +2,10 @@ Update tasks in the database.
 
 Include any number of `FIELD=VALUE` or tag `KEY:VALUE` positional arguments.
 
+A group change (``group=VALUE``, or ``ID group VALUE`` in the single-task form) takes an integer as
+``hs submit -g`` does, in the 32-bit range; any other value exits with status 2 before anything is
+counted, asked or written, and no other change given with it is written.
+
 The ``-w``/``--where`` and ``-t``/``--with-tag`` operate just as in the search command.
 Each takes the words that follow it up to the next option, so the changes go before them
 (e.g., ``hs update group=7 color:red -t color:blue``).
@@ -33,3 +37,7 @@ The legacy interface for updating a single task with the `ID`, `FIELD`,
 and `VALUE` as positional arguments remains valid.
 The single-task form takes no ``--cancel``, ``--revert``, ``--delete`` or ``--remove-tag``;
 given one, it exits with status 2 and writes nothing.
+The single-task form takes no option that selects tasks (``-w``, ``-t``, ``-g``, ``-l``, ``-s``,
+``--desc``, ``-F``, ``-S``, ``-C``, ``-R``, ``-X``, ``--retries``, ``--signal``); given one, it exits
+with status 2 and writes nothing. To write a task only if it matches, use the filtered form:
+``hs update FIELD=VALUE -w "id == ID" -F``.

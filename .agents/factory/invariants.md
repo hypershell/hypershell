@@ -116,7 +116,9 @@ subsystems.
 - **A task group must be an integer** (`ensure_group`: an `int`, not a `bool`, in PostgreSQL's
   32-bit range) wherever input sets it: an inline or tag-only `group:` tag, `-t group:…` (exit 2,
   before any input is read), a `--from-json` `group` key. Anything else raises `TaskGroupError`
-  (exit 5) naming the value and its line or record. `Task.new(group=…)` stays unchecked (queue mode
+  (exit 5) naming the value and its line or record. `hs update group=VALUE` and
+  `hs update ID group VALUE` take it by `parse_group` (exit 2, before counting or writing).
+  `Task.new(group=…)` stays unchecked (queue mode
   passes None), and a retry (`Task.new_retry`) copies the stored group, a legacy text group too. Read-in-full input (a named file to `hs submit`,
   `hs cluster` or `hs server`, `--from-json`, arguments, and `hs submit` stdin with a database) is
   scanned whole (`scan_task_lines`) before any write, with or without a database; a stream's

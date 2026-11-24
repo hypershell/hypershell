@@ -4,6 +4,10 @@ Arguments
 *ARGS*...
     Assignment pairs for update.
 
+    A group change (``group=VALUE``, or ``ID group VALUE`` in the single-task form) takes an integer as
+    ``hs submit -g`` does, in the 32-bit range; any other value exits with status 2 before anything
+    is counted, asked or written, and no other change given with it is written.
+
 Options
 ^^^^^^^
 
@@ -105,6 +109,10 @@ In previous releases of the software the update command had the following signat
 Executing the command with these three positional arguments is still valid.
 The single-task form takes no ``--cancel``, ``--revert``, ``--delete`` or ``--remove-tag``;
 given one, it exits with status 2 and writes nothing.
+The single-task form takes no option that selects tasks (``-w``, ``-t``, ``-g``, ``-l``, ``-s``,
+``--desc``, ``-F``, ``-S``, ``-C``, ``-R``, ``-X``, ``--retries``, ``--signal``); given one, it exits
+with status 2 and writes nothing. To write a task only if it matches, use the filtered form:
+``hs update FIELD=VALUE -w "id == ID" -F``.
 
 ID
     Unique UUID.
