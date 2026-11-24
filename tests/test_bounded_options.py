@@ -151,7 +151,7 @@ def test_option_refused_through_alias(temp_site: Path) -> None:
 
 IN_RANGE: Final[List[Tuple[type, List[str], Dict[str, Any]]]] = [
     (ClusterApp, ['-N', '0', '-b', '2147483647', '-r', '32766', '-c', '32767', '-m', '8388607TB', '-W', '2147483647',
-                  '-F', '1e9', '-P', '0.5', '-R', '1e-6', '-d', '-10m', '-p', '65535', '-X', '0', '-Y', '2147483647',
+                  '-F', '1e9', '-P', '0.5', '-R', '1e-6', '--delay-start=-10m', '-p', '65535', '-X', '0', '-Y', '2147483647',
                   '-I', '0', '-C', '32767', '-M', '1T', '-T', '0', '-S', '2147483647', '-Q', '2147483647',
                   '-w', '2147483647'],
      {'num_threads': 0, 'autoscaling_period': 1, 'ratelimit': 1e-6, 'delay_start': -600.0, 'max_retries': 32766,
