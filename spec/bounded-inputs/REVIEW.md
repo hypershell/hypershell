@@ -140,3 +140,23 @@ before publish.
 
 ### Human-gate triggers
 N1 is in `data/model.py`: the maintainer signs off before publish.
+
+## Review cycle 3 — approved (2026-11-24)
+
+- **Mode:** scoped: verify N1 and N2 fixed and no regression in `d429e2bd..eea98e09`.
+- **Reviewed commit:** eea98e09.
+- **N1 fixed:** `--from-json` `"cores": "4.0"` stores 4 through `hs submit` and `hs cluster` (with a
+  database and `--no-db`), on SQLite and PostgreSQL, 3.14 and 3.11; nothing hangs (every command
+  bounded).
+- **N2 fixed:** 13 string and number forms of `timeout`, `memory` and `cores` all store integers
+  (timeout rounded up, memory rounded down, a zero-fraction `cores` read whole); the docs match.
+- **Refusals:** 19 bad record values exit 5 with one CRITICAL line, nothing stored, no hang.
+- **Templates** expand fields as written in the record (foreman-accepted design); fingerprints and
+  `--update`/`--restart` deduplication are unaffected.
+- **Suites:** `tests/test_bounded_*.py` + `tests/test_submit.py` with PostgreSQL: 1025 passed on 3.14
+  and on 3.11. Docs `-W`: passes.
+- **Findings:** none.
+
+### Human-gate triggers
+F2/F7 (cycle 1) and N1 (cycle 2) touched `data/model.py` and `server.py`: the maintainer signs off
+before publish.
