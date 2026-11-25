@@ -6,7 +6,7 @@ appetite: big
 status: in_progress
 branch: fix/update-typed-columns
 base: develop
-current_phase: P1
+current_phase: P2
 last_updated: '2026-11-25'
 phases:
 - id: P0
@@ -34,7 +34,7 @@ phases:
     tests/test_update.py
 - id: P1
   name: 'Tests first: the red list on the merged develop (tests only)'
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
@@ -57,7 +57,7 @@ phases:
   - P0
   parallel: false
   hammerable: false
-  hill: uphill
+  hill: downhill
   verify: 'base="$(sed -n ''s/^# base: //p'' spec/update-typed-columns/red.txt)" &&
     test -n "$base" && git merge-base --is-ancestor "$base" HEAD && git show "$base:src/hypershell/core/config_schema.py"
     | grep -q ''^def parse_setting'' && test -z "$(git diff --name-only "$base" --
@@ -338,7 +338,7 @@ there and behaves as the plan assumes.
 **Goal:** every new test is in the tree and fails on the merged base for what it checks; every guard
 and every other test in the touched files passes.
 
-- [ ] `tests/test_update_numbers.py` (new; `db_site` from `tests/input_checks.py`, importing
+- [x] `tests/test_update_numbers.py` (new; `db_site` from `tests/input_checks.py`, importing
       `admin`, `ts_database`, `ts_site` from `tests.test_timescale`; helpers from
       `tests/test_update_group.py` and `tests/bounded_checks.py`): PLAN §6's row. Layer 1: in-process
       `change_value(field, text)` for `cores`, `memory`, `timeout`, `waited`, `duration`,
@@ -354,14 +354,14 @@ and every other test in the touched files passes.
       R12: one WARNING at `cores=1025` and `attempt=101`, none at 1,024 and 100, exit 0; the new
       rows' `Range.text` and `setting_for` returning None for them; `task_update_desc.rst` gives each
       ranged column's `Range.text`.
-- [ ] `tests/test_update_kinds.py` (new): `retried` (every word in any case, `none`, `x`, `2`,
+- [x] `tests/test_update_kinds.py` (new): `retried` (every word in any case, `none`, `x`, `2`,
       empty); the six uuid columns (lower case stored from upper case; braces, `urn:uuid:`, no
       hyphens, a trailing newline, `<direct>` refused; the reserved source ids accepted; `none`
       clears all but `submit_id`); `zone` (`default`, `none`, `NULL` → NULL; `x` → its id, the
       `Zone` row recorded and `hs list` showing `x`; `Default` a separate zone; empty and control
       characters refused; nothing recorded on a refusal); `args` (`none` refused, `''` and `1` kept as
       text); the eight text columns unchanged (R13).
-- [ ] `tests/test_update_datetime.py` (new): the four columns; accepted forms (date, `T` and space,
+- [x] `tests/test_update_datetime.py` (new): the four columns; accepted forms (date, `T` and space,
       seconds, 1–6 fraction digits, `Z`, `±HH:MM`); refused (`now`, `today`, `epoch`, `x`, `5`, `1h`,
       `20260101T0900`, `2026-W01`, `2026-01-01T09`, `2026-01-01x09:00`, `T24:00`, `…,5`, 7 fraction
       digits, `+05`, `2026-02-30`, empty, a DST-gap time); `none` clears all but `submit_time`; R6:
@@ -369,7 +369,7 @@ and every other test in the touched files passes.
       `TZ=America/Indiana/Indianapolis` and `PGTZ=UTC` in the subprocess environment (a naive write
       would be caught), and the same local wall time in `hs info` and `hs list`;
       `set(COLUMN_KINDS) == set(Task.columns)`.
-- [ ] `tests/test_update_tags.py` (new): R10 single-task `ID id x`; R11 `tag=x`, `tag=none` (exit 2,
+- [x] `tests/test_update_tags.py` (new): R10 single-task `ID id x`; R11 `tag=x`, `tag=none` (exit 2,
       the message names `KEY=VALUE`, `KEY:VALUE` and `--remove-tag`), `ID tag a:1` still merges;
       R13 guards (`--cancel`, `--revert`, `--delete`, `--remove-tag`, `KEY:VALUE`); R16 (`color=blue`
       in both forms is the tag `color`; `exti_stauts=0` two edits away is a tag; an invalid key
@@ -379,14 +379,19 @@ and every other test in the touched files passes.
       message's four parts; `exit_stauts:0` and `exit_status:0` set tags; `-f` writes nothing); the
       separator rule (`note:a=b`, `time=12:30`, `start_time=2026-01-01T09:00`); the bash and zsh
       completions do not offer `tag=`.
-- [ ] `tests/test_bounded_table.py`: `COLUMN_ONLY` (`column.exit_status`, `column.cores_max`,
+- [x] `tests/test_bounded_table.py`: `COLUMN_ONLY` (`column.exit_status`, `column.cores_max`,
       `column.memory_max`) unioned where `OPTION_ONLY` is; samples in `RANGES`.
-- [ ] Existing tests that R16 changes (an unknown field expected to exit 2): updated to R16 and listed
+- [x] Existing tests that R16 changes (an unknown field expected to exit 2): updated to R16 and listed
       in the commit body (research/05 found none).
-- [ ] `spec/update-typed-columns/red.txt`: header `# base: <sha of origin/develop as merged in P0>`,
+- [x] `spec/update-typed-columns/red.txt`: header `# base: <sha of origin/develop as merged in P0>`,
       the checker and the counts; one node id per red test, `pg:` for PostgreSQL nodes. Layer 1 listed
       per kind, not per value, to hold `red_check.sh` to its bound.
-- [ ] Nothing outside `tests/` and `spec/` changes.
+- [x] Nothing outside `tests/` and `spec/` changes.
+- **Built (P1, 2026-11-25):** shared helpers in `tests/update_checks.py` (not collected): sites,
+  both forms, a full-row snapshot, the refusal check and the stored-value checks. 263 red nodes, 105
+  `pg:`; `test_column_kinds_complete` is red by `ImportError` and the three new
+  `test_settings_ranges` rows by `KeyError` (` raises=` lines). No existing test asserted R16's
+  replaced refusals (`Unrecognized task field`, `Invalid field name`), so none changed.
 - **Verify:** see frontmatter: the base is the merged `develop` and carries `parse_setting`; no
   change outside `tests/` and `spec/`; each new file has SQLite and PostgreSQL red nodes; every node
   red on the base (`spec/relay-hardening/drive/red_check.sh`); the rest green

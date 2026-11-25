@@ -40,6 +40,11 @@ OPTION_ONLY: Final[Dict[str, Kind]] = {
 }
 """Entries for options that set no key, and their kinds (threads share `relay.num_threads`'s entry)."""
 
+COLUMN_ONLY: Final[Dict[str, Kind]] = {
+    'column.exit_status': Kind.INT, 'column.cores_max': Kind.NUMBER, 'column.memory_max': Kind.NUMBER,
+}
+"""Entries for task columns `hs update` writes that no key or option reads, and their kinds."""
+
 TEXT_OPTIONS: Final[frozenset] = frozenset({
     '--advertise', '--auth', '--autoscaling', '--backup', '--bind', '--database', '--delimiter', '--errors',
     '--extract', '--failures', '--format', '--from-json', '--host', '--launcher', '--launcher-args', '--order-by',
@@ -131,6 +136,8 @@ RANGES: Final[Dict[str, Tuple[Any, Any, Any]]] = {
     'option.delay': (-(2**31 - 1), 2**31 - 1, None),
     'task.memory': (0, 2**63 - 1, None), 'client.memory': (0, 2**63 - 1, None),
     'client.ratelimit': (0, 1e9, ('below', 0.001)), 'autoscale.factor': (1e-6, 1e9, ('above', 100)),
+    'column.exit_status': (-2**15, 2**15 - 1, None), 'column.cores_max': (0, 2**15 - 1, None),
+    'column.memory_max': (0, 2**63 - 1, None),
 }
 """A sample of entries, one or more per class of the GOAL's table, by floor, ceiling and advisory limit."""
 
@@ -179,15 +186,16 @@ def test_no_plain_numeric_option_type() -> None:
 
 @mark.unit
 def test_settings_cover_numeric_keys() -> None:
-    """`SETTINGS` holds every numeric key, every zone key and each option-only entry, and nothing else."""
-    assert set(table().SETTINGS) == numeric_keys() | set(OPTION_ONLY)
+    """`SETTINGS` holds every numeric key, every zone key, each option-only and each column-only entry, and nothing else."""
+    assert set(table().SETTINGS) == numeric_keys() | set(OPTION_ONLY) | set(COLUMN_ONLY)
 
 
 @mark.unit
 def test_settings_kinds_match_keys() -> None:
     """Each entry's kind is its key's kind in `KEYS` (or `ZONE_KEYS`), so the table cannot drift from it."""
     kinds = {**{path: kind for path, kind in KEYS.items() if kind in NUMERIC},
-             **{f'relay.zone.*.{name}': kind for name, kind in ZONE_KEYS.items() if kind in NUMERIC}, **OPTION_ONLY}
+             **{f'relay.zone.*.{name}': kind for name, kind in ZONE_KEYS.items() if kind in NUMERIC}, **OPTION_ONLY,
+             **COLUMN_ONLY}
     assert {name: entry.kind for name, entry in table().SETTINGS.items()} == kinds
 
 
