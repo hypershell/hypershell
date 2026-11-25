@@ -58,9 +58,13 @@ refused before any input is read (exit status 2), here and on ``hs run``.
 - ``timeout``: Range: 0 s to 2,147,483,647 s.
 
 A tag is read as its option reads it, with one difference: ``cores`` written as a decimal with a
-zero fraction (``cores:4.0``) is that whole number, as in a ``--from-json`` record, while a
-non-zero fraction (``cores:4.5``) is refused. A ``timeout`` with a fraction of a second is rounded
-up to whole seconds, as ``-W`` rounds it (``timeout:90.5`` is 91 seconds).
+zero fraction (``cores:4.0``) is that whole number, while a non-zero fraction (``cores:4.5``) is
+refused. A ``timeout`` with a fraction of a second is rounded up to whole seconds, as ``-W`` rounds
+it (``timeout:90.5`` is 91 seconds), and a ``memory`` with a fraction of a byte is rounded down, as
+``-m`` rounds it. A ``--from-json`` record's value, a JSON number or a string, is read the same way
+and stored as a whole number (``"cores": "4.0"`` and ``"cores": 4.0`` are 4, ``"timeout": 90.5``
+is 91); a template still expands the record's field as written (``{memory}`` of ``"2G"`` is
+``2G``).
 
 Tasks past the advisory limit run as before; one warning for the whole submission gives their
 count and the first such line (or record, or the command line for one task given as arguments).
@@ -68,7 +72,9 @@ count and the first such line (or record, or the command line for one task given
 .. versionchanged:: 2.9.0
    A resource tag outside its range, or not of its kind, is refused as a group that is not an
    integer is; before, it was stored as given, or stopped the submission while it was written.
-   ``hs run -t`` refuses one the same way. A ``cores`` tag of ``4.0`` is still read as 4.
+   ``hs run -t`` refuses one the same way. A ``cores`` tag of ``4.0`` is still read as 4. A
+   ``--from-json`` record's resource value is stored as a whole number: before, a decimal
+   ``timeout`` or ``memory`` number was stored as given.
 
 With ``--from-json``, read tasks from a JSON file instead. The value is
 ``FILE[@path]`` where the optional dotted ``path`` locates the list of task objects

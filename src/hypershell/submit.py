@@ -80,7 +80,7 @@ from hypershell.core.exceptions import (handle_exception, handle_disconnect,
                                         handle_address_unknown, HostAddressInfo, get_shared_exception_mapping,
                                         ReadingMixin, reading)
 from hypershell.data.model import (Task, Source, Zone, DIRECT_SOURCE_ID, STDIN_SOURCE_ID, DEFAULT_TASK_GROUP,
-                                   TaskGroupInfo, TaskGroupError, TaskInputError, ensure_group, ensure_resources,
+                                   TaskGroupInfo, TaskGroupError, TaskInputError, ensure_group, ensure_resources, read_resources,
                                    RESOURCE_SETTINGS, tag_text,
                                    serialize_tasks, zone_name)
 from hypershell.data import initdb, checkdb, DATABASE_DIALECT, DATABASE_ENABLED
@@ -300,9 +300,15 @@ def task_fingerprints(lines: Iterable[str], *, template: str = DEFAULT_TEMPLATE,
 
 
 def json_record_tags(record: dict) -> Dict[str, JSONData]:
-    """The tags of a JSON task record: every key but ``args``, nested values serialized as JSON."""
-    return {key: (json.dumps(value, separators=(',', ':')) if isinstance(value, (dict, list)) else value)
-            for key, value in record.items() if key != 'args'}
+    """The tags of a JSON task record: every key but ``args``, nested values serialized as JSON.
+
+    The resource tags (``cores``, ``memory``, ``timeout``) are read by their entries, as
+    :func:`validate_json_records` checked them, so the task's columns hold whole numbers (``"4.0"``
+    is 4, a ``timeout`` of 90.5 is 91). The record itself is left as given: a template expands its
+    fields as written (``{memory}`` stays ``2G``).
+    """
+    return read_resources({key: (json.dumps(value, separators=(',', ':')) if isinstance(value, (dict, list)) else value)
+                           for key, value in record.items() if key != 'args'})
 
 
 def json_fingerprints(records: List[dict], *, group: Optional[int] = DEFAULT_TASK_GROUP,

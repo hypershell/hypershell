@@ -40,7 +40,11 @@ Behaviour changes:
   `hs run` alike, before anything is written. A tag is read as its option reads it, except that a
   `cores` tag with a zero fraction (`cores:4.0`) still reads as that whole number (`cores:4.5` is
   refused), and a `timeout` tag's fraction of a second rounds up to whole seconds
-  (`timeout:90.5` is 91), as `-W` rounds it; before, a bare decimal was stored as written.
+  (`timeout:90.5` is 91), as `-W` rounds it; before, a bare decimal was stored as written. A
+  `--from-json` record's `cores`, `memory` and `timeout`, a JSON number or a string, are stored as
+  whole numbers read the same way: `"timeout": 90.5` stores 91 and `"memory": 1.5` stores 1, where
+  before the decimal was stored as given; `"cores": "4.0"` stores 4 on PostgreSQL too, where before
+  it failed the submission. A template still expands a record's field as written.
 - Some settings warn past an advisory limit and run anyway: more than 1,024 threads, more than 100
   attempts (`-r` above 99), more than 1,024 cores, a scaling factor above 100, a scaling period
   above an hour (3,600 seconds), and a rate below 0.001 tasks per second other than 0. One warning

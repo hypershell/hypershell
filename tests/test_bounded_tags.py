@@ -187,6 +187,86 @@ def test_json_tag_refused_whole(db_site: Tuple[Path, Engine], tag: str, value: A
     assert count(engine, 'task') == 0
 
 
+JSON_STORED: Final[List[Tuple[str, str, Any, int]]] = [
+    ('cores-text-4.0', 'cores', '4.0', 4), ('cores-4.0', 'cores', 4.0, 4), ('cores-text-7', 'cores', '7', 7),
+    ('timeout-90.5', 'timeout', 90.5, 91), ('timeout-text-90.5', 'timeout', '90.5', 91),
+    ('timeout-text-1h', 'timeout', '1h', 3600), ('timeout-0.25', 'timeout', 0.25, 1),
+    ('memory-1.5', 'memory', 1.5, 1), ('memory-text-1.5', 'memory', '1.5', 1), ('memory-1024.0', 'memory', 1024.0, 1024),
+    ('memory-text-2G', 'memory', '2G', 2 * 1024**3), ('memory-largest', 'memory', 2**63 - 1, 2**63 - 1),
+]
+"""A JSON record's resource value, as a JSON number or string, and the whole number stored for it."""
+
+
+def assert_json_stored(engine: Engine) -> None:
+    """Every record of `JSON_STORED` was stored with its whole number, as an integer."""
+    columns = ('cores', 'memory', 'timeout')
+    stored = {args: dict(zip(columns, values)) for args, *values in rows(engine, 'SELECT args, cores, memory, timeout FROM task')}
+    assert len(stored) == len(JSON_STORED), stored
+    for case, tag, value, want in JSON_STORED:
+        got = stored[f'echo {case}'][tag]
+        assert got == want and isinstance(got, int), (case, value, got)
+
+
+@mark.integration
+def test_json_values_stored_whole(db_site: Tuple[Path, Engine]) -> None:
+    """`--from-json` stores each resource value, string or number, as its whole number, within the bound.
+
+    A string ``"4.0"`` for cores once reached PostgreSQL as text and hung the submission; the
+    command must finish (it runs under the bound) with every column an integer. A template expands
+    the record's fields as written.
+    """
+    site, engine = db_site
+    path = create_json_taskfile(site, [{'args': f'echo {case}', tag: value} for case, tag, value, _ in JSON_STORED])
+    rc, _, stderr = submit('-b', '1', '-w', '1', '--from-json', str(path), cwd=site)
+    assert rc == 0, stderr[-4000:]
+    assert_json_stored(engine)
+    path = create_json_taskfile(site, [{'args': 'echo t', 'memory': '2G', 'cores': '1.0'}], 't.json')
+    rc, _, stderr = submit('--template', 'run --mem={memory} -c {cores} {}', '--from-json', str(path), cwd=site)
+    assert rc == 0, stderr[-4000:]
+    assert rows(engine, "SELECT args, cores, memory FROM task WHERE args LIKE 'run %'") == [
+        ('run --mem=2G -c 1.0 echo t', 1, 2 * 1024**3)]
+
+
+@mark.integration
+def test_cluster_json_values_stored_whole(db_site: Tuple[Path, Engine]) -> None:
+    """`hs cluster --from-json` stores each resource value, string or number, as its whole number, within the bound."""
+    from tests.conftest import free_port
+    site, engine = db_site
+    path = create_json_taskfile(site, [{'args': f'echo {case}', tag: (value if tag != 'cores' else '1.0')}
+                                       for case, tag, value, _ in JSON_STORED])
+    rc, _, stderr = bounded(['hs', 'cluster', '--from-json', str(path), '--no-tls', '-H', '127.0.0.1',
+                             '-p', str(free_port())], cwd=site, timeout=120)
+    assert rc == 0, stderr[-4000:]
+    stored = {args: (cores, memory, timeout) for args, cores, memory, timeout
+              in rows(engine, 'SELECT args, cores, memory, timeout FROM task')}
+    for case, tag, value, want in JSON_STORED:
+        got = dict(zip(('cores', 'memory', 'timeout'), stored[f'echo {case}']))[tag]
+        assert got == (1 if tag == 'cores' else want) and isinstance(got, int), (case, value, got)
+
+
+JSON_STRING_REFUSED: Final[List[Tuple[str, str, Any]]] = [
+    ('cores-text-4.5', 'cores', '4.5'), ('cores-4.5', 'cores', 4.5), ('cores-text-100000.0', 'cores', '100000.0'),
+    ('cores-text-x', 'cores', 'x'), ('memory-text-8EB', 'memory', '8EB'), ('memory-1.5e19', 'memory', 1.5e19),
+    ('timeout-text-2147483648', 'timeout', '2147483648'), ('timeout-2147483647.5', 'timeout', 2147483647.5),
+    ('timeout-text-minus5', 'timeout', '-5'),
+]
+"""A JSON record's resource value, number or string, refused, by test id."""
+
+
+@mark.integration
+@mark.parametrize('tag, value', [pytest.param(tag, value, id=case) for case, tag, value in JSON_STRING_REFUSED])
+def test_json_value_refused_on_every_backend(db_site: Tuple[Path, Engine], tag: str, value: Any) -> None:
+    """A `--from-json` record's refused resource value exits 5 within the bound, naming it; nothing is stored."""
+    site, engine = db_site
+    path = create_json_taskfile(site, [{'args': 'echo a'}, {'args': 'echo b', tag: value}])
+    rc, _, stderr = submit('-b', '1', '-w', '1', '--from-json', str(path), cwd=site)
+    assert rc == exit_status.runtime_error, stderr[-4000:]
+    lines = [line for line in stderr.splitlines() if f'task.{tag}: expected ' in line]
+    assert len(lines) == 1 and 'record 1' in lines[0], stderr[-4000:]
+    assert 'Traceback' not in stderr, stderr[-4000:]
+    assert count(engine, 'task') == 0
+
+
 @mark.integration
 @mark.parametrize('db_site', ['sqlite'], indirect=True)
 def test_tags_in_range_stored(db_site: Tuple[Path, Engine]) -> None:

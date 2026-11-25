@@ -11,6 +11,7 @@ from typing import List, Dict, Tuple, Any, Type, Optional, Final
 # Standard libs
 import re
 import json
+import math
 import hashlib
 from enum import Enum
 from uuid import UUID as PyUUID, uuid5
@@ -48,7 +49,7 @@ __all__ = [
     'DEFAULT_TASK_GROUP', 'CANCEL_STATUS', 'TASK_TEMPLATE_ERROR', 'TASK_RESOURCE_ERROR', 'NO_RETRY_STATUSES',
     'DIRECT_SOURCE_ID', 'STDIN_SOURCE_ID', 'TaskGroupInfo', 'ResultOutcome',
     'GROUP_MIN', 'GROUP_MAX', 'TaskInputError', 'TaskGroupError', 'TaskResourceError', 'ensure_group', 'parse_group',
-    'ensure_resources', 'RESOURCE_SETTINGS', 'tag_text',
+    'ensure_resources', 'read_resources', 'RESOURCE_SETTINGS', 'tag_text',
     'DEFAULT_ZONE_ID', 'DEFAULT_ZONE_NAME', 'ZONE_NAMESPACE', 'zone_id', 'zone_name',
 ]
 
@@ -153,28 +154,61 @@ WHOLE_DECIMAL: Final[re.Pattern] = re.compile(r'(?P<whole>[+-]?[0-9]+(?:_[0-9]+)
 """A whole number written as a decimal with a zero fraction (``4.0``, ``4.00``), as a tag may give it."""
 
 
+def _read_resource(setting: str, given: Any) -> Any:
+    """The resource value `given` (text as written, or a JSON value) read by the entry `setting`, else SettingError.
+
+    A whole-number value written as a decimal with a zero fraction (``4.0``) is that whole number. A
+    duration is whole seconds, a fraction rounded up as the option rounds it (a JSON ``90.5`` too),
+    and a size whole bytes, rounded down as its text is, so the value fits its integer column.
+    """
+    entry = SETTINGS[setting]
+    value = given
+    if entry.kind is Kind.INT and isinstance(given, str) and (match := WHOLE_DECIMAL.fullmatch(given.strip())):
+        value = match.group('whole')
+    try:
+        read = entry.parse(value, setting)
+    except SettingError as error:
+        raise SettingError(setting, entry, given, out_of_range=error.out_of_range) from None
+    if entry.kind is Kind.DURATION and not isinstance(read, int):
+        return math.ceil(read)
+    if entry.kind is Kind.SIZE and not isinstance(read, int):
+        return int(read)
+    return read
+
+
 def ensure_resources(tags: Dict[str, Any], texts: Optional[Dict[str, Optional[str]]] = None) -> Dict[str, Any]:
     """`tags` with each resource tag read by its `task.*` entry, else :class:`TaskResourceError`.
 
     A tag's text as written (`texts`, from a line or `-t`) is read as the option reads it; without
     it, the value is read as a configuration file's value of that kind (a JSON record). An empty
     value (a bare tag) is left as it is. A whole-number tag (`cores`) written as a decimal with a
-    zero fraction (``4.0``) is read as that whole number, as a JSON ``4.0`` is; a refusal shows the
-    text as written.
+    zero fraction (``4.0``) is read as that whole number, as a JSON ``4.0`` is; a duration is whole
+    seconds (rounded up) and a size whole bytes (rounded down). A refusal shows the value as given.
     """
     for name, setting in RESOURCE_SETTINGS.items():
         if name not in tags or tags[name] is None or tags[name] == '':
             continue
         text = (texts or {}).get(name)
-        given = tags[name] if not text else text
-        entry = SETTINGS[setting]
-        value = given
-        if entry.kind is Kind.INT and isinstance(given, str) and (match := WHOLE_DECIMAL.fullmatch(given.strip())):
-            value = match.group('whole')
         try:
-            tags[name] = entry.parse(value, setting)
+            tags[name] = _read_resource(setting, tags[name] if not text else text)
         except SettingError as error:
-            raise TaskResourceError(str(SettingError(setting, entry, given, out_of_range=error.out_of_range))) from None
+            raise TaskResourceError(str(error)) from None
+    return tags
+
+
+def read_resources(tags: Dict[str, Any]) -> Dict[str, Any]:
+    """`tags` with each resource tag its entry takes read as :func:`ensure_resources` reads it; others as given.
+
+    For a JSON record's tags as they become a task: the command line refused a bad value before
+    (:func:`~hypershell.submit.validate_json_records`), and a record given to the Python API is
+    taken as given (GOAL C3), so nothing is refused here.
+    """
+    for name, setting in RESOURCE_SETTINGS.items():
+        if name in tags and tags[name] is not None and tags[name] != '':
+            try:
+                tags[name] = _read_resource(setting, tags[name])
+            except SettingError:
+                pass
     return tags
 
 
