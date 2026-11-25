@@ -3,7 +3,7 @@ slug: bounded-inputs
 title: Every numeric setting has one declared range, one parser and one error
 kind: fix
 appetite: big
-status: blocked
+status: in_review
 branch: fix/bounded-inputs
 base: develop
 current_phase: done
@@ -381,6 +381,55 @@ the red list and the docs build pass.
 - **Touches:** `src/hypershell/data/model.py`, `submit.py`, `cluster/__init__.py`, `docs/`,
   `AGENTS.md`, `.agents/factory/invariants.md`, `.agents/factory/review-rubric.md`,
   `spec/bounded-inputs/RELEASE-NOTE.md`, `tests/`.
+
+## Review-cycle-1 remediation
+
+REVIEW.md F1–F8, cycle 1 → 2. **The maintainer signed off on this remediation on 2026-11-24**,
+which covers the human gate for `server.py` (F7) and the tag path (`data/model.py`, F2, F8).
+
+- [x] F1: `docs/_include/config_set_desc.rst` says `hs config set` refuses a value outside its key's
+      range (exit 2, nothing written), refuses an untyped integer outside 64 bits, and writes a
+      value past an advisory limit with a warning; "checked by the command that reads it" is gone;
+      a `versionchanged:: 2.9.0` in `docs/cli/config_set.rst`. `hs config set --help` never carried
+      the sentence, so no help text changed. Test: `test_config_set_page_names_ranges`.
+- [x] F2: `-t` resource tags on `hs run` and the one-task submit go through `read_tag_options`
+      (`submit.py`, shared with `hs submit`'s `check_tags`): exit 2 naming the `task.*` entry,
+      before the database is opened; `Task.new` stays unchecked (C3). `hs cluster` and `hs server`
+      take no `-t`; the `-t` of `hs list` and `hs update` are filters. Tests on SQLite and
+      PostgreSQL (`test_single_task_tag_option_refused`, `test_single_task_tag_option_stored`).
+- [x] F3: `--delay-start=-10m` in `tests/test_bounded_options.py`; no other new test passes a
+      negative value as its own token that 3.11's negative-number pattern does not take.
+- [x] F4: `check_settings` treats a file's `_env`/`_eval` that cannot resolve as a refused file
+      value under the `hs config` exemption; a variable's still stops it, and other commands exit 3.
+      Tests: `test_config_command_runs_with_unresolved_file` (get, which, edit, set),
+      `test_config_command_stops_on_unresolved_variable`.
+- [x] F5: `advise_one_task` gives a single task from arguments (`hs submit -- ARGS` in either
+      mode, `hs run`, the one-task submit) the one summary, for its `-t` and inline tags, naming
+      the command line. Test: `test_one_task_tags_advised`.
+- [x] F6: `issues/api-argument-ranges.md` no longer lists `evict_after=10**30` (bounded by the
+      plan-gate ruling) or `num_threads=0` (in range); its other examples were checked on the
+      branch (`bundlesize=0`, `max_retries=100000` are taken as given).
+- [x] F7: `HeartMonitor` asks finiteness of a float only, so `10**400` raises the evict entry's
+      `RuntimeError`. Test: `test_heartmonitor_evict_refused`. The API pages name `evict_after` as
+      the explicit argument held to its range.
+- [x] F8 (**maintainer ruling, 2026-11-24: accept a whole decimal**): `ensure_resources` reads a
+      whole-number tag written with a zero fraction (`cores:4.0`, `4.00`) as that integer, from an
+      inline tag, `-t`, stdin, a file, a stream or a JSON string, as develop and a JSON `4.0` do;
+      `cores:4.5` is refused and the refusal shows the text as written. `timeout` keeps rounding a
+      fraction of a second up (`timeout:90.5` is 91), documented beside the tag ranges in
+      `submit_desc.rst`. Scope: the tag path only. On develop `-c 4.0` was refused (`type=int`) and a
+      variable's `4.0` was refused (`INT_FORM`), and a TOML `4.0` is already read as 4, so options and
+      configuration keys keep R2 unchanged. Tests: `test_whole_decimal_tags_stored`,
+      `test_whole_decimal_option_refused`.
+- [x] Release note: checked for `-N 0` or `-N`'s floor listed as newly refused; it is not (the
+      note says `-N` keeps 0). F2, F4, F5 and F8 added where they change what a user sees.
+- **Gate (2026-11-24):** the cycle's targeted files on 3.14 with PostgreSQL, 2,500 passed;
+  `tests/test_bounded_*.py` and the touched suites on 3.11 with PostgreSQL, 1,603 passed, 2 skipped;
+  P4's `verify:` as written (the whole suite with `HS_TEST_POSTGRES` unset, as the line has it:
+  5,527 passed, 265 skipped; the tag and group files with PostgreSQL, the red list, the guards,
+  `no_bypass.sh`, every `bounds_drive.sh` mode), all green. The docs build ran with the docs venv's
+  `sphinx-build` (html and man, `-W`) in place of the line's `uv run --python 3.12 --group docs`,
+  which would rebuild the shared venv; both passed.
 
 ---
 
