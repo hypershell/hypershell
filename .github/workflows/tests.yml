@@ -18,8 +18,8 @@ concurrency:
 jobs:
   tests:
     runs-on: ubuntu-latest
-    # The serial suite takes 35-45 minutes on CI since the range tests (bounded-inputs); 60 leaves room.
-    timeout-minutes: 60
+    # The serial suite takes 45-60 minutes on CI since the typed update tests (update-typed-columns); 90 leaves room.
+    timeout-minutes: 90
     strategy:
       fail-fast: false          # run the whole matrix so every Python version's result is visible
       matrix:
