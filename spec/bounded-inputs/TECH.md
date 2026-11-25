@@ -3,7 +3,7 @@ slug: bounded-inputs
 title: Every numeric setting has one declared range, one parser and one error
 kind: fix
 appetite: big
-status: blocked
+status: in_review
 branch: fix/bounded-inputs
 base: develop
 current_phase: done
@@ -430,6 +430,37 @@ which covers the human gate for `server.py` (F7) and the tag path (`data/model.p
   `no_bypass.sh`, every `bounds_drive.sh` mode), all green. The docs build ran with the docs venv's
   `sphinx-build` (html and man, `-W`) in place of the line's `uv run --python 3.12 --group docs`,
   which would rebuild the shared venv; both passed.
+
+## Review-cycle-2 remediation
+
+REVIEW.md N1, N2, cycle 2 → 3 (the last the bound allows). **Human gate: pending maintainer
+sign-off** (N1 touches `data/model.py` again; the 2026-11-24 sign-off covered cycle 1 only).
+
+- [x] N1: a `--from-json` record's resource tags are read by their entries again where the record
+      becomes a task: `json_record_tags` (the Loader and the fingerprints, so `hs submit` and
+      `hs cluster --from-json` alike) applies `read_resources`, which reads as `ensure_resources`
+      does and never refuses (the command line refused a bad value in `validate_json_records`; a
+      record given to the Python API is taken as given, C3). `"cores": "4.0"` stores 4 on
+      PostgreSQL instead of hanging. **Deviation from the brief's "write back into the record":**
+      the record itself is not rewritten, because a template expands the record's fields, and a
+      rewritten record would expand `{memory}` of `"2G"` as `2147483648` and `{timeout}` of `"1h"`
+      as `3600`, unlike develop. `group` needs no write-back: a JSON group must be a JSON integer.
+- [x] N2: `_read_resource` gives a duration whole seconds (a fraction rounded up, as `-W`) and a
+      size whole bytes (rounded down, as `-m`), for a JSON number too: `"timeout": 90.5` stores 91,
+      `"memory": 1.5` stores 1. `submit_desc.rst` says so for `--from-json`; marker and release note
+      amended.
+- [x] A JSON number 4.5 for `cores` stays refused (since P4); develop stored 4.5 on SQLite.
+- [x] Tests on SQLite and PostgreSQL, every command bounded: `test_json_values_stored_whole`,
+      `test_cluster_json_values_stored_whole` (string and number forms of `cores`, `timeout`,
+      `memory`, stored as integers; a template expanding as written), and
+      `test_json_value_refused_on_every_backend`. On the previous HEAD the stored cases hang on
+      PostgreSQL and store decimals on SQLite.
+- **Gate (2026-11-24):** `tests/test_bounded_*.py` with `test_submit`, `test_group_integer`,
+  `test_group_stream`, `test_memory_column`, `test_size_duration`, with PostgreSQL: 1,389 passed on
+  3.14 and 1,389 on 3.11. P4's `verify:` as written (whole suite with `HS_TEST_POSTGRES` unset as the
+  line has it: 5,538 passed, 276 skipped; the tag and group files with PostgreSQL 485 passed; red
+  list 53; guards 427; `no_bypass.sh` clean; every `bounds_drive.sh` mode ok), with the same docs
+  substitution as cycle 1 (the docs venv's `sphinx-build`, html and man, `-W`): all green.
 
 ---
 
