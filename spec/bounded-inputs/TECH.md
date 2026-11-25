@@ -3,7 +3,7 @@ slug: bounded-inputs
 title: Every numeric setting has one declared range, one parser and one error
 kind: fix
 appetite: big
-status: in_review
+status: blocked
 branch: fix/bounded-inputs
 base: develop
 current_phase: done
@@ -111,11 +111,11 @@ phases:
     900 uv run --python 3.12 --group docs sphinx-build -W --keep-going -q -E -b man
     docs /tmp/claude-501/docs-man-bnd
 review:
-  last_reviewed_commit: a0c227a6
+  last_reviewed_commit: e844863f
   verdict: changes-requested
-  blocked_reason: 'Review cycle 1: F1-F8 (docs, -t tags, 3.11 test, hs config exemption,
-    advisory, seed, HeartMonitor, decimal tags)'
-  cycle: 1
+  blocked_reason: 'Review cycle 2: N1 (JSON string decimal unconverted), N2 (JSON
+    timeout rounding docs)'
+  cycle: 2
 ---
 # TECH.md — Every numeric setting has one declared range, one parser and one error
 

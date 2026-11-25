@@ -113,3 +113,30 @@ Fresh reviewer, xhigh effort, on Python 3.14 and 3.11, SQLite and local PostgreS
 
 F7 is in `server.py` and F2 names `data/model.py` (high-blast-radius core): the maintainer signs off
 before publish.
+
+## Review cycle 2 — changes-requested (2026-11-24)
+
+- **Mode:** scoped (the maintainer's sign-off on remediation, 2026-11-24): verify F1–F8 fixed and no
+  regression in the remediation diff `bf759ec1..e844863f`.
+- **Reviewed commit:** e844863f.
+- **F1–F8:** all fixed, verified by running code on SQLite and PostgreSQL, on 3.14 and 3.11 (F8 per
+  the maintainer's ruling: whole decimals in tags only; `-c 4.0` still refused as on develop).
+- **Suites:** `tests/test_bounded_*.py` with PostgreSQL: 969 passed on 3.14 and on 3.11. Docs `-W`:
+  passes.
+
+### [MEDIUM/CONFIRMED] N1 — A `--from-json` record's string decimal reaches PostgreSQL unconverted
+- **Where:** `src/hypershell/data/model.py:172-175` (the whole-decimal branch) with
+  `src/hypershell/submit.py:1525`: `validate_json_records` checks a copy and drops the parsed value.
+- **Failure scenario:** `[{"args": "echo j", "cores": "4.0"}]` with `hs submit --from-json` on
+  PostgreSQL logs `invalid input syntax for type smallint: "4.0"` and hangs; nothing is written.
+  a0c227a6 refused it cleanly (exit 5). The new `submit_desc.rst` promises it reads as 4.
+- **Touches:** R4, R9; `data/model.py` (human gate).
+
+### [LOW/CONFIRMED] N2 — A JSON-number `timeout` is not rounded as the new docs say
+- **Where:** `docs/_include/submit_desc.rst:60-63`.
+- **Failure scenario:** `{"timeout": 90.5}` stores 90.5 on SQLite and 90 on PostgreSQL; the docs say
+  91. Pre-existing behaviour, newly documented. Same root cause as N1: checked values are not written
+  back into the record.
+
+### Human-gate triggers
+N1 is in `data/model.py`: the maintainer signs off before publish.
