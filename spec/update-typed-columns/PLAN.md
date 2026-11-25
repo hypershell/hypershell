@@ -443,3 +443,8 @@ join the PostgreSQL job's list (`.github/workflows/tests.yml:121`) and its comme
 - **Risks accepted as planned:** the per-process advisory, SQLite wall time, `source=<direct>`
   refused, the CI timeout raise. File the `ensure_valid_tag` early-return seed (target 2.9.x) on
   develop.
+
+**Build note (P6, 2026-11-25, approved by the foreman, 2026-11-25).** The two
+completion tests in `tests/test_update_tags.py` leave `red.txt`: they read `share/` from the working
+tree, and `red_check.sh` swaps in the base's `src` only, so once `share/` is fixed they cannot be
+shown red on the base. Both were red at P1 (263 of 263). They stay as tests and pass, as guards.

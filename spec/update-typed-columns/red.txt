@@ -1,9 +1,11 @@
 # Red list for update-typed-columns: every test here must fail on 674f6d85 (develop with
 # bounded-inputs, #125, as merged in P0; this branch's src and docs before the fix) for what it
 # checks, and pass after it. Checked by spec/relay-hardening/drive/red_check.sh with
-# RED_BASE_REV set to the base below; 263 tests, 105 of them `pg:` (PostgreSQL, needing
+# RED_BASE_REV set to the base below; 261 tests, 105 of them `pg:` (PostgreSQL, needing
 # HS_TEST_POSTGRES with the sandbox off, HS_TEST_TIMESCALE empty). The in-process layer is listed
 # per column (each node loops over the column's values), so the list stays within its bound.
+# The completion tests read share/, which red_check does not swap for the base's, so they are
+# guards here, not red nodes (PLAN build note, approved by the foreman, 2026-11-25).
 # A ` raises=NAME` line is red by that exception: a name or row this cycle adds, missing on the base.
 # base: 674f6d856e2ab99f14a795bd271e459fef135026
 
@@ -196,7 +198,6 @@ pg:tests/test_update_datetime.py::test_same_instant[postgres-single]
 tests/test_update_tags.py::test_refusal_before_database[tag]
 tests/test_update_tags.py::test_refusal_before_database[near-miss]
 tests/test_update_tags.py::test_refusal_before_database[tag-key]
-tests/test_update_tags.py::test_bash_completion_offers_no_whole_tag
 tests/test_update_tags.py::test_column_value_with_colon[sqlite]
 tests/test_update_tags.py::test_first_separator_splits[sqlite-colon-first]
 tests/test_update_tags.py::test_first_separator_splits[sqlite-equals-first]
@@ -237,7 +238,6 @@ tests/test_update_tags.py::test_tag_rules_every_path[sqlite-memory-single]
 tests/test_update_tags.py::test_whole_tag_refused[sqlite-a:1]
 tests/test_update_tags.py::test_whole_tag_refused[sqlite-none]
 tests/test_update_tags.py::test_whole_tag_refused[sqlite-x]
-tests/test_update_tags.py::test_zsh_completion_offers_no_whole_tag
 
 # tests/test_update_tags.py, PostgreSQL
 pg:tests/test_update_tags.py::test_column_value_with_colon[postgres]
