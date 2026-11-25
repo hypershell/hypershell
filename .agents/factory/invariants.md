@@ -118,6 +118,9 @@ subsystems.
   before any input is read), a `--from-json` `group` key. Anything else raises `TaskGroupError`
   (exit 5) naming the value and its line or record. `hs update group=VALUE` and
   `hs update ID group VALUE` take it by `parse_group` (exit 2, before counting or writing).
+  Every other column `hs update` writes is read by its kind through `COLUMN_KINDS` (`task.py`; the
+  ranged ones by `SETTINGS` entries) before counting or writing: a new `Task` column gets its kind
+  there in the same commit (pinned by `set(COLUMN_KINDS) == set(Task.columns)`).
   The resource tags `cores`, `memory` and
   `timeout` follow the same paths (`ensure_resources`, by the `task.*` entries of `SETTINGS`, the
   text as written; a whole-number tag with a zero fraction, `cores:4.0`, reads as 4; a duration

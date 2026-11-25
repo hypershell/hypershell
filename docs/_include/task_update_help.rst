@@ -4,6 +4,28 @@ Arguments
 *ARGS*...
     Assignment pairs for update.
 
+    Any key that is not a column is a tag (``color=blue`` is ``color:blue``), so a misspelled column
+    becomes a tag; the prompt lists each change as a column, a tag or a removal. A key one edit from
+    a column (``exit_stauts``, ``Cores``, ``tags``) exits with status 2, naming the column;
+    ``KEY:VALUE`` always sets a tag. ``tag=VALUE`` is refused. An argument is split at its first
+    ``=`` or ``:``.
+
+    Every column is read by its kind, in both forms, within the range the description lists:
+    ``cores``, ``exit_status``, ``attempt`` and ``part`` take a whole number; ``memory`` a size, as
+    ``hs submit -m`` reads it (``4G``, ``512MB``, ``1.5GiB``, or bytes); ``timeout``, ``waited`` and
+    ``duration`` a duration, as ``hs submit -W`` reads it (``90m``, ``1h30m``, ``1:30:00``, ``1-12``,
+    or seconds); ``cores_max`` and ``memory_max`` a number. ``none`` or ``null`` clears a column that
+    may be empty (not ``attempt``, ``part``, ``retried``, ``submit_id``, ``submit_time`` or ``args``).
+    ``retried`` takes true/false, yes/no, on/off or 1/0, in any case. The uuid columns
+    (``submit_id``, ``server_id``, ``client_id``, ``previous_id``, ``next_id``, ``source``) take the
+    8-4-4-4-12 hexadecimal form, stored in lower case. ``zone`` takes a zone name as ``hs submit --zone``
+    reads it, ``default`` or ``none`` being the default zone. The datetime columns (``submit_time``,
+    ``schedule_time``, ``start_time``, ``completion_time``) take ISO 8601 only (e.g., ``2026-01-01``,
+    ``2026-01-01T09:00``, ``2026-01-01T09:00:00-05:00``), a value without an offset being local time;
+    ``now``, ``today`` and ``epoch`` are refused (use ``$(date -Iseconds)``). Any other value exits with status 2 before anything
+    is counted, asked or written, and no other change given with it is written. ``id`` is never
+    written.
+
     A group change (``group=VALUE``, or ``ID group VALUE`` in the single-task form) takes an integer as
     ``hs submit -g`` does, in the 32-bit range; any other value exits with status 2 before anything
     is counted, asked or written, and no other change given with it is written.

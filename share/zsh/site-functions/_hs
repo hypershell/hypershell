@@ -119,7 +119,7 @@ _hs_cached() {
 (( $+functions[_hs_update_args] )) || _hs_update_args() {
     local -a assigns f k
     f=( ${=$(_hs_cached fields hs list --fields)} )
-    for k in $f; do [[ $k != id ]] && assigns+=( "${k}=" ); done
+    for k in $f; do [[ $k != id && $k != tag ]] && assigns+=( "${k}=" ); done
     k=( ${(f)"$(_hs_cached tagkeys hs list --tag-keys)"} )
     local key; for key in $k; do assigns+=( "${key}:" ); done
     compadd -S '' -- $assigns

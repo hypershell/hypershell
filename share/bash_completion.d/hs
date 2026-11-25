@@ -459,7 +459,7 @@ function _hs_task_update() {
 	for opt in $(hs list --fields 2>/dev/null)
 	do
 		case "${opt}" in
-			id) ;;  # the 'id' field cannot be modified
+			id|tag) ;;  # 'id' cannot be modified, and tags change one at a time
 			*) pos_args="${pos_args} ${opt}=";;
 		esac
 	done

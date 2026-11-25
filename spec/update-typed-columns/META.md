@@ -1,0 +1,68 @@
+# META — hs update reads every column it writes by the column's kind
+
+> **Harness feedback log** for this feature — the producer artifact of the factory's self-improvement
+> loop. Written by the lifecycle skills (`hs-feature` / `hs-plan` / `hs-build` / `hs-review`) when the
+> **skillset itself** costs something; read by `hs-publish` (surfaced in the PR) and applied by
+> `/hs-harness`. This file is **orthogonal** to the `GOAL → PLAN → TECH → REVIEW` spine — it is about
+> the *toolchain*, not the feature — and is retained on merge like the rest of `spec/{slug}/`.
+>
+> **Silence is the default.** The bar for a finding is one test: *was this the **skill's** fault — not
+> mine, not the task's?* The blind `hs-review` correctness reviewer never reads this file.
+
+- **slug:** update-typed-columns
+
+## What worked well
+
+- `hs-plan` Step 3: one brief per rabbit hole, written to `research/NN-*.md` and consumed by summary,
+  kept five parallel investigations (including live probes on both backends) out of the planner's
+  context.
+
+## Friction findings
+
+## F1 — No guidance for a plan whose dependency has not landed on the base
+`origin=hs-plan:6 severity=low category=missing-guidance status=open target=.claude/skills/hs-plan/SKILL.md`
+- **What happened:** this cycle builds on a branch still in review. The skill and the `TECH.md`
+  template assume `base: develop` already holds everything the design uses, so the planner had to
+  invent a P0 (merge `origin/develop` once the dependency lands, with `satisfies: []`), a red-list base
+  that is not yet known (recorded as a `# base:` header in `red.txt` and read by the verify), and an
+  API-pinning verify.
+- **Skill cause:** Step 6 and the template say nothing about a `builds after:` GOAL field, a
+  dependency-merge phase, or how a red list names a base commit that does not exist at plan time.
+- **Recommended fix:** in Step 6, when the GOAL names `builds after:`, add a P0 that merges the base
+  once the dependency lands and whose verify imports the dependency API the PLAN names; allow
+  `satisfies: []` for it; have red lists carry their base in a `# base:` header read by the verify.
+- **Confidence:** med · **Effort:** small
+
+## F2 — Verify lines name venvs under `${TMPDIR:-/tmp}`, which differs with the sandbox
+`origin=hs-build:P4 severity=low category=tooling status=open target=.claude/skills/hs-plan/SKILL.md`
+- **What happened:** P4-P6's verify lines name `${TMPDIR:-/tmp}/venv311-utc` and
+  `${TMPDIR:-/tmp}/docs-venv-utc`. Every verify that reaches PostgreSQL runs with the sandbox off,
+  where macOS's `TMPDIR` is `/var/folders/…/T/`, not the sandbox's `/tmp/claude-501`, so the venvs
+  the foreman names were not where the verify looked. The builder ran the verify with
+  `TMPDIR=/tmp/claude-501` exported (the line unchanged).
+- **Skill cause:** the plan template lets a verify depend on `TMPDIR` for a path the foreman fixes
+  elsewhere; nothing says which `TMPDIR` a verify runs under.
+- **Recommended fix:** verify lines take such paths from a named variable the foreman sets (e.g.,
+  `UTC_VENV311`), or the skill says to export `TMPDIR` to the cycle's scratch root for every verify.
+- **Confidence:** high · **Effort:** small
+
+## F3 — P0's verify stops holding once develop moves on
+`origin=hs-build:P0 severity=low category=template status=open target=.agents/factory/templates/TECH.md`
+- **What happened:** P0's `git merge-base --is-ancestor origin/develop HEAD` passed at the merge,
+  but develop gained roadmap commits (seeds filed by the foreman) during the build, so the same
+  verify, re-run later, fails though nothing in the branch changed.
+- **Skill cause:** a dependency-merge phase (F1) pins "origin/develop" by name, not the commit it
+  merged; the red list already pins its base by SHA.
+- **Recommended fix:** a dependency-merge verify checks the merged commit by SHA (recorded in the
+  phase, as `red.txt` records `# base:`), not the moving `origin/develop`.
+- **Confidence:** high · **Effort:** small
+
+## Build notes
+
+- **P6 attempt 2 runs the verify from `red_check` on (foreman's ruling, 2026-11-25).** Steps 1-3 of
+  P6's chain (the whole suite without PostgreSQL, the PostgreSQL-aware files, every red node green)
+  carry over from attempt 1 at b030445a: 5,736 passed and 400 skipped; 443 passed; 263 passed.
+  The commits since (30961de7, the red list to 261 nodes with the PLAN note; 4e91d5b0, the CI
+  postgres job's timeout) touch only `spec/` and `.github/workflows/tests.yml`, so they change no
+  code or test those steps ran. Attempt 2 ran the rest of the chain as written: `red_check` with
+  261 nodes, every drive mode on both backends, and the docs build.

@@ -18,8 +18,8 @@ concurrency:
 jobs:
   tests:
     runs-on: ubuntu-latest
-    # The serial suite takes 35-45 minutes on CI since the range tests (bounded-inputs); 60 leaves room.
-    timeout-minutes: 60
+    # The serial suite takes 45-60 minutes on CI since the typed update tests (update-typed-columns); 90 leaves room.
+    timeout-minutes: 90
     strategy:
       fail-fast: false          # run the whole matrix so every Python version's result is visible
       matrix:
@@ -61,13 +61,16 @@ jobs:
   # its TimescaleDB scenarios skip there. tests/test_server_initdb.py launches the real `hs server`
   # with --initdb and --no-db on fresh databases: its `postgres`-provider cases run on every entry,
   # its `timescale`-provider cases on the TimescaleDB entries only. tests/test_update_group.py checks
-  # the group `hs update` writes on PostgreSQL's 32-bit column. Images are pinned by tag and
+  # the group `hs update` writes on PostgreSQL's 32-bit column; tests/test_update_numbers.py,
+  # tests/test_update_kinds.py, tests/test_update_datetime.py and tests/test_update_tags.py check
+  # every other column it writes, by kind, against PostgreSQL's column types. Images are pinned by tag and
   # index digest (Docker Hub tag API,
   # https://hub.docker.com/v2/repositories/timescale/timescaledb/tags/<tag>, read 2026-11-02).
   postgres:
     name: PostgreSQL (${{ matrix.name }})
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # The PostgreSQL-aware files take 30-50 minutes on CI since update-typed-columns; 75 leaves room.
+    timeout-minutes: 75
     strategy:
       fail-fast: false
       matrix:
@@ -117,7 +120,7 @@ jobs:
           PG_CONTAINER: ${{ job.services.postgres.id }}
 
       - name: Run PostgreSQL tests
-        run: uv run --python 3.14 --extra postgres pytest -v -rs tests/test_upgrade_postgres.py tests/test_writeback_postgres.py tests/test_timescale.py tests/test_contended_write.py tests/test_zone_postgres.py tests/test_server_initdb.py tests/test_update_group.py
+        run: uv run --python 3.14 --extra postgres pytest -v -rs tests/test_upgrade_postgres.py tests/test_writeback_postgres.py tests/test_timescale.py tests/test_contended_write.py tests/test_zone_postgres.py tests/test_server_initdb.py tests/test_update_group.py tests/test_update_numbers.py tests/test_update_kinds.py tests/test_update_datetime.py tests/test_update_tags.py
 
   # Guards zero-conflict installability: a full install of the default extras must succeed using
   # ONLY pre-built wheels (no compiler). This catches stale/native pins (e.g., greenlet, pyyaml) that

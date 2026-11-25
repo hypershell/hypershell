@@ -6,7 +6,7 @@
 
 # Type annotations
 from __future__ import annotations
-from typing import List, Dict, Callable, IO, Tuple, Any, Optional, Type, Final
+from typing import List, Dict, Callable, IO, Tuple, Any, Optional, Type, Final, NamedTuple
 
 # Standard libs
 import os
@@ -16,7 +16,7 @@ import csv
 import json
 import time
 import functools
-from datetime import timedelta, datetime
+from datetime import timedelta, datetime, timezone
 from dataclasses import dataclass
 from shutil import copyfileobj
 
@@ -47,11 +47,12 @@ from hypershell.core.logging import Logger, HOSTNAME
 from hypershell.core.remote import SSHConnection
 from hypershell.core.signal import exit_status_for_signal
 from hypershell.core.types import smart_coerce, JSONData, to_json_type, ranged
+from hypershell.core.config_schema import parse_setting, SettingError, advise, shown, read_value, Kind, FORMS
 from hypershell.core.pretty_print import format_tag, format_json, format_bytes, format_source
 from hypershell.core.tag import Tag
 from hypershell.data.core import Session
-from hypershell.data.model import (Task, Source, Zone, JSON, CANCEL_STATUS, zone_name, DEFAULT_ZONE_NAME,
-                                   TaskGroupError, TaskInputError, parse_group)
+from hypershell.data.model import (Task, Source, Zone, JSON, CANCEL_STATUS, zone_name, zone_id, DEFAULT_ZONE_NAME,
+                                   DEFAULT_ZONE_ID, TaskGroupError, TaskInputError, parse_group)
 from hypershell.data import ensuredb, DATABASE_DIALECT
 from hypershell.submit import read_tag_options, advise_one_task
 
@@ -968,6 +969,38 @@ UPDATE_HELP = f"""\
   Include any number of FIELD=VALUE or tag KEY:VALUE positional arguments.
   The -w/--where and -t/--with-tag operate just as in the search command.
 
+  Any key that is not a column is a tag: KEY=VALUE with such a key is a tag
+  change, as KEY:VALUE is, so a misspelled column becomes a tag; the prompt
+  lists each change as a column, a tag or a removal before anything is
+  written. A key one edit from a column (exit_stauts, Cores, tags) exits with
+  status 2, naming the column; KEY:VALUE always sets a tag, the way to a tag
+  named like a column. tag=VALUE is refused: change tags with KEY=VALUE or
+  KEY:VALUE, remove them with --remove-tag. An argument is split at its first
+  = or :. Every tag is checked by the tag rules, exit status 2 for one that
+  breaks them.
+
+  Every column is read by its kind, in both forms, within the range the
+  documentation lists for it. cores, exit_status, attempt and part take a
+  whole number; memory a size, as hs submit -m reads it (4G, 512MB, 1.5GiB,
+  or bytes); timeout, waited and duration a duration, as hs submit -W reads it
+  (90m, 1h30m, 1:30:00, 1-12, or seconds); cores_max and memory_max a number.
+  retried takes true/false, yes/no, on/off or 1/0, in any case. submit_id,
+  server_id, client_id, previous_id, next_id and source take a uuid, the
+  8-4-4-4-12 hexadecimal form in any case, stored in lower case. zone takes
+  a zone name as hs submit --zone reads it; default or none is the default
+  zone (so a zone named none or null cannot be set here). args takes any text
+  but none or null; the other text columns take any text. submit_time,
+  schedule_time, start_time and completion_time take ISO 8601 only: a date
+  (2026-01-01), or a date and time joined by T or a space, with optional
+  seconds, fraction and offset (2026-01-01T09:00:00-05:00, or Z); a value
+  without an offset is local time. now, today and epoch are refused: use
+  $(date -Iseconds).
+  none or null clears a column that may be empty (not attempt, part,
+  retried, submit_id, submit_time or args).
+  Any other value exits with status 2 before anything is counted, asked or
+  written, and no other change given with it is written. A change to id is
+  refused in both forms.
+
   A group change (group=VALUE, or ID group VALUE in the single-task form)
   takes an integer as hs submit -g does; any other value exits with status 2
   before anything is counted, asked or written.
@@ -1041,17 +1074,298 @@ def option_given(value: Any) -> bool:
     return value is not None
 
 
-def change_value(field: str, text: str) -> Any:
-    """The value a change writes to task column `field`, given as `text` (exit 2 for a group that is not one)."""
-    if field == 'group':
+NULL_WORDS: Final[frozenset] = frozenset({'none', 'null'})
+"""The words, in any case, that clear a column that may be empty."""
+
+
+def refusal(column: str, form: str, text: str) -> str:
+    """A refusal in the range table's one form, for a column it holds no range for: `<column>: expected <form>, given <V>`."""
+    return f'{column}: expected {form}, given {shown(text)}'
+
+
+@dataclass(frozen=True)
+class ColumnKind:
+    """How `hs update` reads a value given for a task column.
+
+    `read(column, text)` returns the value to store or raises :class:`ArgumentError` naming the column.
+    `clears` says that `none` or `null` (any case) writes NULL; otherwise the word goes to `read`, or is
+    refused as `form` with the column named as one that may not be empty when `form` is given.
+    """
+
+    read: Callable[[str, str], Any]
+    clears: bool = True
+    form: Optional[str] = None
+
+
+def by_range(setting: str, number: bool = False) -> Callable[[str, str], Any]:
+    """A reader by the range table's entry `setting`; a `number` is stored as a float (never -0.0)."""
+    def read(column: str, text: str) -> Any:
         try:
-            return parse_group(text)
-        except TaskGroupError as error:
-            raise ArgumentError(str(error)) from error
-    if Task.columns.get(field) is str:
-        # A text column takes the text as given (e.g., `args=1` stays text); `none` and `null` clear it.
-        return None if text.lower() in {'none', 'null'} else text
-    return smart_coerce(text)
+            value = parse_setting(setting, text, name=column)
+        except SettingError as error:
+            raise ArgumentError(str(error)) from None
+        return float(value) + 0.0 if number else value
+    return read
+
+
+def read_group(column: str, text: str) -> int:
+    """A task group, as `hs submit -g` reads it."""
+    try:
+        return parse_group(text)
+    except TaskGroupError as error:
+        raise ArgumentError(str(error)) from error
+
+
+def read_text(column: str, text: str) -> Optional[str]:
+    """The text as given (e.g., `args=1` stays text); `none` and `null` clear it."""
+    return None if text.lower() in NULL_WORDS else text
+
+
+UUID_FORM: Final[str] = 'a uuid (8-4-4-4-12 hexadecimal digits)'
+"""What a uuid column expects, for its refusal."""
+
+ZONE_FORM: Final[str] = 'a zone name (1 to 256 printable characters; default or none for the default zone)'
+"""What `zone` expects, for its refusal."""
+
+
+def read_bool(column: str, text: str) -> bool:
+    """A boolean: the words a boolean configuration key takes, in any case."""
+    try:
+        return read_value(Kind.BOOL, text)
+    except ValueError:
+        raise ArgumentError(refusal(column, FORMS[Kind.BOOL], text)) from None
+
+
+def read_uuid(column: str, text: str) -> str:
+    """A uuid in the 8-4-4-4-12 form, in any case, as lower case (surrounding spaces aside)."""
+    value = text.strip(' ')
+    if not UUID_PATTERN.fullmatch(value):
+        raise ArgumentError(refusal(column, UUID_FORM, text))
+    return value.lower()
+
+
+def read_zone(column: str, text: str) -> Optional[str]:
+    """The id of the zone named `text`, read as `hs submit --zone` reads it; None for the default zone."""
+    try:
+        ident = zone_id(zone_name(text))
+    except ValueError:
+        raise ArgumentError(refusal(column, ZONE_FORM, text)) from None
+    return None if ident == DEFAULT_ZONE_ID else ident
+
+
+def read_args(column: str, text: str) -> str:
+    """The text as given; a task's command may not be empty, so `none` and `null` are refused."""
+    if text.lower() in NULL_WORDS:
+        raise ArgumentError(refusal(column, f'text ({column} may not be empty)', text))
+    return text
+
+
+DATETIME_PATTERN: Final[re.Pattern] = re.compile(
+    r'\d{4}-\d{2}-\d{2}(?:[T ](?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d{1,6})?)?(?:Z|[+-]\d{2}:\d{2})?)?', re.ASCII)
+"""ISO 8601 as the datetime columns take it: a date, or a date and a time (`T` or a space), with optional
+seconds and fraction (up to six digits) and an optional `Z` or `±HH:MM` offset."""
+
+DATETIME_FORM: Final[str] = 'an ISO 8601 date, or date and time (e.g., 2026-01-01T09:00:00-05:00)'
+"""What a datetime column expects, for its refusal."""
+
+DATETIME_SPAN: Final[Tuple[datetime, datetime]] = (datetime.min.replace(tzinfo=timezone.utc) + timedelta(days=1),
+                                                     datetime.max.replace(tzinfo=timezone.utc) - timedelta(days=1))
+"""The earliest and latest instants a datetime column takes: a day inside either end of the calendar,
+so the instant is a date in any zone it is read in."""
+
+
+def read_datetime(column: str, text: str) -> datetime:
+    """An ISO 8601 date or date and time, as an aware local time; a value without an offset is local time.
+
+    The form is checked before Python reads it, as Python's reader takes more forms than these, and
+    more on some versions than others. A local time that does not exist (in a daylight-saving gap) is
+    refused, since where it would land differs by version; an ambiguous one is its first occurrence.
+    An instant within a day of either end of the calendar (years 1 and 9999) is refused too: a reader
+    in another zone could not hold it, nor can Python in some zones.
+    """
+    try:
+        value = datetime.fromisoformat(text) if DATETIME_PATTERN.fullmatch(text) else None
+        if value is not None:
+            local = value.astimezone()
+            if not DATETIME_SPAN[0] <= local <= DATETIME_SPAN[1]:
+                value = None
+    except (ValueError, OverflowError):  # Not a day of the calendar, or an instant past either end of it
+        value = None
+    if value is None:
+        raise ArgumentError(refusal(column, DATETIME_FORM, text))
+    if value.tzinfo is None and local.replace(tzinfo=None) != value:
+        raise ArgumentError(refusal(column, DATETIME_FORM, text) + ', which does not exist in local time')
+    return local
+
+
+def read_whole_tag(column: str, text: str) -> None:
+    """A task's tags are never assigned whole."""
+    raise ArgumentError(f'tag: tags are not assigned whole; change one with KEY=VALUE or KEY:VALUE, '
+                        f'remove one with --remove-tag (given: tag={text})')
+
+
+def read_id(column: str, text: str) -> None:
+    """A task's id is never written."""
+    raise ArgumentError(f'Cannot alter task "id" (given: id={text})')
+
+
+RANGED_COLUMNS: Final[Dict[str, str]] = {
+    'cores': 'task.cores', 'memory': 'task.memory', 'timeout': 'task.timeout',
+    'waited': 'task.timeout', 'duration': 'task.timeout', 'exit_status': 'column.exit_status',
+    'attempt': 'server.attempts', 'part': 'option.part',
+    'cores_max': 'column.cores_max', 'memory_max': 'column.memory_max',
+}
+"""Each column read by an entry of the range table, and that entry."""
+
+ADVISED_COLUMNS: Final[Tuple[str, ...]] = ('cores', 'attempt')
+"""Ranged columns whose entry has an advisory limit."""
+
+UUID_COLUMNS: Final[Tuple[str, ...]] = ('server_id', 'client_id', 'previous_id', 'next_id', 'source')
+"""The uuid columns that may be empty (`submit_id` may not)."""
+
+DATETIME_COLUMNS: Final[Tuple[str, ...]] = ('schedule_time', 'start_time', 'completion_time')
+"""The datetime columns that may be empty (`submit_time` may not)."""
+
+TEXT_COLUMNS: Final[Tuple[str, ...]] = ('command', 'outpath', 'errpath', 'csvpath', 'submit_host', 'server_host',
+                                        'client_host', 'fingerprint')
+"""The text columns that may be empty."""
+
+COLUMN_KINDS: Final[Dict[str, ColumnKind]] = {
+    **{column: ColumnKind(by_range(setting, number=column in ('cores_max', 'memory_max')),
+                          clears=column not in ('attempt', 'part'))
+       for column, setting in RANGED_COLUMNS.items()},
+    'group': ColumnKind(read_group, clears=False),
+    'retried': ColumnKind(read_bool, clears=False, form=FORMS[Kind.BOOL]),
+    'submit_id': ColumnKind(read_uuid, clears=False, form=UUID_FORM),
+    **{column: ColumnKind(read_uuid) for column in UUID_COLUMNS},
+    'zone': ColumnKind(read_zone),
+    'submit_time': ColumnKind(read_datetime, clears=False, form=DATETIME_FORM),
+    **{column: ColumnKind(read_datetime) for column in DATETIME_COLUMNS},
+    'args': ColumnKind(read_args, clears=False),
+    **{column: ColumnKind(read_text, clears=False) for column in TEXT_COLUMNS},
+    'id': ColumnKind(read_id, clears=False),
+    'tag': ColumnKind(read_whole_tag, clears=False),
+}
+"""How `hs update` reads each task column, by name."""
+
+
+def change_value(field: str, text: str) -> Any:
+    """The value a change writes to task column `field`, given as `text`; :class:`ArgumentError` (exit 2) if refused."""
+    kind = COLUMN_KINDS[field]
+    word = text.strip().lower()
+    if word in NULL_WORDS and kind.clears:
+        return None
+    if word in NULL_WORDS and kind.form is not None:
+        raise ArgumentError(refusal(field, f'{kind.form} ({field} may not be empty)', text))
+    return kind.read(field, text)
+
+
+class Changes(NamedTuple):
+    """The changes `hs update` was given, read before the database is opened.
+
+    `columns` maps each column to the value stored; `tags` each tag to its value; `zones` the zone
+    names to record before the write; `advice` the `(setting, value, column, text)` of each value to
+    check against an advisory limit; `shown` one `(kind, text)` per change, for the prompt.
+    """
+
+    columns: Dict[str, Any]
+    tags: Dict[str, Any]
+    zones: List[str]
+    advice: List[Tuple[str, Any, str, str]]
+    shown: List[Tuple[str, str]]
+
+
+def edit_distance(a: str, b: str) -> int:
+    """The optimal string alignment distance of `a` and `b`: insertions, deletions, substitutions and adjacent swaps."""
+    before, previous = None, list(range(len(b) + 1))
+    for i in range(1, len(a) + 1):
+        row = [i] + [0] * len(b)
+        for j in range(1, len(b) + 1):
+            row[j] = min(previous[j] + 1, row[j - 1] + 1, previous[j - 1] + (a[i - 1] != b[j - 1]))
+            if i > 1 and j > 1 and a[i - 1] == b[j - 2] and a[i - 2] == b[j - 1]:
+                row[j] = min(row[j], before[j - 2] + 1)
+        before, previous = previous, row
+    return previous[-1]
+
+
+def near_columns(key: str) -> List[str]:
+    """The task columns within one edit of `key`, ignoring letter case, in the order `hs info` shows them."""
+    return [name for name in Task.columns if edit_distance(key.lower(), name) <= 1]
+
+
+def check_tag(key: str, value: Any) -> None:
+    """Refuse a tag that is not one by the tag rules (exit 2); each is checked alone, so none is skipped."""
+    try:
+        Task.ensure_valid_tag({key: value})
+    except (ValueError, TypeError) as error:
+        raise ArgumentError(str(error)) from error
+
+
+def read_changes(arguments: List[str], single: bool = False) -> Changes:
+    """The changes `hs update` was given as `arguments`, each read by its kind; nothing is opened.
+
+    In the `single` form the arguments are `ID FIELD VALUE`; otherwise each is `KEY=VALUE` or
+    `KEY:VALUE`, split at the first of the two. A key that is a column is read by the column's kind; a
+    key one edit from a column (case aside) is refused; any other key, and every `KEY:VALUE`, is a tag.
+    The first argument refused raises :class:`ArgumentError` (exit 2), so nothing is counted, asked or
+    written.
+    """
+    changes = Changes(columns={}, tags={}, zones=[], advice=[], shown=[])
+    if single:
+        ident, field, value = arguments
+        if field == 'tag':
+            for key, tag_value in Tag.parse_cmdline_list([value, ]).items():
+                add_tag(changes, key, tag_value)
+        else:
+            read_assignment(changes, field, value, f'write {ident} tag {field}:VALUE',
+                            lambda: Tag.parse_cmdline_list([f'{field}:{value}']))
+        return changes
+    for arg in arguments:
+        if WhereClause.pattern.match(arg):
+            raise ArgumentError(f'Positional argument matches conditional ({arg}), '
+                                f'maybe you intended to use -w/--where?')
+        equals, colon = arg.find('='), arg.find(':')
+        if equals < 0 and colon < 0:
+            raise ArgumentError(f'Argument not recognized ({arg}): missing "=" or ":"')
+        if colon >= 0 and (equals < 0 or colon < equals):
+            key, value = arg.split(':', 1)
+            add_tag(changes, key, smart_coerce(value), value)
+        else:
+            key, value = arg.split('=', 1)
+            read_assignment(changes, key, value, f'write {key}:VALUE', lambda: {key: smart_coerce(value)})
+    return changes
+
+
+def read_assignment(changes: Changes, key: str, text: str, way_out: str,
+                    as_tags: Callable[[], Dict[str, Any]]) -> None:
+    """Read `key` given `text` into `changes`: a column by its kind, else a tag (`as_tags`), unless one edit from a column."""
+    if key in Task.columns:
+        read_column(changes, key, text)
+        return
+    near = near_columns(key)
+    if near:
+        raise ArgumentError(f'{key}: not a task column; did you mean {" or ".join(near)}? '
+                            f'To set a tag by that name, {way_out}')
+    for tag, value in as_tags().items():
+        add_tag(changes, tag, value, text)
+
+
+def add_tag(changes: Changes, key: str, value: Any, text: Optional[str] = None) -> None:
+    """Add the tag `key` with `value` (given as `text`) to `changes`, refused if not one by the tag rules."""
+    check_tag(key, value)
+    changes.tags[key] = value
+    changes.shown.append(('tag', f'{key}:{value if text is None else text}'))
+
+
+def read_column(changes: Changes, column: str, text: str) -> None:
+    """Read `text` for `column` into `changes`."""
+    value = change_value(column, text)
+    changes.columns[column] = value
+    changes.shown.append(('column', f'{column}={text}'))
+    if column == 'zone' and value is not None:
+        changes.zones.append(zone_name(text))
+    if column in ADVISED_COLUMNS and value is not None:
+        changes.advice.append((RANGED_COLUMNS[column], value, column, text))
 
 
 class TaskUpdateApp(ReadingMixin, Application, SearchableMixin):
@@ -1121,6 +1435,8 @@ class TaskUpdateApp(ReadingMixin, Application, SearchableMixin):
         **get_shared_exception_mapping(__name__)
     }
 
+    changes: Changes = None
+
     def run(self: TaskUpdateApp) -> None:
         """Update task attributes in bulk."""
         legacy = len(self.update_args) == 3 and UUID_PATTERN.match(self.update_args[0])
@@ -1137,6 +1453,14 @@ class TaskUpdateApp(ReadingMixin, Application, SearchableMixin):
         elif self.delete_mode and (self.update_args or self.remove_tag):
             words = [*self.update_args, *(['--remove-tag', *self.remove_tag] if self.remove_tag else [])]
             raise ArgumentError(f'Cannot use --delete with changes (given: {" ".join(words)})')
+        self.changes = read_changes(self.update_args, single=bool(legacy))
+        if not legacy:
+            if self.order_desc and not self.order_by:
+                raise ArgumentError('Should not provide --desc if not using -s/--order-by')
+            if self.order_by and not self.limit:
+                raise ArgumentError('Using -s/--order-by without -l/--limit is meaningless')
+        for setting, value, column, given in self.changes.advice:
+            advise(setting, value, column, given=given)
         ensuredb()
         if legacy:
             self.update_legacy()
@@ -1145,22 +1469,21 @@ class TaskUpdateApp(ReadingMixin, Application, SearchableMixin):
 
     def update_legacy(self: TaskUpdateApp) -> None:
         """Implement legacy interface to update single task."""
-        uuid, field, value = self.update_args
-        if field not in Task.columns:
-            raise ArgumentError(f'Invalid field name "{field}"')
+        uuid = self.update_args[0]
+        columns, tags = self.changes.columns, self.changes.tags
         try:
-            if field == 'tag':
-                Task.update(uuid, tag={**Task.from_id(uuid).tag,
-                                       **Tag.parse_cmdline_list([value, ])})
+            self.record_zones()
+            if tags:
+                Task.update(uuid, tag={**Task.from_id(uuid).tag, **tags}, **columns)
             else:
-                Task.update(uuid, **{field: change_value(field, value), })
+                Task.update(uuid, **columns)
         except StaleDataError as err:
             raise Task.NotFound(str(err)) from err
 
     def update_tasks(self: TaskUpdateApp) -> None:
         """Normal mode updates many tasks."""
 
-        field_updates, tag_updates = self.process_arguments()
+        field_updates, tag_updates = dict(self.changes.columns), dict(self.changes.tags)
 
         if DATABASE_DIALECT == 'sqlite':
             site = config.database.file
@@ -1177,6 +1500,7 @@ class TaskUpdateApp(ReadingMixin, Application, SearchableMixin):
             return
 
         if not self.no_confirm:
+            self.show_changes()
             response = input(f'Update affects {count} tasks, continue? yes/[no]: ').strip().lower()
             if response in ['n', 'no', '']:
                 print('Stopping')
@@ -1211,6 +1535,8 @@ class TaskUpdateApp(ReadingMixin, Application, SearchableMixin):
             log.info('Updated 0 tasks')
             return
 
+        self.record_zones()
+
         if self.limit is not None:
             # An UPDATE cannot take a LIMIT, so the tasks are selected first, then each is written
             # by id while it still matches the filter, all in one transaction.
@@ -1228,43 +1554,25 @@ class TaskUpdateApp(ReadingMixin, Application, SearchableMixin):
         written = Task.update_matching(self.filter_criteria(), field_updates, tag_updates, self.remove_tag or [])
         self.report_written(count, written)
 
+    def show_changes(self: TaskUpdateApp) -> None:
+        """Print each change before the prompt, as a column, a tag or a removal, so a misspelled column shows as a tag."""
+        lines = [*self.changes.shown, *(('remove', f'tag {name}') for name in self.remove_tag or [])]
+        if lines:
+            print('Changes:')
+            for kind, text in lines:
+                print(f'  {kind:<7} {text}')
+
+    def record_zones(self: TaskUpdateApp) -> None:
+        """Record each zone a change names, as `hs submit --zone` does, so its tasks show the name."""
+        for name in self.changes.zones:
+            Zone.ensure(name)
+
     def report_written(self: TaskUpdateApp, count: int, written: int) -> None:
         """Log the number of tasks written, and how many of those counted were not, if any."""
         if written < count:
             log.warning(f'{count - written} of the {count} tasks counted no longer matched '
                         f'and were left as they are')
         log.info(f'{"Deleted" if self.delete_mode else "Updated"} {written} tasks')
-
-    def process_arguments(self: TaskUpdateApp) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-        """Process positional arguments and build dictionaries for changes."""
-        field_updates = {}
-        tag_updates = {}
-        for arg in self.update_args:
-            if WhereClause.pattern.match(arg):
-                raise ArgumentError(f'Positional argument matches conditional ({arg}), '
-                                    f'maybe you intended to use -w/--where?')
-            if '=' in arg:
-                field, value = arg.split('=', 1)
-                if field == 'id':
-                    raise ArgumentError(f'Cannot alter task "id" (given: {field}={value})')
-                if field not in Task.columns:
-                    raise ArgumentError(f'Unrecognized task field "{field}"')
-                field_updates[field] = change_value(field, value)
-            elif ':' in arg:
-                key, value = arg.split(':', 1)
-                tag_updates[key] = smart_coerce(value)
-            else:
-                raise ArgumentError(f'Argument not recognized ({arg}): missing "=" or ":"')
-
-        Task.ensure_valid_tag(tag_updates)
-
-        if self.order_desc and not self.order_by:
-            raise ArgumentError('Should not provide --desc if not using -s/--order-by')
-
-        if self.order_by and not self.limit:
-            raise ArgumentError('Using -s/--order-by without -l/--limit is meaningless')
-
-        return field_updates, tag_updates
 
 
 TASK_PROGRAM = 'hs task'

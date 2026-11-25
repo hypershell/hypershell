@@ -81,4 +81,47 @@ Description
    option, the range and the value (exit status 2). ``-l``/``--limit`` below 1 is refused, and so is
    a ``-g``/``--group`` outside 32 bits.
 
+.. versionchanged:: 2.9.0
+   Every column ``hs update`` writes is read by its kind, in both forms and on SQLite and PostgreSQL
+   alike. ``cores``, ``memory`` and ``timeout`` are read as ``hs submit -c``, ``-m`` and ``-W`` read
+   them, so ``memory=4G`` and ``timeout=1:30:00`` store bytes and seconds; ``waited`` and
+   ``duration`` take durations; ``exit_status``, ``attempt`` and ``part`` take whole numbers, and
+   ``cores_max`` and ``memory_max`` numbers, each within the range the description lists (the
+   exit status and peak ranges are new). Any other value, ``none`` for ``attempt`` or ``part``, and
+   ``ID id VALUE`` exit with status 2 before anything is counted, asked or written. Before, SQLite
+   stored text, fractions and out-of-range numbers, ``true`` was stored as 1, and PostgreSQL failed
+   with exit status 5 and a traceback (rounding a fraction instead). ``cores`` above 1,024 and
+   ``attempt`` above 100 are written with a warning.
+
+.. versionchanged:: 2.9.0
+   ``retried`` takes the boolean words a configuration key takes, ``yes``/``no`` and ``on``/``off``
+   as well as ``true``/``false`` and ``1``/``0``, in any case. The uuid columns take the 8-4-4-4-12
+   form only, stored in lower case on both databases. ``zone`` takes a zone name, as
+   ``hs submit --zone`` reads it: ``zone=default`` and ``zone=none`` put the task in the default
+   zone, and a new name is recorded so ``hs list`` and ``hs info`` show it. ``none`` for ``args``,
+   ``submit_id`` or ``retried`` exits with status 2. Before, SQLite stored any text in a uuid or
+   zone column, a zone name failed with exit status 5 on PostgreSQL, the default zone's reserved id
+   was stored where its tasks are matched by none, and ``none`` for these columns failed with exit
+   status 5 and a traceback.
+
+.. versionchanged:: 2.9.0
+   ``submit_time``, ``schedule_time``, ``start_time`` and ``completion_time`` take ISO 8601 on both
+   databases, a value without an offset being local time, and hold the same instant on SQLite and
+   PostgreSQL. Before, SQLite refused every value with exit status 5 and a traceback, and PostgreSQL
+   stored whatever its server read, a time without an offset in the server session's zone. ``now``,
+   ``today`` and ``epoch``, which PostgreSQL stored, exit with status 2: use ``$(date -Iseconds)``.
+   ``none`` for ``submit_time`` exits with status 2.
+
+.. versionchanged:: 2.9.0
+   ``KEY=VALUE`` with a key that is not a task column is a tag change, as ``KEY:VALUE`` is, in both
+   forms (``hs update ID KEY VALUE`` too). Before, it exited with status 2 (``Unrecognized task
+   field``, ``Invalid field name``). Without ``-f``, the prompt lists each change as a column, a tag
+   or a removal before asking. A key one edit from a column, letter case aside (``exit_stauts=0``,
+   ``Exit_Status=0``, ``tags=x``), exits with status 2, naming the key and the nearest column, and
+   writes nothing; ``KEY:VALUE`` always sets a tag. ``tag=VALUE`` exits with status 2, pointing to
+   ``KEY=VALUE``, ``KEY:VALUE`` and ``--remove-tag``; before, it replaced the task's every tag with
+   the value as JSON text. An argument is split at its first ``=`` or ``:``. Every tag is checked by
+   the tag rules: a filtered ``KEY:VALUE`` that breaks them exits with status 2 instead of 5 with a
+   traceback, and ``hs update ID tag KEY:VALUE``, which stored any tag before, is checked too.
+
 .. include:: ../_include/task_update_help.rst
