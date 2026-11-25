@@ -28,7 +28,7 @@ level margin: \\n[rst2man-indent\\n[rst2man-indent-level]]
 .\" new: \\n[rst2man-indent\\n[rst2man-indent-level]]
 .in \\n[rst2man-indent\\n[rst2man-indent-level]]u
 ..
-.TH "HS" "1" "Nov 22, 2026" "2.9.0a9" "hypershell"
+.TH "HS" "1" "Nov 25, 2026" "2.9.0a10" "hypershell"
 .SH NAME
 hs \- Process shell commands over a distributed, asynchronous queue
 .SH SYNOPSIS
@@ -189,6 +189,8 @@ process has the name in its \fBHYPERSHELL_ZONE\fP environment variable. The clie
 .B \fB\-N\fP, \fB\-\-num\-threads\fP \fINUM\fP
 Number of executor threads per client (default: 1).
 .sp
+Range: 0 (all cores) to 4,194,304. Above 1,024 it runs with a warning.
+.sp
 Set to 0 to auto\-detect based on available CPU cores on each client.
 .sp
 For example, \fB\-N4\fP would create four workers, but \fB\-N4 \-\-ssh \(aqcluster\-a[00\-01].xyz\(aq\fP
@@ -238,11 +240,15 @@ or set \fBserver.tls.servername\fP\&.
 .B \fB\-p\fP, \fB\-\-port\fP \fIPORT\fP
 Port number (default: 50001).
 .sp
+Range: 1 to 65,535.
+.sp
 This is an arbitrary choice and simply must be an available port. The default option chosen
 here is typically available on most platforms and is not expected by any known major software.
 .TP
 .B \fB\-b\fP, \fB\-\-bundlesize\fP \fISIZE\fP
 Size of task bundle (default: 1).
+.sp
+Range: 1 to 2,147,483,647.
 .sp
 The default value allows for greater concurrency and responsiveness on small scales. This is
 used by the \fIsubmit\fP thread to accumulate bundles for either database commits and/or publishing
@@ -256,6 +262,8 @@ See also \fB\-\-num\-threads\fP and \fB\-\-bundlewait\fP\&.
 .TP
 .B \fB\-w\fP, \fB\-\-bundlewait\fP \fISEC\fP
 Time to wait before flushing tasks (default: 5).
+.sp
+Range: 0 s to 2,147,483,647 s.
 .sp
 Specify a number of seconds, units \fBd\fP, \fBh\fP, \fBm\fP and \fBs\fP in that order, whole or
 fractional (e.g., \fB30s\fP, \fB5m\fP, \fB1h30m\fP, \fB1.5h\fP), or a Slurm time \fBMM:SS\fP,
@@ -274,6 +282,8 @@ See also \fB\-\-bundlesize\fP\&.
 .B \fB\-Q\fP, \fB\-\-poll\fP \fISEC\fP
 Polling interval between database queries if no tasks are available (default: 30).
 .sp
+Range: 0 s to 2,147,483,647 s.
+.sp
 Specify a number of seconds, units \fBd\fP, \fBh\fP, \fBm\fP and \fBs\fP in that order, whole or
 fractional (e.g., \fB30s\fP, \fB5m\fP, \fB1h30m\fP, \fB1.5h\fP), or a Slurm time \fBMM:SS\fP,
 \fBHH:MM:SS\fP, \fBD\-HH\fP, \fBD\-HH:MM\fP or \fBD\-HH:MM:SS\fP (e.g., \fB1:30\fP). A fraction of a
@@ -287,6 +297,8 @@ scheduler\(aqs wait at once.
 .TP
 .B \fB\-r\fP, \fB\-\-max\-retries\fP \fINUM\fP
 Auto\-retry failed tasks (default: 0).
+.sp
+Range: 0 to 32,766. Above 99 it runs with a warning.
 .sp
 If a database is in use, then there is an opportunity to automatically retry failed tasks. A
 task is considered to have failed if it has a non\-zero exit status. Setting this value greater
@@ -408,6 +420,8 @@ This option is necessary for clients with a different install path on client hos
 .B \fB\-d\fP, \fB\-\-delay\-start\fP \fISEC\fP
 Delay time for launching clients (default: 0).
 .sp
+Range: \-2,147,483,647 s to 2,147,483,647 s.
+.sp
 Specify a number of seconds, units \fBd\fP, \fBh\fP, \fBm\fP and \fBs\fP in that order, whole or
 fractional (e.g., \fB30s\fP, \fB10m\fP, \fB1h30m\fP, \fB1.5h\fP), or a Slurm time \fBMM:SS\fP,
 \fBHH:MM:SS\fP, \fBD\-HH\fP, \fBD\-HH:MM\fP or \fBD\-HH:MM:SS\fP (e.g., \fB1:30\fP). Fractions of a second
@@ -458,6 +472,8 @@ for you and if \fB\-\-failures\fP is enabled these task args will be sent to a l
 .B \fB\-T\fP, \fB\-\-timeout\fP \fISEC\fP
 Timeout in seconds for clients. Automatically shutdown if no tasks received (default: never).
 .sp
+Range: 0 s to 2,147,483,647 s.
+.sp
 This feature allows for gracefully scaling down a cluster when task throughput subsides.
 .sp
 Specify a number of seconds, units \fBd\fP, \fBh\fP, \fBm\fP and \fBs\fP in that order, whole or
@@ -466,6 +482,8 @@ fractional (e.g., \fB90m\fP, \fB1h30m\fP, \fB1.5h\fP, \fB1d12h\fP), or a Slurm t
 .TP
 .B \fB\-W\fP, \fB\-\-task\-timeout\fP \fISEC\fP
 Task\-level walltime limit (default: none).
+.sp
+Range: 0 s to 2,147,483,647 s.
 .sp
 Executors will send a progression of SIGINT, SIGTERM, and SIGKILL.
 If the process still persists the executor itself will shutdown.
@@ -479,11 +497,15 @@ Individual tasks can override this with inline comments, which take the same for
 .B \fB\-c\fP, \fB\-\-cores\fP \fINUM\fP
 Number of CPU cores required per task (default: none).
 .sp
+Range: 0 (unconstrained) to 32,767. Above 1,024 it runs with a warning.
+.sp
 When specified, tasks will only be executed when the required number of cores
 is available. Used with resource\-aware scheduling and backfill.
 .TP
 .B \fB\-m\fP, \fB\-\-memory\fP \fIMEM\fP
 Amount of memory required per task (default: none).
+.sp
+Range: 0 bytes (unconstrained) to 9,223,372,036,854,775,807 bytes.
 .sp
 Specify memory size in bytes or with a unit \fBK\fP, \fBM\fP, \fBG\fP or \fBT\fP, alone or followed
 by \fBB\fP or \fBiB\fP, in any case (e.g., \(aq4GB\(aq, \(aq512M\(aq). Each unit is a power of 1024, so
@@ -495,6 +517,8 @@ and backfill.
 .B \fB\-C\fP, \fB\-\-client\-cores\fP \fINUM\fP
 Limit available cores per client (default: all cores).
 .sp
+Range: 0 (unconstrained) to 32,767. Above 1,024 it runs with a warning.
+.sp
 Sets an upper bound on the number of CPU cores that each client can use.
 This allows running multiple clients on the same node by partitioning resources.
 Clients will not execute tasks if doing so would exceed this limit.
@@ -503,6 +527,8 @@ See also \fB\-\-num\-threads=0\fP\&.
 .TP
 .B \fB\-M\fP, \fB\-\-client\-memory\fP \fIMEM\fP
 Limit available memory per client (default: all memory).
+.sp
+Range: 0 bytes (unconstrained) to 9,223,372,036,854,775,807 bytes.
 .sp
 Sets an upper bound on the amount of memory that each client can use.
 Specify memory size in bytes or with a unit \fBK\fP, \fBM\fP, \fBG\fP or \fBT\fP, alone or followed
@@ -522,9 +548,13 @@ See also \fB\-\-capture\fP\&.
 .B \fB\-R\fP, \fB\-\-ratelimit\fP \fINUM\fP
 Maximum allowed tasks per second per client; a number, e.g. 0.5 (default: none).
 Individual tasks are throttled if exceeding this average limit.
+.sp
+Range: 0.000001 to 1,000,000,000 tasks per second, or 0 (no limit). Below 0.001 tasks per second, other than 0, it runs with a warning.
 .TP
 .B \fB\-S\fP, \fB\-\-signalwait\fP \fISEC\fP
 Task\-level signal escalation wait period (default: 10).
+.sp
+Range: 0 s to 2,147,483,647 s.
 .sp
 Specify a number of seconds, units \fBd\fP, \fBh\fP, \fBm\fP and \fBs\fP in that order, whole or
 fractional (e.g., \fB30s\fP, \fB5m\fP, \fB1h30m\fP, \fB1.5h\fP), or a Slurm time \fBMM:SS\fP,
@@ -592,6 +622,8 @@ See also \fB\-\-factor\fP, \fB\-\-period\fP, \fB\-\-init\-size\fP, \fB\-\-min\-s
 .B \fB\-F\fP, \fB\-\-factor\fP \fIVALUE\fP
 Scaling factor (default: 1).
 .sp
+Range: 0.000001 to 1,000,000,000. Above 100 it runs with a warning.
+.sp
 A configurable, dimensionless quantity used by the \fB\-\-autoscaling=dynamic\fP policy.
 This value expresses some multiple of the average task duration in seconds.
 .sp
@@ -615,6 +647,8 @@ See also \fB\-\-period\fP\&.  Only valid with \fB\-\-autoscaling\fP\&.
 .B \fB\-P\fP, \fB\-\-period\fP \fISEC\fP
 Scaling period, greater than zero (default: 60).
 .sp
+Range: 0 s (exclusive) to 2,147,483,647 s. Above 3,600 s it runs with a warning.
+.sp
 Specify a number of seconds, units \fBd\fP, \fBh\fP, \fBm\fP and \fBs\fP in that order, whole or
 fractional (e.g., \fB30s\fP, \fB5m\fP, \fB1h30m\fP, \fB1.5h\fP), or a Slurm time \fBMM:SS\fP,
 \fBHH:MM:SS\fP, \fBD\-HH\fP, \fBD\-HH:MM\fP or \fBD\-HH:MM:SS\fP (e.g., \fB1:30\fP). A fraction of a
@@ -630,6 +664,8 @@ Only valid with \fB\-\-autoscaling\fP\&.
 .B \fB\-I\fP, \fB\-\-init\-size\fP \fISIZE\fP
 Initial size of cluster (default: 1).
 .sp
+Range: 0 to 2,147,483,647.
+.sp
 When the cluster starts, this number of clients will be launched.
 For a \fIfixed\fP policy cluster, this should be given with a \fB\-\-min\-size\fP, and likely
 the same value.
@@ -639,6 +675,8 @@ Only valid with \fB\-\-autoscaling\fP\&.
 .B \fB\-X\fP, \fB\-\-min\-size\fP \fISIZE\fP
 Minimum size of cluster (default: 0).
 .sp
+Range: 0 to 2,147,483,647.
+.sp
 Regardless of autoscaling policy, if the number of launched clients drops below this
 value we will scale up by one. Allowing \fB\-\-min\-size=0\fP is an important feature for
 efficient use of computing resources in the absence of tasks.
@@ -647,6 +685,8 @@ Only valid with \fB\-\-autoscaling\fP\&.
 .TP
 .B \fB\-Y\fP, \fB\-\-max\-size\fP \fISIZE\fP
 Maximum size of cluster (default: 1).
+.sp
+Range: 0 to 2,147,483,647.
 .sp
 For a \fIdynamic\fP autoscaling policy, this sets an upper limit on the number of launched
 clients. When this number is reached, scaling stops regardless of task pressure.
@@ -745,11 +785,15 @@ over the network, bind the server to \fI0.0.0.0\fP\&.
 .B \fB\-p\fP, \fB\-\-port\fP \fINUM\fP
 Port number (default: 50001).
 .sp
+Range: 1 to 65,535.
+.sp
 This is an arbitrary choice and simply must be an available port. The default option chosen
 here is typically available on most platforms and is not expected by any known major software.
 .TP
 .B \fB\-b\fP, \fB\-\-bundlesize\fP \fINUM\fP
 Size of task bundle (default: 1).
+.sp
+Range: 1 to 2,147,483,647.
 .sp
 The default value allows for greater concurrency and responsiveness on small scales. This is
 used by the \fIsubmit\fP thread to accumulate bundles for either database commits and/or publishing
@@ -765,6 +809,8 @@ See also \fB\-\-num\-threads\fP and \fB\-\-bundlewait\fP\&.
 .B \fB\-w\fP, \fB\-\-bundlewait\fP \fISEC\fP
 Time to wait before flushing tasks (default: 5).
 .sp
+Range: 0 s to 2,147,483,647 s.
+.sp
 Specify a number of seconds, units \fBd\fP, \fBh\fP, \fBm\fP and \fBs\fP in that order, whole or
 fractional (e.g., \fB30s\fP, \fB5m\fP, \fB1h30m\fP, \fB1.5h\fP), or a Slurm time \fBMM:SS\fP,
 \fBHH:MM:SS\fP, \fBD\-HH\fP, \fBD\-HH:MM\fP or \fBD\-HH:MM:SS\fP (e.g., \fB1:30\fP). A fraction of a
@@ -779,6 +825,8 @@ See also \fB\-\-bundlesize\fP\&.
 .B \fB\-Q\fP, \fB\-\-poll\fP \fISEC\fP
 Polling interval between database queries if no tasks are available (default: 30).
 .sp
+Range: 0 s to 2,147,483,647 s.
+.sp
 Specify a number of seconds, units \fBd\fP, \fBh\fP, \fBm\fP and \fBs\fP in that order, whole or
 fractional (e.g., \fB30s\fP, \fB5m\fP, \fB1h30m\fP, \fB1.5h\fP), or a Slurm time \fBMM:SS\fP,
 \fBHH:MM:SS\fP, \fBD\-HH\fP, \fBD\-HH:MM\fP or \fBD\-HH:MM:SS\fP (e.g., \fB1:30\fP). A fraction of a
@@ -792,6 +840,8 @@ scheduler\(aqs wait at once.
 .TP
 .B \fB\-r\fP, \fB\-\-max\-retries\fP \fINUM\fP
 Auto\-retry failed tasks (default: 0).
+.sp
+Range: 0 to 32,766. Above 99 it runs with a warning.
 .sp
 If a database is in use, then there is an opportunity to automatically retry failed tasks. A
 task is considered to have failed if it has a non\-zero exit status. Setting this value greater
@@ -812,6 +862,8 @@ scheduled when there are no more remaining novel tasks.
 .B \fB\-c\fP, \fB\-\-task\-cores\fP \fINUM\fP
 Number of CPU cores required per task (default: none).
 .sp
+Range: 0 (unconstrained) to 32,767. Above 1,024 it runs with a warning.
+.sp
 When an input \fIFILE\fP is provided, a \fIsubmit\fP thread is launched to read and submit tasks.
 This option sets the default core requirement for all submitted tasks.
 Individual tasks can override this with inline comments (e.g., \fB#HYPERSHELL: cores:8\fP).
@@ -820,6 +872,8 @@ See also \fB\-\-task\-memory\fP and \fB\-\-task\-timeout\fP\&.
 .TP
 .B \fB\-m\fP, \fB\-\-task\-memory\fP \fIMEM\fP
 Amount of memory required per task (default: none).
+.sp
+Range: 0 bytes (unconstrained) to 9,223,372,036,854,775,807 bytes.
 .sp
 When an input \fIFILE\fP is provided, a \fIsubmit\fP thread is launched to read and submit tasks.
 This option sets the default memory requirement for all submitted tasks.
@@ -832,6 +886,8 @@ See also \fB\-\-task\-cores\fP and \fB\-\-task\-timeout\fP\&.
 .TP
 .B \fB\-W\fP, \fB\-\-task\-timeout\fP \fISEC\fP
 Task\-level walltime limit in seconds (default: none).
+.sp
+Range: 0 s to 2,147,483,647 s.
 .sp
 When an input \fIFILE\fP is provided, a \fIsubmit\fP thread is launched to read and submit tasks.
 This option sets the default timeout for all submitted tasks. Individual
@@ -914,11 +970,15 @@ See also \fB\-\-factor\fP and \fB\-\-period\fP\&.
 .B \fB\-F\fP, \fB\-\-factor\fP \fIVALUE\fP
 Scaling factor (default: 1).
 .sp
+Range: 0.000001 to 1,000,000,000. Above 100 it runs with a warning.
+.sp
 The dimensionless multiple of the average task duration that \fB\-\-autoscaling=dynamic\fP compares
 each zone\(aqs estimated time to completion against (its \fItask pressure\fP), as for the \fIcluster\fP\&.
 .TP
 .B \fB\-P\fP, \fB\-\-period\fP \fISEC\fP
 Scaling period, greater than zero (default: 60).
+.sp
+Range: 0 s (exclusive) to 2,147,483,647 s. Above 3,600 s it runs with a warning.
 .sp
 Specify a number of seconds, units \fBd\fP, \fBh\fP, \fBm\fP and \fBs\fP in that order, whole or
 fractional (e.g., \fB30s\fP, \fB5m\fP, \fB1h30m\fP, \fB1.5h\fP), or a Slurm time \fBMM:SS\fP,
@@ -1010,6 +1070,8 @@ configuration file.
 .B \fB\-N\fP, \fB\-\-num\-threads\fP \fINUM\fP
 Number of task executor threads (default: 1).
 .sp
+Range: 0 (all cores) to 4,194,304. Above 1,024 it runs with a warning.
+.sp
 Set to 0 to auto\-detect based on available CPU cores.
 .TP
 .B \fB\-t\fP, \fB\-\-template\fP \fICMD\fP
@@ -1026,6 +1088,8 @@ See section on \fItemplates\fP\&.
 Size of task bundle to request from the server and to return results in (default: the
 server\(aqs).
 .sp
+Range: 1 to 2,147,483,647.
+.sp
 When given (on the command line, by \fBHYPERSHELL_CLIENT_BUNDLESIZE\fP, or in a configuration
 file as \fBclient.bundlesize\fP), the client advertises this size and the server replies with
 up to this many tasks, never more than its cap (\fBserver.bundlemax\fP). When not given, the
@@ -1039,6 +1103,8 @@ See also \fB\-\-num\-threads\fP and \fB\-\-bundlewait\fP\&.
 .TP
 .B \fB\-w\fP, \fB\-\-bundlewait\fP \fISEC\fP
 Time to wait before flushing tasks (default: 5, or \fBclient.bundlewait\fP).
+.sp
+Range: 0 s to 2,147,483,647 s.
 .sp
 Specify a number of seconds, units \fBd\fP, \fBh\fP, \fBm\fP and \fBs\fP in that order, whole or
 fractional (e.g., \fB30s\fP, \fB5m\fP, \fB1h30m\fP, \fB1.5h\fP), or a Slurm time \fBMM:SS\fP,
@@ -1060,13 +1126,20 @@ zone only. A client given no \fB\-\-zone\fP (or \fB\-\-zone default\fP) runs onl
 without one. See \fB\-\-zone\fP on \fIsubmit\fP\&.
 .TP
 .B \fB\-H\fP, \fB\-\-host\fP \fIADDR\fP
-Hostname or IP address to connect with server (default: localhost).
+Hostname or IP address to connect with server (default: \fBserver.host\fP).
+.sp
+With no \fB\-H\fP, the client dials \fBserver.host\fP when the configuration gives it, else
+\fBserver.advertise\fP, else \fBserver.bind\fP when it is one specific address, else \fIlocalhost\fP\&.
 .TP
 .B \fB\-p\fP, \fB\-\-port\fP \fINUM\fP
 Port number to connect with server (default: 50001).
+.sp
+Range: 1 to 65,535.
 .TP
 .B \fB\-d\fP, \fB\-\-delay\-start\fP \fISEC\fP
 Delay time before connecting to server (default: 0).
+.sp
+Range: \-2,147,483,647 s to 2,147,483,647 s.
 .sp
 Specify a number of seconds, units \fBd\fP, \fBh\fP, \fBm\fP and \fBs\fP in that order, whole or
 fractional (e.g., \fB30s\fP, \fB10m\fP, \fB1h30m\fP, \fB1.5h\fP), or a Slurm time \fBMM:SS\fP,
@@ -1113,6 +1186,8 @@ Mutually exclusive with both \fB\-\-output\fP and \fB\-\-errors\fP\&.
 .B \fB\-T\fP, \fB\-\-timeout\fP \fISEC\fP
 Timeout in seconds for client. Automatically shutdown if no tasks received (default: never).
 .sp
+Range: 1 s to 2,147,483,647 s.
+.sp
 This feature allows for gracefully scaling down a cluster when task throughput subsides.
 The timeout counts from when the client starts, after any \fB\-\-delay\-start\fP, so the delay
 does not count toward it.
@@ -1124,6 +1199,8 @@ fractional (e.g., \fB90m\fP, \fB1h30m\fP, \fB1.5h\fP, \fB1d12h\fP), or a Slurm t
 .B \fB\-W\fP, \fB\-\-task\-timeout\fP \fISEC\fP
 Task\-level walltime limit (default: none).
 .sp
+Range: 1 s to 2,147,483,647 s.
+.sp
 Executors will send a progression of SIGINT, SIGTERM, and SIGKILL.
 If the process still persists the executor itself will shutdown.
 .sp
@@ -1134,6 +1211,8 @@ fractional (e.g., \fB90m\fP, \fB1h30m\fP, \fB1.5h\fP, \fB1d12h\fP), or a Slurm t
 .B \fB\-C\fP, \fB\-\-client\-cores\fP \fINUM\fP
 Limit available cores for client (default: all cores).
 .sp
+Range: 0 (unconstrained) to 32,767. Above 1,024 it runs with a warning.
+.sp
 Sets an upper bound on the number of CPU cores that the client can use.
 This allows running multiple clients on the same node by partitioning resources.
 The client will not execute tasks if doing so would exceed this limit.
@@ -1142,6 +1221,8 @@ See also \fB\-\-num\-threads=0\fP\&.
 .TP
 .B \fB\-M\fP, \fB\-\-client\-memory\fP \fISIZE\fP
 Limit available memory for client (default: all memory).
+.sp
+Range: 0 bytes (unconstrained) to 9,223,372,036,854,775,807 bytes.
 .sp
 Sets an upper bound on the amount of memory that the client can use.
 Specify memory size in bytes or with a unit \fBK\fP, \fBM\fP, \fBG\fP or \fBT\fP, alone or followed
@@ -1161,9 +1242,13 @@ See also \fB\-\-capture\fP\&.
 .B \fB\-R\fP, \fB\-\-ratelimit\fP \fINUM\fP
 Maximum allowed tasks per second per client; a number, e.g. 0.5 (default: none).
 Individual tasks are throttled if exceeding this average limit.
+.sp
+Range: 0.000001 to 1,000,000,000 tasks per second, or 0 (no limit). Below 0.001 tasks per second, other than 0, it runs with a warning.
 .TP
 .B \fB\-S\fP, \fB\-\-signalwait\fP \fISEC\fP
 Task\-level signal escalation wait period (default: 10).
+.sp
+Range: 0 s to 2,147,483,647 s.
 .sp
 Specify a number of seconds, units \fBd\fP, \fBh\fP, \fBm\fP and \fBs\fP in that order, whole or
 fractional (e.g., \fB30s\fP, \fB5m\fP, \fB1h30m\fP, \fB1.5h\fP), or a Slurm time \fBMM:SS\fP,
@@ -1212,8 +1297,8 @@ See the \fIsecurity\fP section for peer verification modes.
 .INDENT 0.0
 .TP
 .B \fBhs\fP \fBrelay\fP \fB[\-h]\fP \fB[\-H ADDR]\fP \fB[\-p NUM]\fP \fB[\-\-no\-tls]\fP \fB[\-\-zone NAME ...]\fP \fB[\-N NUM]\fP
-\fB[\-\-launcher CMD]\fP \fB[\-\-launcher\-args ARGS]\fP \fB[\-\-bind ADDR]\fP \fB[\-\-advertise ADDR]\fP \fB[\-\-port NUM]\fP
-\fB[\-\-database PATH]\fP
+\fB[\-\-launcher CMD]\fP \fB[\-\-launcher\-args ARGS]\fP \fB[\-\-remote\-exe PATH]\fP \fB[\-\-bind ADDR]\fP \fB[\-\-advertise ADDR]\fP
+\fB[\-\-port NUM]\fP \fB[\-\-database PATH]\fP
 .UNINDENT
 .sp
 Run relay for one site.
@@ -1322,6 +1407,8 @@ See also \fBrelay.upstream.host\fP\&.
 .B \fB\-p\fP, \fB\-\-upstream\-port\fP \fINUM\fP
 Port number of the upstream \fIserver\fP (default: 50001).
 .sp
+Range: 1 to 65,535.
+.sp
 See also \fBrelay.upstream.port\fP\&.
 .TP
 .B \fB\-\-no\-tls\fP
@@ -1341,6 +1428,8 @@ settings from \fB[relay.zone.NAME]\fP\&. See also \fBrelay.zone\fP\&.
 .B \fB\-N\fP, \fB\-\-size\fP \fINUM\fP
 Number of \fIclients\fP the relay keeps launched at its site (default: 1).
 .sp
+Range: 1 to 2,147,483,647.
+.sp
 A \fIclient\fP that exits is launched again. The size must be at least 1: with no \fIclient\fP at the
 site the relay would never ask upstream for work. Against an upstream \fIserver\fP autoscaling with
 relay sites, the size is instead the default \fBmax\fP each zone advertises (see \fBrelay.max\fP),
@@ -1350,9 +1439,9 @@ and \fIclients\fP are launched as the published topology asks. See also \fBrelay
 Command prefix used to launch each \fIclient\fP at the site (default: none).
 .sp
 With none, \fIclients\fP run directly on the relay\(aqs host. Otherwise each is launched as
-\fBCMD [ARGS...] hyper\-shell client ...\fP (e.g., \fBsrun\fP). A \fB{zone}\fP in the launcher or
-its arguments is replaced by the zone the \fIclient\fP serves, and the launched process has it in
-\fBHYPERSHELL_ZONE\fP\&. The \fIclients\fP connect back to the relay at its bind address (\fB\-\-bind\fP),
+\fBCMD [ARGS...] HS client ...\fP (e.g., \fBsrun\fP), where \fIHS\fP is the relay\(aqs own program (see
+\fB\-\-remote\-exe\fP). A \fB{zone}\fP in the launcher or its arguments is replaced by the zone the
+\fIclient\fP serves, and the launched process has it in \fBHYPERSHELL_ZONE\fP\&. The \fIclients\fP connect back to the relay at its bind address (\fB\-\-bind\fP),
 or by its host name when it binds every interface (\fI0.0.0.0\fP, the default), unless
 \fB\-\-advertise\fP names another address for them to dial. The launcher must
 pass the environment through: each \fIclient\fP receives the site key there
@@ -1363,6 +1452,17 @@ See also \fBrelay.launcher\fP\&.
 Extra arguments for the launcher, placed after it (quoted as one argument).
 .sp
 See also \fBrelay.launcher_args\fP\&.
+.TP
+.B \fB\-\-remote\-exe\fP \fIPATH\fP
+Program the \fIclients\fP at the site are launched as (default: the \fBhs\fP that runs the relay).
+.sp
+By default the relay launches its \fIclients\fP as the \fBhs\fP it was started as, by its full path
+and as the user ran it (a symlinked \fBbin/hs\fP stays the link), and keeps that program when it
+starts again to bind its database (\fB\-\-database\fP). The path assumes the site\(aqs nodes see this
+installation where this host does; where they see it at another path, or run another
+installation, name the program here. It is one program, not a command line: a wrapper belongs
+in \fB\-\-launcher\fP\&. The value is passed on as given, never resolved or checked. It takes
+precedence over \fBrelay.remote_exe\fP\&. See also \fBrelay.remote_exe\fP\&.
 .TP
 .B \fB\-\-bind\fP \fIADDR\fP
 Bind address of the relay\-local \fIserver\fP (default: 0.0.0.0).
@@ -1386,6 +1486,8 @@ bounds a zone advertises upstream. It takes precedence over \fBrelay.advertise\f
 .TP
 .B \fB\-\-port\fP \fINUM\fP
 Port of the relay\-local \fIserver\fP (default: 50002).
+.sp
+Range: 1 to 65,535.
 .sp
 The default differs from the \fIserver\fP default (50001), so a relay can run beside a
 \fIserver\fP on the same host. See also \fBrelay.port\fP\&.
@@ -1453,6 +1555,39 @@ recently scheduled group is below it, so it is never refused.
 .sp
 Changed in version 2.9.0: \X'tty: link https://github.com/hypershell/hypershell/pull/118'\fI\%#118\fP\X'tty: link': a group that is not an integer is refused; a task below the reached group is refused;
 with the database, standard input is read in full before anything is submitted.
+
+.sp
+The resource tags \fBcores\fP, \fBmemory\fP and \fBtimeout\fP take the ranges of the \fB\-c\fP, \fB\-m\fP and
+\fB\-W\fP options, and are refused as a group is, wherever they come from (an inline tag, \fB\-t\fP or a
+\fB\-\-from\-json\fP record): input read in full is refused whole, with nothing submitted, naming the
+value and its line (or record); on a stream only that line is refused, with an error; \fB\-t\fP is
+refused before any input is read (exit status 2), here and on \fBhs run\fP\&.
+.INDENT 0.0
+.IP \(bu 2
+\fBcores\fP: Range: 0 (unconstrained) to 32,767. Above 1,024 it runs with a warning.
+.IP \(bu 2
+\fBmemory\fP: Range: 0 bytes (unconstrained) to 9,223,372,036,854,775,807 bytes.
+.IP \(bu 2
+\fBtimeout\fP: Range: 0 s to 2,147,483,647 s.
+.UNINDENT
+.sp
+A tag is read as its option reads it, with one difference: \fBcores\fP written as a decimal with a
+zero fraction (\fBcores:4.0\fP) is that whole number, while a non\-zero fraction (\fBcores:4.5\fP) is
+refused. A \fBtimeout\fP with a fraction of a second is rounded up to whole seconds, as \fB\-W\fP rounds
+it (\fBtimeout:90.5\fP is 91 seconds), and a \fBmemory\fP with a fraction of a byte is rounded down, as
+\fB\-m\fP rounds it. A \fB\-\-from\-json\fP record\(aqs value, a JSON number or a string, is read the same way
+and stored as a whole number (\fB\(dqcores\(dq: \(dq4.0\(dq\fP and \fB\(dqcores\(dq: 4.0\fP are 4, \fB\(dqtimeout\(dq: 90.5\fP
+is 91); a template still expands the record\(aqs field as written (\fB{memory}\fP of \fB\(dq2G\(dq\fP is
+\fB2G\fP).
+.sp
+Tasks past the advisory limit run as before; one warning for the whole submission gives their
+count and the first such line (or record, or the command line for one task given as arguments).
+.sp
+Changed in version 2.9.0: \X'tty: link https://github.com/hypershell/hypershell/pull/125'\fI\%#125\fP\X'tty: link': a resource tag outside its range, or not of its kind, is refused as a group that is
+not an integer is; before, it was stored as given, or stopped the submission while it was
+written. \fBhs run \-t\fP refuses one the same way. A \fBcores\fP tag of \fB4.0\fP is still read as 4. A
+\fB\-\-from\-json\fP record\(aqs resource value is stored as a whole number: before, a decimal
+\fBtimeout\fP or \fBmemory\fP number was stored as given.
 
 .sp
 With \fB\-\-from\-json\fP, read tasks from a JSON file instead. The value is
@@ -1543,12 +1678,16 @@ Uses \fB\-H\fP and \fB\-p\fP to name the server. The key to connect to it is tak
 file, and must match the server\(aqs.
 .TP
 .B \fB\-H\fP, \fB\-\-host\fP \fIADDR\fP
-Hostname or IP address for server (default: localhost).
+Hostname or IP address for server (default: \fBserver.host\fP).
 .sp
-Only used with \fB\-\-queue\fP mode to specify the server to connect to.
+Only used with \fB\-\-queue\fP mode to specify the server to connect to. With no \fB\-H\fP, it is
+\fBserver.host\fP when the configuration gives it, else \fBserver.advertise\fP, else
+\fBserver.bind\fP when it is one specific address, else \fIlocalhost\fP, as for \fIclient\fP\&.
 .TP
 .B \fB\-p\fP, \fB\-\-port\fP \fINUM\fP
 Port number for server (default: 50001).
+.sp
+Range: 1 to 65,535.
 .sp
 Only used with \fB\-\-queue\fP mode to specify the server port.
 .TP
@@ -1566,6 +1705,8 @@ See section on \fItemplates\fP\&.
 .B \fB\-b\fP, \fB\-\-bundlesize\fP \fINUM\fP
 Size of task bundle (default: 1).
 .sp
+Range: 1 to 2,147,483,647.
+.sp
 The default value allows for greater concurrency and responsiveness on small scales.
 Using larger bundles is a good idea for large distributed workflows; specifically, it is best
 to coordinate bundle size with the number of executors in use by each client.
@@ -1574,6 +1715,8 @@ See also \fB\-\-bundlewait\fP\&.
 .TP
 .B \fB\-w\fP, \fB\-\-bundlewait\fP \fISEC\fP
 Time to wait before flushing tasks (default: 5).
+.sp
+Range: 0 s to 2,147,483,647 s.
 .sp
 Specify a number of seconds, units \fBd\fP, \fBh\fP, \fBm\fP and \fBs\fP in that order, whole or
 fractional (e.g., \fB30s\fP, \fB5m\fP, \fB1h30m\fP, \fB1.5h\fP), or a Slurm time \fBMM:SS\fP,
@@ -1588,11 +1731,15 @@ See also \fB\-\-bundlesize\fP\&.
 .B \fB\-c\fP, \fB\-\-cores\fP \fINUM\fP
 Number of CPU cores required per task (default: none).
 .sp
+Range: 0 (unconstrained) to 32,767. Above 1,024 it runs with a warning.
+.sp
 Sets the default core requirement for all submitted tasks. Individual tasks can override
 this with inline comments (e.g., \fB#HYPERSHELL: cores:8\fP).
 .TP
 .B \fB\-m\fP, \fB\-\-memory\fP \fIMEM\fP
 Amount of memory required per task (default: none).
+.sp
+Range: 0 bytes (unconstrained) to 9,223,372,036,854,775,807 bytes.
 .sp
 Sets the default memory requirement for all submitted tasks. Specify memory size in bytes
 or with a unit \fBK\fP, \fBM\fP, \fBG\fP or \fBT\fP, alone or followed by \fBB\fP or \fBiB\fP, in any
@@ -1602,6 +1749,8 @@ same forms (e.g., \fB#HYPERSHELL: memory:8G\fP).
 .TP
 .B \fB\-W\fP, \fB\-\-timeout\fP \fISEC\fP
 Task\-level walltime limit in seconds (default: none).
+.sp
+Range: 0 s to 2,147,483,647 s.
 .sp
 Sets the default timeout for all submitted tasks. Individual tasks can override this
 with inline comments, which take the same forms (e.g., \fB#HYPERSHELL: timeout:3600\fP or
@@ -1613,6 +1762,8 @@ fractional (e.g., \fB90m\fP, \fB1h30m\fP, \fB1.5h\fP, \fB1d12h\fP), or a Slurm t
 .TP
 .B \fB\-g\fP, \fB\-\-group\fP \fINUM\fP
 Task group for dependency management (default: 0).
+.sp
+Range: \-2,147,483,648 to 2,147,483,647.
 .sp
 Assigns submitted tasks to a specific group. Tasks are executed in ascending group order,
 with all tasks in a group completing before the next group begins. This enables simple
@@ -1794,6 +1945,8 @@ Unique task UUID.
 .B \fB\-n\fP, \fB\-\-interval\fP \fISEC\fP
 Time to wait between polling (default: 5).
 .sp
+Range: 1 s to 2,147,483,647 s.
+.sp
 Specify a number of seconds, units \fBd\fP, \fBh\fP, \fBm\fP and \fBs\fP in that order, whole or
 fractional (e.g., \fB30s\fP, \fB5m\fP, \fB1h30m\fP, \fB1.5h\fP), or a Slurm time \fBMM:SS\fP,
 \fBHH:MM:SS\fP, \fBD\-HH\fP, \fBD\-HH:MM\fP or \fBD\-HH:MM:SS\fP (e.g., \fB1:30\fP). A fraction of a
@@ -1829,6 +1982,11 @@ A database must be configured. The task will not run until scheduled
 by the server process. The <stdout> and <stderr> are written locally
 as if run locally, requires the client to have \fB\-\-capture\fP enabled.
 .sp
+The resource tags given with \fB\-t\fP/\fB\-\-tag\fP (\fBcores\fP, \fBmemory\fP and \fBtimeout\fP) take their
+ranges as on \fBhs submit\fP: a value outside its range, or not of its kind, is refused before the
+database is opened, with one line naming the tag\(aqs key (e.g., \fBtask.memory\fP), the range and the
+value (exit status 2). A \fBcores\fP tag past 1,024 runs, with one warning.
+.sp
 See \fBinfo\fP and \fBwait\fP commands.
 .SS Arguments
 .INDENT 0.0
@@ -1844,6 +2002,8 @@ To use options, preface with leading \fB\-\-\fP\&.
 .TP
 .B \fB\-n\fP, \fB\-\-interval\fP \fISEC\fP
 Time to wait between polling (default: 5).
+.sp
+Range: 1 s to 2,147,483,647 s.
 .sp
 Specify a number of seconds, units \fBd\fP, \fBh\fP, \fBm\fP and \fBs\fP in that order, whole or
 fractional (e.g., \fB30s\fP, \fB5m\fP, \fB1h30m\fP, \fB1.5h\fP), or a Slurm time \fBMM:SS\fP,
@@ -1924,9 +2084,13 @@ Specifying a full \fIkey\fP:\fIvalue\fP pair will match on both.
 .TP
 .B \fB\-g\fP, \fB\-\-group\fP \fIGROUP\fP
 Filter results to a single task group.
+.sp
+Range: \-2,147,483,648 to 2,147,483,647.
 .TP
 .B \fB\-\-part\fP \fIN\fP
 Filter results to a single database partition.
+.sp
+Range: 0 to 2,147,483,647.
 .sp
 After \fBhs initdb \-\-rotate\fP, completed tasks are moved into numbered partition files and
 stamped with that partition\(aqs index in their \fBpart\fP column. \fB\-\-part\fP \fIN\fP restricts the
@@ -1987,6 +2151,8 @@ Field seperator for plain/csv formats.
 .TP
 .B \fB\-l\fP, \fB\-\-limit\fP \fINUM\fP
 Limit the number of results.
+.sp
+Range: 1 to 2,147,483,647.
 .TP
 .B \fB\-c\fP, \fB\-\-count\fP
 Show count of results.
@@ -2021,6 +2187,79 @@ and used within a temporary view, making full task history searchable.
 Update tasks in the database.
 .sp
 Include any number of \fIFIELD=VALUE\fP or tag \fIKEY:VALUE\fP positional arguments.
+Each argument is split at its first \fB=\fP or \fB:\fP (so \fBnote:a=b\fP is the tag \fBnote\fP).
+.sp
+Any key that is not a column is a tag: \fBcolor=blue\fP sets the tag \fBcolor\fP, as \fBcolor:blue\fP does,
+and so does \fBhs update ID color blue\fP\&. A misspelled column therefore becomes a tag; without
+\fB\-f\fP the prompt lists each change as a column, a tag or a removal before anything is written, so
+it shows there. A key one edit from a column (a letter added, dropped, changed or two swapped,
+letter case aside, as in \fBexit_stauts\fP, \fBExit_Status\fP, \fBCores\fP, \fBtags\fP or \fBip\fP) is refused
+with exit status 2, naming the column it is near, and nothing is written. \fBKEY:VALUE\fP always sets a
+tag, even when the key is close to or equal to a column\(aqs name: it is the way to set a tag named
+like a column (\fBhs update ID tag KEY:VALUE\fP in the single\-task form). \fBtag=VALUE\fP, which would
+replace every tag at once, is refused: change one tag with \fBKEY=VALUE\fP or \fBKEY:VALUE\fP, and remove
+one with \fB\-\-remove\-tag\fP\&. Every tag is checked by the tag rules (as \fBhs submit \-t\fP checks it), and
+one that breaks them exits with status 2 before anything is counted, asked or written.
+.sp
+Every column is read by its kind, in both forms and on every database, within the range listed
+below. Any other value exits with status 2, naming the column, the range or form and the value,
+before anything is counted, asked or written, and no other change given with it is written.
+\fBnone\fP or \fBnull\fP, in any case, clears a column that may be empty; for \fBattempt\fP, \fBpart\fP,
+\fBretried\fP, \fBsubmit_id\fP, \fBsubmit_time\fP and \fBargs\fP it is refused. A change to \fBid\fP is
+refused in both forms.
+.INDENT 0.0
+.IP \(bu 2
+\fBcores\fP: a whole number, as \fBhs submit \-c\fP reads it. Range: 0 (unconstrained) to 32,767.
+Above 1,024 it is written with a warning.
+.IP \(bu 2
+\fBmemory\fP: a size, as \fBhs submit \-m\fP reads it (e.g., \fB4G\fP, \fB512MB\fP, \fB1.5GiB\fP, or a number of bytes). Range: 0 bytes (unconstrained) to 9,223,372,036,854,775,807 bytes.
+.IP \(bu 2
+\fBtimeout\fP: a duration, as \fBhs submit \-W\fP reads it (e.g., \fB90m\fP, \fB1h30m\fP, \fB1:30:00\fP, \fB1\-12\fP, or a number of seconds), rounded up to whole seconds. Range: 0 s to 2,147,483,647 s.
+.IP \(bu 2
+\fBwaited\fP: a duration in seconds, read as \fBtimeout\fP is. Range: 0 s to 2,147,483,647 s.
+.IP \(bu 2
+\fBduration\fP: a duration in seconds, read as \fBtimeout\fP is. Range: 0 s to 2,147,483,647 s.
+.IP \(bu 2
+\fBexit_status\fP: a whole number. Range: \-32,768 to 32,767.
+.IP \(bu 2
+\fBattempt\fP: a whole number; not \fBnone\fP\&. Range: 1 to 32,767.
+Above 100 it is written with a warning.
+.IP \(bu 2
+\fBpart\fP: a whole number; not \fBnone\fP\&. Range: 0 to 2,147,483,647.
+.IP \(bu 2
+\fBcores_max\fP: a number, the peak cores measured. Range: 0 to 32,767.
+.IP \(bu 2
+\fBmemory_max\fP: a number of bytes, the peak memory measured. Range: 0 to 9,223,372,036,854,775,807 bytes.
+.IP \(bu 2
+\fBretried\fP: a boolean, true/false, yes/no, on/off or 1/0 in any case; not \fBnone\fP\&.
+.IP \(bu 2
+\fBsubmit_id\fP, \fBserver_id\fP, \fBclient_id\fP, \fBprevious_id\fP, \fBnext_id\fP and \fBsource\fP: a uuid,
+the 8\-4\-4\-4\-12 hexadecimal form in any case, stored in lower case (e.g.,
+\fB0198f3a2\-1b2c\-7d3e\-8f40\-0123456789ab\fP); \fBsubmit_id\fP not \fBnone\fP\&. A \fBsource\fP is the id of
+a source as \fBhs info\fP shows it in parentheses; the value is not checked against the sources.
+.IP \(bu 2
+\fBzone\fP: a zone name, read as \fBhs submit \-\-zone\fP reads it; \fBdefault\fP or \fBnone\fP puts the task in
+the default zone, so a zone named \fBnone\fP or \fBnull\fP cannot be set by \fBhs update\fP\&. A new name
+is recorded once the change is written, as \fBhs submit \-\-zone\fP records it.
+.IP \(bu 2
+\fBsubmit_time\fP, \fBschedule_time\fP, \fBstart_time\fP and \fBcompletion_time\fP: ISO 8601 only, a date
+(\fB2026\-01\-01\fP, midnight) or a date and a time joined by \fBT\fP or a space, with optional seconds
+and fraction (up to six digits) and an optional offset or \fBZ\fP (e.g., \fB2026\-01\-01T09:00\fP,
+\fB2026\-01\-01 09:00:00.5\fP, \fB2026\-01\-01T09:00:00\-05:00\fP); \fBsubmit_time\fP not \fBnone\fP\&. A value
+without an offset is local time, the zone \fBhs info\fP and \fBhs list\fP show times in; a local time
+that does not exist, in the hour skipped by a change to daylight\-saving time, is refused, and one
+that occurs twice is the first. An instant on or near the first or last day of the calendar (years 1
+and 9999) is refused. A value is the same instant on SQLite and PostgreSQL. \fBnow\fP,
+\fBtoday\fP, \fBepoch\fP and other words are refused; for the time now, use \fB$(date \-Iseconds)\fP\&.
+.IP \(bu 2
+\fBargs\fP: any text, as given; not \fBnone\fP\&. The other text columns (\fBcommand\fP, \fBoutpath\fP,
+\fBerrpath\fP, \fBcsvpath\fP, \fBsubmit_host\fP, \fBserver_host\fP, \fBclient_host\fP, \fBfingerprint\fP) take
+any text, and \fBnone\fP clears them.
+.UNINDENT
+.sp
+A group change (\fBgroup=VALUE\fP, or \fBID group VALUE\fP in the single\-task form) takes an integer as
+\fBhs submit \-g\fP does, in the 32\-bit range; any other value exits with status 2 before anything is
+counted, asked or written, and no other change given with it is written.
 .sp
 The \fB\-w\fP/\fB\-\-where\fP and \fB\-t\fP/\fB\-\-with\-tag\fP operate just as in the search command.
 Each takes the words that follow it up to the next option, so the changes go before them
@@ -2053,11 +2292,41 @@ The legacy interface for updating a single task with the \fIID\fP, \fIFIELD\fP,
 and \fIVALUE\fP as positional arguments remains valid.
 The single\-task form takes no \fB\-\-cancel\fP, \fB\-\-revert\fP, \fB\-\-delete\fP or \fB\-\-remove\-tag\fP;
 given one, it exits with status 2 and writes nothing.
+The single\-task form takes no option that selects tasks (\fB\-w\fP, \fB\-t\fP, \fB\-g\fP, \fB\-l\fP, \fB\-s\fP,
+\fB\-\-desc\fP, \fB\-F\fP, \fB\-S\fP, \fB\-C\fP, \fB\-R\fP, \fB\-X\fP, \fB\-\-retries\fP, \fB\-\-signal\fP); given one, it exits
+with status 2 and writes nothing. To write a task only if it matches, use the filtered form:
+\fBhs update FIELD=VALUE \-w \(dqid == ID\(dq \-F\fP\&.
 .SS Arguments
 .INDENT 0.0
 .TP
 .B \fIARGS\fP\&...
 Assignment pairs for update.
+.sp
+Any key that is not a column is a tag (\fBcolor=blue\fP is \fBcolor:blue\fP), so a misspelled column
+becomes a tag; the prompt lists each change as a column, a tag or a removal. A key one edit from
+a column (\fBexit_stauts\fP, \fBCores\fP, \fBtags\fP) exits with status 2, naming the column;
+\fBKEY:VALUE\fP always sets a tag. \fBtag=VALUE\fP is refused. An argument is split at its first
+\fB=\fP or \fB:\fP\&.
+.sp
+Every column is read by its kind, in both forms, within the range the description lists:
+\fBcores\fP, \fBexit_status\fP, \fBattempt\fP and \fBpart\fP take a whole number; \fBmemory\fP a size, as
+\fBhs submit \-m\fP reads it (\fB4G\fP, \fB512MB\fP, \fB1.5GiB\fP, or bytes); \fBtimeout\fP, \fBwaited\fP and
+\fBduration\fP a duration, as \fBhs submit \-W\fP reads it (\fB90m\fP, \fB1h30m\fP, \fB1:30:00\fP, \fB1\-12\fP,
+or seconds); \fBcores_max\fP and \fBmemory_max\fP a number. \fBnone\fP or \fBnull\fP clears a column that
+may be empty (not \fBattempt\fP, \fBpart\fP, \fBretried\fP, \fBsubmit_id\fP, \fBsubmit_time\fP or \fBargs\fP).
+\fBretried\fP takes true/false, yes/no, on/off or 1/0, in any case. The uuid columns
+(\fBsubmit_id\fP, \fBserver_id\fP, \fBclient_id\fP, \fBprevious_id\fP, \fBnext_id\fP, \fBsource\fP) take the
+8\-4\-4\-4\-12 hexadecimal form, stored in lower case. \fBzone\fP takes a zone name as \fBhs submit \-\-zone\fP
+reads it, \fBdefault\fP or \fBnone\fP being the default zone. The datetime columns (\fBsubmit_time\fP,
+\fBschedule_time\fP, \fBstart_time\fP, \fBcompletion_time\fP) take ISO 8601 only (e.g., \fB2026\-01\-01\fP,
+\fB2026\-01\-01T09:00\fP, \fB2026\-01\-01T09:00:00\-05:00\fP), a value without an offset being local time;
+\fBnow\fP, \fBtoday\fP and \fBepoch\fP are refused (use \fB$(date \-Iseconds)\fP). Any other value exits with status 2 before anything
+is counted, asked or written, and no other change given with it is written. \fBid\fP is never
+written.
+.sp
+A group change (\fBgroup=VALUE\fP, or \fBID group VALUE\fP in the single\-task form) takes an integer as
+\fBhs submit \-g\fP does, in the 32\-bit range; any other value exits with status 2 before anything
+is counted, asked or written, and no other change given with it is written.
 .UNINDENT
 .SS Options
 .INDENT 0.0
@@ -2108,6 +2377,8 @@ Specifying a full \fIkey\fP:\fIvalue\fP pair will match on both.
 .TP
 .B \fB\-g\fP, \fB\-\-group\fP \fIGROUP\fP
 Filter matches to a single task group.
+.sp
+Range: \-2,147,483,648 to 2,147,483,647.
 .TP
 .B \fB\-s\fP, \fB\-\-order\-by\fP \fIFIELD\fP \fB[\-\-desc]\fP
 Order results by field. Optionally, in descending order.
@@ -2118,6 +2389,8 @@ For example, to delete the most recently submitted task,
 .TP
 .B \fB\-l\fP, \fB\-\-limit\fP \fINUM\fP
 Limit the number of results.
+.sp
+Range: 1 to 2,147,483,647.
 .TP
 .B \fB\-F\fP, \fB\-\-failed\fP
 Alias for \fB\-w \(aqexit_status != 0\(aq\fP\&.
@@ -2158,6 +2431,10 @@ In previous releases of the software the update command had the following signat
 Executing the command with these three positional arguments is still valid.
 The single\-task form takes no \fB\-\-cancel\fP, \fB\-\-revert\fP, \fB\-\-delete\fP or \fB\-\-remove\-tag\fP;
 given one, it exits with status 2 and writes nothing.
+The single\-task form takes no option that selects tasks (\fB\-w\fP, \fB\-t\fP, \fB\-g\fP, \fB\-l\fP, \fB\-s\fP,
+\fB\-\-desc\fP, \fB\-F\fP, \fB\-S\fP, \fB\-C\fP, \fB\-R\fP, \fB\-X\fP, \fB\-\-retries\fP, \fB\-\-signal\fP); given one, it exits
+with status 2 and writes nothing. To write a task only if it matches, use the filtered form:
+\fBhs update FIELD=VALUE \-w \(dqid == ID\(dq \-F\fP\&.
 .INDENT 0.0
 .TP
 .B ID
@@ -2272,14 +2549,20 @@ for the key is read by. A key that takes text holds the value as written, \fBtru
 \fB007\fP and an empty value included. A whole number, a number or a boolean is converted, a boolean
 from \fBtrue\fP/\fBfalse\fP, \fByes\fP/\fBno\fP, \fBon\fP/\fBoff\fP or \fB1\fP/\fB0\fP in any letter case; a value
 that does not convert is refused with exit status 2, and nothing is written. A duration or a size
-is written as a number when the value is one and as the text otherwise, and is checked by the
-command that reads it. A key with no type of its own (an entry of \fBdatabase.connect_args\fP or
-\fBdatabase.pragmas\fP, a \fB[database]\fP provider argument, or a path that names no documented key)
-holds a TOML integer, float or boolean when the value is exactly one (\fB5\fP, \fB2.5\fP, \fBtrue\fP), and
-the text otherwise. An empty value for a key that takes text is written as \fB\(dq\(dq\fP and overrides the
-key in a lower file. For an optional text key, such as \fBdatabase.user\fP or \fBserver.bind\fP, an empty
-variable would not: it is read as not given. The file is written as UTF\-8, whatever the locale; a
-path or value that cannot be is refused with exit status 2, and nothing is written.
+is written as a number when the value is one and as the text otherwise. A numeric key (a whole
+number, a number, a duration or a size, a zone key\(aqs included) is held to the key\(aqs range, given
+with each key in the \fI\%parameter reference\fP: a value outside it, or not a
+number of the key\(aqs kind (\fBnan\fP, \fBinf\fP, a boolean), is refused with exit status 2, and nothing
+is written. A value inside the range but past the key\(aqs advisory limit is written, with a warning.
+A key with no type of its own (an entry of \fBdatabase.connect_args\fP or \fBdatabase.pragmas\fP, a
+\fB[database]\fP provider argument, or a path that names no documented key) holds a TOML integer,
+float or boolean when the value is exactly one (\fB5\fP, \fB2.5\fP, \fBtrue\fP), and the text otherwise;
+an integer outside 64 bits (below \-9,223,372,036,854,775,808 or above 9,223,372,036,854,775,807),
+which TOML cannot hold, is refused with exit status 2, and nothing is written. An empty value for a
+key that takes text is written as \fB\(dq\(dq\fP and overrides the key in a lower file. For an optional text
+key, such as \fBdatabase.user\fP or \fBserver.bind\fP, an empty variable would not: it is read as not
+given. The file is written as UTF\-8, whatever the locale; a path or value that cannot be is refused
+with exit status 2, and nothing is written.
 .SS Arguments
 .INDENT 0.0
 .TP
@@ -2652,6 +2935,13 @@ Every configurable option can be set in one of these files. Further, every optio
 also be set by an environment variable: \fBHYPERSHELL_\fP followed by the option\(aqs path, with each
 \fB\&.\fP written as \fB_\fP (see \fIEnvironment Variables\fP below).
 .sp
+Every numeric option has a range, given in the parameter reference. A value from a file, or from
+an environment variable, is held to its key\(aqs range when the configuration loads, for every
+command: a value outside it stops the command before it starts, naming the key, the range, the
+value and the file or variable it came from (exit status 3). A numeric key\(aqs \fB_env\fP or \fB_eval\fP
+form that cannot resolve (a variable that is not set, a command that fails) stops it the same way.
+\fBhs config\fP still runs on a file holding either, so it can be shown and set right.
+.sp
 For example, set the logging level at the user level with a command:
 .INDENT 0.0
 .INDENT 3.5
@@ -2801,6 +3091,8 @@ Extensions \fB\&.gz\fP, \fB\&.bz2\fP, \fB\&.xz\fP, and \fB\&.zstd\fP respectivel
 .B \fB\&.keep\fP
 Number of \fIuncompressed\fP rotated files to retain (default: \fB0\fP). Only applies
 when compression is enabled; without compression, rotated files are never deleted.
+.sp
+Range: 0 to 2,147,483,647.
 .UNINDENT
 .UNINDENT
 .TP
@@ -2840,6 +3132,8 @@ Hostname or address of database server (default: \fIlocalhost\fP).
 .B \fB\&.port\fP
 Port number to connect with database server.
 The default value depends on the provider, e.g., 5432 for Postgres.
+.sp
+Range: 1 to 65,535.
 .TP
 .B \fB\&.user\fP
 Username for databaser server account.
@@ -2887,14 +3181,23 @@ When running locally, the default is recommended. To allow remote \fIclients\fP 
 over the network, bind the server to \fI0.0.0.0\fP\&. A \fIcluster\fP tells the clients it launches
 to dial the bind address when it is one specific address, and this host\(aqs own name when
 it is \fI0.0.0.0\fP, unless \fB\&.advertise\fP names another.
+.sp
+A \fIclient\fP, or \fBsubmit \-\-queue\fP, given no \fB\-H\fP dials \fB\&.host\fP, else \fB\&.advertise\fP\&.
+When neither is given, it dials the bind address if it is one specific address, else
+\fIlocalhost\fP\&.
 .TP
 .B \fB\&.host\fP
-Host address that clients connect to (default: \fIlocalhost\fP).
+Address that \fIclients\fP dial (default: by \fB\&.advertise\fP or \fB\&.bind\fP).
 .sp
 Counterpart to \fB\&.bind\fP: where \fB\&.bind\fP is the local address the server listens on,
 \fB\&.host\fP is the address that \fIclient\fP instances and queue\-direct \fBsubmit \-\-queue\fP
-dial to reach the server. Set this to the server\(aqs reachable hostname or address
-when running clients on other machines.
+dial when given no \fB\-H\fP\&. Set it to the server\(aqs reachable name when clients run on
+other machines, so one shared file serves both, e.g. \fBbind = \(dq0.0.0.0\(dq\fP with
+\fBhost = \(dqlogin00.example.edu\(dq\fP\&.
+.sp
+It counts as given when any configuration file or \fBHYPERSHELL_SERVER_HOST\fP gives it,
+even as \fIlocalhost\fP\&. When none does, they dial \fB\&.advertise\fP if given, else \fB\&.bind\fP
+when it is one specific address, else \fIlocalhost\fP\&. The \fB\-H\fP option takes precedence.
 .TP
 .B \fB\&.advertise\fP
 Address the clients a \fIcluster\fP launches are told to dial (default: by \fB\&.bind\fP).
@@ -2903,7 +3206,8 @@ Overrides the rule under \fB\&.bind\fP in every remote \fIcluster\fP mode (\fB\-
 \fB\-\-launcher\fP and \fB\-\-autoscaling\fP), for a name the clients must use that differs from
 the bind address, such as the name on the server\(aqs certificate. The \fB\-\-advertise\fP
 option takes precedence. A local \fIcluster\fP, whose clients are not launched, ignores it,
-and so does a relay: its site \fIclients\fP are told \fBrelay.advertise\fP instead. Its
+and so does a relay: its site \fIclients\fP are told \fBrelay.advertise\fP instead. A \fIclient\fP
+or \fBsubmit \-\-queue\fP given no \fB\-H\fP also dials it when \fB\&.host\fP is not given. Its
 environment form is \fBHYPERSHELL_SERVER_ADVERTISE\fP\&.
 .TP
 .B \fB\&.port\fP
@@ -2911,6 +3215,8 @@ Port number (default: \fI50001\fP).
 .sp
 This is an arbitrary choice and simply must be an available port. The default option chosen
 here is typically available on most platforms and is not expected by any known major software.
+.sp
+Range: 1 to 65,535.
 .TP
 .B \fB\&.auth\fP
 Cryptographic authentication key to connect with server (default: \fI<not\-secure>\fP).
@@ -2929,6 +3235,8 @@ of the currently running tasks.
 .sp
 On large scale workflows with many clients (e.g., 100) it may be advantageous to allow
 the scheduler to work ahead in selecting new tasks.
+.sp
+Range: 1 to 2,147,483,647.
 .TP
 .B \fB\&.bundlesize\fP
 Size of task bundle (default: \fI1\fP).
@@ -2944,6 +3252,8 @@ to coordinate bundle size with the number of executors in use by each client.
 It is also the size of the bundle given to a client that advertises no size of its own.
 .sp
 See also \fB\-b\fP/\fB\-\-bundlesize\fP command\-line option.
+.sp
+Range: 1 to 2,147,483,647.
 .TP
 .B \fB\&.bundlemax\fP
 Most tasks the server hands a client in one reply (default: \fI1000\fP).
@@ -2951,6 +3261,8 @@ Most tasks the server hands a client in one reply (default: \fI1000\fP).
 A client advertises its own bundle size (its \fB\-b\fP); the server never replies with more
 than this many tasks, whatever a client asks for. The effective cap is never smaller than
 the server\(aqs own \fB\&.bundlesize\fP\&. There is no command\-line option.
+.sp
+Range: 1 to 2,147,483,647.
 .TP
 .B \fB\&.attempts\fP
 Attempts for auto\-retry on failed tasks (default: \fI1\fP).
@@ -2971,6 +3283,8 @@ Also read by the Python API\(aqs entry points (\fBServerThread\fP, \fBserve_from
 they are not given \fBmax_retries\fP\&.
 .sp
 See also \fB\&.eager\fP\&.
+.sp
+Range: 1 to 32,767. Above 100 it runs with a warning.
 .TP
 .B \fB\&.eager\fP
 Schedule failed tasks before new tasks (default: \fIfalse\fP).
@@ -2996,6 +3310,8 @@ A string takes the same forms as \fB\-Q\fP/\fB\-\-poll\fP: units \fBd\fP, \fBh\f
 seconds.
 .sp
 See also \fB\-Q\fP/\fB\-\-poll\fP command\-line option.
+.sp
+Range: 0 s to 2,147,483,647 s.
 .TP
 .B \fB\&.evict\fP
 Eviction period in seconds for clients (default: \fI600\fP).
@@ -3008,9 +3324,10 @@ disconnect request to all registered clients, and waits until a confirmation is
 returned for each. If a client is defunct, this will hang the shutdown process.
 Takes a number of seconds or a string in the duration forms: units \fBd\fP, \fBh\fP, \fBm\fP
 and \fBs\fP (e.g., \fB\(dq30s\(dq\fP, \fB\(dq5m\(dq\fP, \fB\(dq1h30m\(dq\fP) or a Slurm time (e.g., \fB\(dq1:30\(dq\fP);
-fractions are kept. \fBhs server\fP, \fBhs cluster\fP and \fBhs relay\fP stop before they start if
-the value is not a duration; \fBhs server\fP and \fBhs cluster\fP also if it is under 10 seconds,
-not finite, or over 999,999,999 days.
+fractions are kept. Every command stops before it starts if the value is not a duration or
+is under 10 seconds or over the longest duration (about 68 years).
+.sp
+Range: 10 s to 2,147,483,647 s.
 .TP
 .B \fB[tls]\fP
 Transport\-layer security for queue connections. Enabled by default; every key below
@@ -3079,9 +3396,11 @@ Counted from when the server accepts the connection; data the peer sends meanwhi
 does not extend it. A connection that misses it is closed, and the server keeps
 accepting other clients while handshakes are pending. Takes a number of seconds or
 any duration form (e.g., \fB30\fP, \fB\(dq30s\(dq\fP, \fB\(dq1m\(dq\fP), rounded up to whole seconds;
-it must be greater than 0 and at most one day (\fB1d\fP), or a TLS server refuses to
-start. Also set with \fBHYPERSHELL_SERVER_TLS_HANDSHAKE\fP\&. A server without TLS, by
+it must be greater than 0 and at most one day (\fB1d\fP), or every command stops before
+it starts. Also set with \fBHYPERSHELL_SERVER_TLS_HANDSHAKE\fP\&. A server without TLS, by
 \fB\-\-no\-tls\fP or \fB\&.enabled\fP set to \fIfalse\fP, ignores it; clients never read it.
+.sp
+Range: 1 s to 86,400 s.
 .UNINDENT
 .UNINDENT
 .TP
@@ -3107,6 +3426,8 @@ size and the server uses its own. \fBhs client\fP stops before it starts if the 
 a whole number.
 .sp
 See also \fB\-b\fP/\fB\-\-bundlesize\fP command\-line option.
+.sp
+Range: 1 to 2,147,483,647.
 .TP
 .B \fB\&.bundlewait\fP
 Seconds to wait before flushing task bundle (default: \fI5\fP).
@@ -3123,6 +3444,8 @@ forms as \fB\-w\fP/\fB\-\-bundlewait\fP: units \fBd\fP, \fBh\fP, \fBm\fP and \fB
 \fB\(dq5m\(dq\fP, \fB\(dq1h30m\(dq\fP) or a Slurm time (e.g., \fB\(dq1:30\(dq\fP); a number is seconds.
 .sp
 See also \fB\-w\fP/\fB\-\-bundlewait\fP command\-line option.
+.sp
+Range: 0 s to 2,147,483,647 s.
 .TP
 .B \fB\&.heartrate\fP
 Interval in seconds between heartbeats sent to server (default \fI10\fP).
@@ -3131,6 +3454,8 @@ Even on the largest scales the default interval should be fine.
 Takes a number of seconds or a string in the duration forms: units \fBd\fP, \fBh\fP, \fBm\fP
 and \fBs\fP (e.g., \fB\(dq30s\(dq\fP, \fB\(dq5m\(dq\fP, \fB\(dq1h30m\(dq\fP) or a Slurm time (e.g., \fB\(dq1:30\(dq\fP);
 fractions are kept. \fBhs client\fP stops before it starts if the value is not a duration.
+.sp
+Range: 0 s to 2,147,483,647 s.
 .TP
 .B \fB\&.timeout\fP
 Timeout in seconds for client. Automatically shutdown if no tasks received (default: never).
@@ -3138,6 +3463,8 @@ Timeout in seconds for client. Automatically shutdown if no tasks received (defa
 This feature allows for gracefully scaling down a cluster when task throughput subsides.
 A string takes the same forms as \fB\-T\fP/\fB\-\-timeout\fP: units \fBd\fP, \fBh\fP, \fBm\fP and
 \fBs\fP (e.g., \fB\(dq1h30m\(dq\fP, \fB\(dq1.5h\(dq\fP) or a Slurm time (e.g., \fB\(dq1:30:00\(dq\fP, \fB\(dq1\-12\(dq\fP).
+.sp
+Range: 0 s to 2,147,483,647 s.
 .TP
 .B \fB\&.cores\fP
 Client\-level limit on CPU cores available for running tasks (default: all available).
@@ -3146,6 +3473,8 @@ A value of \fB0\fP means unconstrained (use all detected cores). Set a lower val
 partition a node between multiple clients.
 .sp
 See also \fB\-C\fP/\fB\-\-client\-cores\fP command\-line option.
+.sp
+Range: 0 (unconstrained) to 32,767. Above 1,024 it runs with a warning.
 .TP
 .B \fB\&.memory\fP
 Client\-level limit on memory (in bytes) available for running tasks (default: all available).
@@ -3155,6 +3484,8 @@ between multiple clients. A string may carry a unit \fBK\fP, \fBM\fP, \fBG\fP or
 or followed by \fBB\fP or \fBiB\fP, each a power of 1024 (e.g., \fB\(dq16G\(dq\fP).
 .sp
 See also \fB\-M\fP/\fB\-\-client\-memory\fP command\-line option.
+.sp
+Range: 0 bytes (unconstrained) to 9,223,372,036,854,775,807 bytes.
 .TP
 .B \fB\&.ratelimit\fP
 Maximum number of tasks started per second (default: no limit).
@@ -3162,11 +3493,13 @@ Maximum number of tasks started per second (default: no limit).
 A number (e.g., \fB0.5\fP, one task every two seconds), read by \fBhs client\fP and by
 \fBhs cluster\fP for each of its clients. A value of \fB0\fP disables rate limiting. Useful to
 throttle very short tasks so that task launch does not overwhelm a shared resource.
-\fB\-R\fP refuses a rate other than \fB0\fP under \fB0.000001\fP (one task in about 11.6 days), and
-\fBhs cluster\fP stops before it launches a client if the value is not a finite number or is
-such a rate.
+A rate other than \fB0\fP under \fB0.000001\fP (one task in about 11.6 days) is refused, from
+\fB\-R\fP and from the configuration alike.
 .sp
 See also \fB\-R\fP/\fB\-\-ratelimit\fP command\-line option.
+.sp
+Range: 0.000001 to 1,000,000,000 tasks per second, or 0 (no limit). Below 0.001 tasks per
+second, other than 0, it runs with a warning.
 .UNINDENT
 .TP
 .B \fB[submit]\fP
@@ -3183,6 +3516,8 @@ to coordinate bundle size with the number of executors in use by each client.
 Read by \fBhs submit\fP only.
 .sp
 See also \fB\-b\fP/\fB\-\-bundlesize\fP command\-line option.
+.sp
+Range: 1 to 2,147,483,647.
 .TP
 .B \fB\&.bundlewait\fP
 Seconds to wait before flushing tasks (default: \fI5\fP).
@@ -3197,6 +3532,8 @@ Read by \fBhs submit\fP, \fBhs server\fP and \fBhs cluster\fP (which hands it to
 \fBhs client\fP reads \fBclient.bundlewait\fP\&.
 .sp
 See also \fB\-w\fP/\fB\-\-bundlewait\fP command\-line option.
+.sp
+Range: 0 s to 2,147,483,647 s.
 .UNINDENT
 .TP
 .B \fB[task]\fP
@@ -3213,6 +3550,8 @@ A value of \fB0\fP means unconstrained. Used with resource\-aware scheduling and
 individual tasks may override this inline (e.g., \fB# HYPERSHELL: cores:8\fP).
 .sp
 See also \fB\-c\fP/\fB\-\-cores\fP command\-line option.
+.sp
+Range: 0 (unconstrained) to 32,767. Above 1,024 it runs with a warning.
 .TP
 .B \fB\&.memory\fP
 Default memory (in bytes) required per task (default: unconstrained).
@@ -3223,6 +3562,8 @@ with resource\-aware scheduling and backfill; individual tasks may override this
 the same forms (e.g., \fB# HYPERSHELL: memory:8G\fP).
 .sp
 See also \fB\-m\fP/\fB\-\-memory\fP command\-line option.
+.sp
+Range: 0 bytes (unconstrained) to 9,223,372,036,854,775,807 bytes.
 .TP
 .B \fB\&.timeout\fP
 Task\-level walltime limit in seconds (default: none).
@@ -3232,6 +3573,8 @@ If the process still persists the executor itself will shutdown.
 A string takes the same forms as \fB\-W\fP: units \fBd\fP, \fBh\fP, \fBm\fP and \fBs\fP (e.g.,
 \fB\(dq1h30m\(dq\fP, \fB\(dq1.5h\(dq\fP) or a Slurm time (e.g., \fB\(dq1:30:00\(dq\fP, \fB\(dq1\-12\(dq\fP); individual
 tasks may override this inline in the same forms (e.g., \fB# HYPERSHELL: timeout:1h30m\fP).
+.sp
+Range: 0 s to 2,147,483,647 s.
 .TP
 .B \fB\&.signalwait\fP
 Wait period in seconds between signal escalation on task cancellation (default: 10).
@@ -3241,6 +3584,8 @@ A string takes the same forms as \fB\-S\fP/\fB\-\-signalwait\fP: units \fBd\fP, 
 is seconds.
 .sp
 See also \fB\-S\fP, \fB\-\-signalwait\fP command\-line option.
+.sp
+Range: 0 s to 2,147,483,647 s.
 .UNINDENT
 .TP
 .B \fB[ssh]\fP
@@ -3303,6 +3648,8 @@ the estimated time of completion of remaining tasks given currently connected ex
 exceeds 1 hour, we will scale up by one unit.
 .sp
 See also \fB\&.period\fP\&.
+.sp
+Range: 0.000001 to 1,000,000,000. Above 100 it runs with a warning.
 .TP
 .B \fB\&.period\fP
 Scaling period in seconds, greater than zero (default: 60).
@@ -3317,6 +3664,8 @@ stops before it starts if the value is not a duration.
 The period must be greater than zero: \fBhs cluster\fP, \fBhs server\fP and \fBhs relay\fP each
 refuse zero or a negative value at start\-up. A period below one second, in any form, is one
 second.
+.sp
+Range: 0 s (exclusive) to 2,147,483,647 s. Above 3,600 s it runs with a warning.
 .TP
 .B \fB\&.launcher\fP
 Command prefix used to launch each client as a scaling unit (default: none).
@@ -3370,6 +3719,8 @@ A relay\(aqs site fleets (\fBhs relay\fP) and a server autoscaling with relay si
 setting: a relay keeps relaunching its failing site clients, warning at each one.
 .sp
 Its environment form is \fBHYPERSHELL_AUTOSCALE_FAILED_LAUNCHES\fP\&.
+.sp
+Range: 0 to 2,147,483,647.
 .TP
 .B \fB[size]\fP
 .INDENT 7.0
@@ -3380,6 +3731,8 @@ Initial size of cluster (default: 1).
 When the the cluster starts, this number of clients will be launched.
 For a \fIfixed\fP policy cluster, this should be given with a \fB\&.min\fP size, and likely
 the same value.
+.sp
+Range: 0 to 2,147,483,647.
 .TP
 .B \fB\&.min\fP
 Minimum size of cluster (default: 0).
@@ -3387,6 +3740,8 @@ Minimum size of cluster (default: 0).
 Regardless of autoscaling policy, if the number of launched clients drops below this
 value we will scale up by one. Allowing \fBmin = 0\fP is an important feature for
 efficient use of computing resources in the absence of tasks.
+.sp
+Range: 0 to 2,147,483,647.
 .TP
 .B \fB\&.max\fP
 Maximum size of cluster (default: 1).
@@ -3397,6 +3752,11 @@ clients. When this number is reached, scaling stops regardless of task pressure.
 .sp
 A server autoscaling with relay sites ignores \fB[size]\fP: each relay advertises the
 \fBmin\fP, \fBmax\fP and \fBinit\fP of each zone it serves, and the server plans within those.
+.INDENT 7.0
+.INDENT 3.5
+Range: 0 to 2,147,483,647.
+.UNINDENT
+.UNINDENT
 .UNINDENT
 .TP
 .B \fB[relay]\fP
@@ -3437,6 +3797,8 @@ See also \fB\-\-advertise\fP command\-line option.
 Port of the relay\-local \fIserver\fP (default: \fI50002\fP).
 .sp
 See also \fB\-\-port\fP command\-line option.
+.sp
+Range: 1 to 65,535.
 .TP
 .B \fB\&.bundlesize\fP
 Size of task bundle for the relay\-local \fIserver\fP and the \fIclients\fP at its site
@@ -3444,6 +3806,8 @@ Size of task bundle for the relay\-local \fIserver\fP and the \fIclients\fP at i
 .sp
 It is never smaller than \fBrelay.num_threads\fP: a \fIclient\fP asks for one bundle at a time,
 so a smaller bundle would leave its executors idle between requests.
+.sp
+Range: 1 to 2,147,483,647.
 .TP
 .B \fB\&.bundlewait\fP
 Seconds the relay waits before returning finished tasks upstream regardless of
@@ -3453,6 +3817,8 @@ nothing left to run, returns what it holds at once.
 Takes a number of seconds or a string in the duration forms: units \fBd\fP, \fBh\fP, \fBm\fP
 and \fBs\fP (e.g., \fB\(dq30s\(dq\fP, \fB\(dq5m\(dq\fP, \fB\(dq1h30m\(dq\fP) or a Slurm time (e.g., \fB\(dq1:30\(dq\fP);
 fractions are kept. \fBhs relay\fP stops before it starts if the value is not a duration.
+.sp
+Range: 0 s to 2,147,483,647 s.
 .TP
 .B \fB\&.poll\fP
 Maximum polling interval of the relay\-local scheduler in seconds (default: \fI0.1\fP).
@@ -3461,6 +3827,8 @@ Received tasks wait at most this long before the relay\-local \fIserver\fP hands
 Takes a number of seconds or a string in the duration forms: units \fBd\fP, \fBh\fP, \fBm\fP
 and \fBs\fP (e.g., \fB\(dq30s\(dq\fP, \fB\(dq5m\(dq\fP, \fB\(dq1h30m\(dq\fP) or a Slurm time (e.g., \fB\(dq1:30\(dq\fP);
 fractions are kept. \fBhs relay\fP stops before it starts if the value is not a duration.
+.sp
+Range: 0 s to 2,147,483,647 s.
 .TP
 .B \fB\&.retention\fP
 Seconds a result is kept in the relay database after it has been returned upstream
@@ -3468,6 +3836,8 @@ Seconds a result is kept in the relay database after it has been returned upstre
 Takes a number of seconds or a string in the duration forms: units \fBd\fP, \fBh\fP, \fBm\fP
 and \fBs\fP (e.g., \fB\(dq30s\(dq\fP, \fB\(dq5m\(dq\fP, \fB\(dq1h30m\(dq\fP) or a Slurm time (e.g., \fB\(dq1:30\(dq\fP);
 fractions are kept. \fBhs relay\fP stops before it starts if the value is not a duration.
+.sp
+Range: 0 s to 2,147,483,647 s.
 .TP
 .B \fB\&.zone\fP
 Zone or zones the relay serves (default: none, the default zone).
@@ -3495,6 +3865,14 @@ launcher_args = \(dq\-\-gres=gpu:1\(dq
 .UNINDENT
 .sp
 See also \fB\-\-zone\fP command\-line option, which names the zones in place of this one.
+.sp
+The numeric keys of a zone table:
+.INDENT 7.0
+.IP \(bu 2
+\fBsize\fP\&. Range: 1 to 2,147,483,647.
+.IP \(bu 2
+\fBmin\fP, \fBmax\fP and \fBinit\fP\&. Range: 0 to 2,147,483,647.
+.UNINDENT
 .TP
 .B \fB\&.site\fP
 Name of the relay\(aqs site (default: none, the relay\(aqs host name).
@@ -3506,32 +3884,68 @@ Number of \fIclients\fP the relay keeps launched at its site (default: \fI1\fP, 
 .sp
 Against an upstream \fIserver\fP autoscaling with relay sites it is the default \fB\&.max\fP\&.
 See also \fB\-N\fP, \fB\-\-size\fP command\-line option.
+.sp
+Range: 1 to 2,147,483,647.
 .TP
 .B \fB\&.min\fP
 Fewest \fIclients\fP of each zone an upstream topology assigns this site (default: \fI0\fP).
+.sp
+Range: 0 to 2,147,483,647, or <none>.
 .sp
 Held even while the zone\(aqs tasks wait in a later \fItask group\fP\&. A zone\(aqs own
 \fB[relay.zone.NAME]\fP table may set its own. Without a topology, a zone\(aqs fleet keeps at
 least this many \fIclients\fP launched (at least \fI1\fP, by default the size). Each zone
 advertises its bounds upstream; see \fI\%Topology\fP\&.
+.INDENT 7.0
+.INDENT 3.5
+Changed in version 2.9.0: \X'tty: link https://github.com/hypershell/hypershell/pull/125'\fI\%#125\fP\X'tty: link': the range is checked when the configuration loads, for every command: a
+value outside it, or not a number of the key\(aqs kind, stops the command before it
+starts (exit status 3), naming the key, the range and the file or variable it came
+from.
+
+.UNINDENT
+.UNINDENT
 .TP
 .B \fB\&.max\fP
 Most \fIclients\fP of each zone an upstream topology assigns this site (default: the size).
 .sp
+Range: 0 to 2,147,483,647, or <none>.
+.sp
 Lowering it never ends a running \fIclient\fP: the zone launches no more, and its \fIclients\fP
 exit when idle. A zone\(aqs own \fB[relay.zone.NAME]\fP table may set its own.
+.INDENT 7.0
+.INDENT 3.5
+Changed in version 2.9.0: \X'tty: link https://github.com/hypershell/hypershell/pull/125'\fI\%#125\fP\X'tty: link': the range is checked when the configuration loads, for every command: a
+value outside it, or not a number of the key\(aqs kind, stops the command before it
+starts (exit status 3), naming the key, the range and the file or variable it came
+from.
+
+.UNINDENT
+.UNINDENT
 .TP
 .B \fB\&.init\fP
 \fIClients\fP of each zone an upstream topology assigns this site when the relay starts
 (default: \fB\&.min\fP).
 .sp
+Range: 0 to 2,147,483,647, or <none>.
+.sp
 Without a topology, the \fIclients\fP each zone\(aqs fleet starts with (by default the size).
 Bounds must satisfy \fBmin <= init <= max\fP, with \fBmax\fP at least \fI1\fP\&.
+.INDENT 7.0
+.INDENT 3.5
+Changed in version 2.9.0: \X'tty: link https://github.com/hypershell/hypershell/pull/125'\fI\%#125\fP\X'tty: link': the range is checked when the configuration loads, for every command: a
+value outside it, or not a number of the key\(aqs kind, stops the command before it
+starts (exit status 3), naming the key, the range and the file or variable it came
+from.
+
+.UNINDENT
+.UNINDENT
 .TP
 .B \fB\&.launcher\fP
 Command prefix used to launch each \fIclient\fP at the site (default: none).
 .sp
-An empty value launches clients directly as \fBhs client ...\fP\&.
+An empty value launches clients directly as \fBHS client ...\fP, where \fIHS\fP is the
+relay\(aqs own program (see \fB\&.remote_exe\fP).
 See also \fB\-\-launcher\fP command\-line option.
 .TP
 .B \fB\&.launcher_args\fP
@@ -3539,8 +3953,23 @@ Extra arguments for the launcher (default: none).
 .sp
 See also \fB\-\-launcher\-args\fP command\-line option.
 .TP
+.B \fB\&.remote_exe\fP
+Program the \fIclients\fP at the site are launched as (default: the relay\(aqs own program).
+.sp
+By default it is the \fBhs\fP that runs the relay, by its full path and as the user ran it,
+kept when the relay starts again to bind its database. The path assumes the site\(aqs nodes
+see this installation where this host does; where they do not, name the program here. It
+is one program, not a command line: a wrapper belongs in \fB\&.launcher\fP\&. The value is
+passed on as given, never resolved or checked. The \fB\-\-remote\-exe\fP option takes
+precedence. Its environment form is \fBHYPERSHELL_RELAY_REMOTE_EXE\fP; empty, it is not
+given.
+.sp
+See also \fB\-\-remote\-exe\fP command\-line option.
+.TP
 .B \fB\&.num_threads\fP
 Executor threads for each \fIclient\fP at the site (default: \fI1\fP).
+.sp
+Range: 0 (all cores) to 4,194,304. Above 1,024 it runs with a warning.
 .TP
 .B \fB\&.template\fP
 Command template for the \fIclients\fP at the site (default: \fI{}\fP).
@@ -3551,6 +3980,8 @@ Takes a number of seconds or a string in the duration forms: units \fBd\fP, \fBh
 and \fBs\fP (e.g., \fB\(dq30s\(dq\fP, \fB\(dq5m\(dq\fP, \fB\(dq1h30m\(dq\fP) or a Slurm time (e.g., \fB\(dq1:30\(dq\fP);
 rounded up to whole seconds, since each \fIclient\fP is given it as \fB\-T\fP\&. \fBhs relay\fP stops
 before it starts if the value is not a duration.
+.sp
+Range: 0 s to 2,147,483,647 s.
 .TP
 .B \fB[upstream]\fP
 Connection to the upstream \fIserver\fP\&. These settings are never read from \fB[server]\fP,
@@ -3566,6 +3997,8 @@ See also \fB\-\-upstream\-host\fP command\-line option.
 Port of the upstream \fIserver\fP (default: \fI50001\fP).
 .sp
 See also \fB\-\-upstream\-port\fP command\-line option.
+.sp
+Range: 1 to 65,535.
 .TP
 .B \fB\&.auth\fP
 Cryptographic key for the upstream \fIserver\fP\&.
@@ -3582,12 +4015,16 @@ The relay holds at most twice its connected \fIclients\fP times \fBrelay.bundles
 unfinished tasks. It asks for more only once half of that is left, and then for the
 whole difference (never more than this size at once), so the site has a second round
 of work ready while the first runs.
+.sp
+Range: 1 to 2,147,483,647.
 .TP
 .B \fB\&.heartrate\fP
 Seconds between heartbeats to the upstream \fIserver\fP (default: \fI10\fP).
 Takes a number of seconds or a string in the duration forms: units \fBd\fP, \fBh\fP, \fBm\fP
 and \fBs\fP (e.g., \fB\(dq30s\(dq\fP, \fB\(dq5m\(dq\fP, \fB\(dq1h30m\(dq\fP) or a Slurm time (e.g., \fB\(dq1:30\(dq\fP);
 fractions are kept. \fBhs relay\fP stops before it starts if the value is not a duration.
+.sp
+Range: 0 s to 2,147,483,647 s.
 .TP
 .B \fB\&.deadline\fP
 Seconds a call to the upstream \fIserver\fP may take before the relay takes the connection
@@ -3599,6 +4036,8 @@ returns them before it asks for more work.
 Takes a number of seconds or a string in the duration forms: units \fBd\fP, \fBh\fP, \fBm\fP
 and \fBs\fP (e.g., \fB\(dq30s\(dq\fP, \fB\(dq5m\(dq\fP, \fB\(dq1h30m\(dq\fP) or a Slurm time (e.g., \fB\(dq1:30\(dq\fP);
 fractions are kept. \fBhs relay\fP stops before it starts if the value is not a duration.
+.sp
+Range: 0 s to 2,147,483,647 s.
 .TP
 .B \fB\&.backoff\fP
 Longest wait in seconds between attempts to reach the upstream \fIserver\fP again
@@ -3609,6 +4048,8 @@ each failed attempt, up to this value.
 Takes a number of seconds or a string in the duration forms: units \fBd\fP, \fBh\fP, \fBm\fP
 and \fBs\fP (e.g., \fB\(dq30s\(dq\fP, \fB\(dq5m\(dq\fP, \fB\(dq1h30m\(dq\fP) or a Slurm time (e.g., \fB\(dq1:30\(dq\fP);
 fractions are kept. \fBhs relay\fP stops before it starts if the value is not a duration.
+.sp
+Range: 0 s to 2,147,483,647 s.
 .TP
 .B \fB\&.evict_hint\fP
 Seconds of lost contact after which the relay takes the upstream \fIserver\fP to have
@@ -3621,6 +4062,8 @@ results are still returned when the connection comes back.
 Takes a number of seconds or a string in the duration forms: units \fBd\fP, \fBh\fP, \fBm\fP
 and \fBs\fP (e.g., \fB\(dq30s\(dq\fP, \fB\(dq5m\(dq\fP, \fB\(dq1h30m\(dq\fP) or a Slurm time (e.g., \fB\(dq1:30\(dq\fP);
 fractions are kept. \fBhs relay\fP stops before it starts if the value is not a duration.
+.sp
+Range: 0 s to 2,147,483,647 s.
 .TP
 .B \fB[tls]\fP
 .INDENT 7.0
@@ -3678,8 +4121,9 @@ Postgres must be explicitly initialized via \fBhs initdb\fP, or by launching \fB
 \fBhs submit\fP, or \fBhs cluster\fP with the \fB\-\-initdb\fP command\-line option.
 An existing database created by an earlier release is upgraded in place on first use,
 for both SQLite and Postgres. The upgrade only adds missing tables, columns, and indexes and never
-rewrites existing tasks; on Postgres it also drops the \fBUNIQUE\fP constraints on the retry\-chain
-columns. It holds an exclusive lock while it runs (minutes, on a large database), and processes
+changes existing tasks; on Postgres it also drops the \fBUNIQUE\fP constraints on the retry\-chain
+columns, and widens \fBtask.memory\fP to 64 bits (so a task can declare more than 2 GiB) by
+rewriting the \fBtask\fP table, every task kept, announced in the log before it starts. It holds an exclusive lock while it runs (minutes, on a large database), and processes
 started meanwhile wait for it. A SQLite database created by an
 earlier release (2.8, or the 2.9.0a1 pre\-release) keeps those constraints, with no effect on
 behaviour in normal operation. Only in the rare case where a failed task could be retried twice
