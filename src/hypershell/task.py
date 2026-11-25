@@ -42,17 +42,18 @@ from sqlalchemy.types import Text as TEXT
 from hypershell.core.platform import default_path
 from hypershell.core.config import config
 from hypershell.core.exceptions import (handle_exception, handle_exception_silently, handle_broken_pipe,
-                                        get_shared_exception_mapping)
+                                        get_shared_exception_mapping, ReadingMixin)
 from hypershell.core.logging import Logger, HOSTNAME
 from hypershell.core.remote import SSHConnection
 from hypershell.core.signal import exit_status_for_signal
-from hypershell.core.types import smart_coerce, JSONData, to_json_type, parse_time
+from hypershell.core.types import smart_coerce, JSONData, to_json_type, ranged
 from hypershell.core.pretty_print import format_tag, format_json, format_bytes, format_source
 from hypershell.core.tag import Tag
 from hypershell.data.core import Session
 from hypershell.data.model import (Task, Source, Zone, JSON, CANCEL_STATUS, zone_name, DEFAULT_ZONE_NAME,
-                                   TaskGroupError, parse_group)
+                                   TaskGroupError, TaskInputError, parse_group)
 from hypershell.data import ensuredb, DATABASE_DIALECT
+from hypershell.submit import read_tag_options, advise_one_task
 
 # Public interface
 __all__ = ['TaskGroupApp',
@@ -83,7 +84,7 @@ Options:
 """
 
 
-class TaskSubmitApp(Application):
+class TaskSubmitApp(ReadingMixin, Application):
     """Submit task to database."""
 
     interface = Interface(SUBMIT_PROGRAM, SUBMIT_USAGE, SUBMIT_HELP)
@@ -109,19 +110,21 @@ class TaskSubmitApp(Application):
                 self.zone = zone_name(self.zone)
             except ValueError as error:
                 raise ArgumentError(str(error)) from error
-        ensuredb()
         self.check_tags()
+        ensuredb()
         zone = None if self.zone is None else Zone.ensure(self.zone)
-        task = Task.new(args=' '.join(self.argv), tag=self.tags, zone=zone)
+        args = ' '.join(self.argv)
+        task = Task.new(args=args, tag=self.tags, zone=zone)
+        advise_one_task(args, self.tags)
         Task.add(task)
         print(task.id)
 
     def check_tags(self: TaskSubmitApp) -> None:
-        """Ensure valid tags."""
-        self.tags = {} if not self.taglist else Tag.parse_cmdline_list(self.taglist)
+        """Ensure valid tags, before the database is opened: a resource tag is read by its `task.*` entry."""
         try:
+            self.tags = read_tag_options(self.taglist)
             Task.ensure_valid_tag(self.tags)
-        except (ValueError, TypeError) as error:
+        except (ValueError, TypeError, TaskInputError) as error:
             raise ArgumentError(str(error)) from error
 
 
@@ -164,7 +167,7 @@ Options:
 """
 
 
-class TaskInfoApp(Application):
+class TaskInfoApp(ReadingMixin, Application):
     """Get metadata/status/outputs of task."""
 
     interface = Interface(INFO_PROGRAM, INFO_USAGE, INFO_HELP)
@@ -337,7 +340,7 @@ Options:
 """
 
 
-class TaskWaitApp(Application):
+class TaskWaitApp(ReadingMixin, Application):
     """Wait for task to complete."""
 
     interface = Interface(WAIT_PROGRAM, WAIT_USAGE, WAIT_HELP)
@@ -346,7 +349,7 @@ class TaskWaitApp(Application):
     interface.add_argument('uuid')
 
     interval: int = DEFAULT_INTERVAL
-    interface.add_argument('-n', '--interval', type=parse_time, default=interval)
+    ranged(interface, '-n', '--interval', setting='option.interval', default=interval)
 
     print_info: bool = False
     print_status: bool = False
@@ -422,7 +425,7 @@ Options:
 """
 
 
-class TaskRunApp(Application):
+class TaskRunApp(ReadingMixin, Application):
     """Submit task and wait for completion."""
 
     interface = Interface(RUN_PROGRAM, RUN_USAGE, RUN_HELP)
@@ -431,7 +434,7 @@ class TaskRunApp(Application):
     interface.add_argument('argv', nargs='+')
 
     interval: int = DEFAULT_INTERVAL
-    interface.add_argument('-n', '--interval', type=parse_time, default=interval)
+    ranged(interface, '-n', '--interval', setting='option.interval', default=interval)
 
     taglist: List[str] = []
     interface.add_argument('-t', '--tag', nargs='+', dest='taglist')
@@ -442,9 +445,14 @@ class TaskRunApp(Application):
 
     def run(self: TaskRunApp) -> None:
         """Submit task and wait for completion."""
+        try:
+            tags = read_tag_options(self.taglist)  # Before the database is opened: exit 2 writes nothing
+        except TaskInputError as error:
+            raise ArgumentError(str(error)) from error
         ensuredb()
-        task = Task.new(args=' '.join(self.argv),
-                        tag=(None if not self.taglist else Tag.parse_cmdline_list(self.taglist)))
+        args = ' '.join(self.argv)
+        task = Task.new(args=args, tag=tags or None)
+        advise_one_task(args, tags)
         Task.add(task)
         TaskWaitApp(uuid=task.id, interval=self.interval).run()
         TaskInfoApp(uuid=task.id, print_stdout=True).run()
@@ -627,7 +635,7 @@ Options:
 """
 
 
-class TaskSearchApp(Application, SearchableMixin):
+class TaskSearchApp(ReadingMixin, Application, SearchableMixin):
     """Search for tasks in database."""
 
     interface = Interface(SEARCH_PROGRAM, SEARCH_USAGE, SEARCH_HELP)
@@ -655,7 +663,7 @@ class TaskSearchApp(Application, SearchableMixin):
     show_count: bool = False
     guard_interface = interface.add_mutually_exclusive_group()
     guard_interface.add_argument('--all', action='store_true', dest='show_all')
-    guard_interface.add_argument('-l', '--limit', type=int, default=None)
+    ranged(guard_interface, '-l', '--limit', setting='option.limit', default=None)
     guard_interface.add_argument('-c', '--count', action='store_true', dest='show_count')
 
     show_failed: bool = False
@@ -673,10 +681,10 @@ class TaskSearchApp(Application, SearchableMixin):
     # NOTE: --finished retained for backwards compatibility
 
     group_filter: Optional[int] = None
-    interface.add_argument('-g', '--group', type=int, default=None, dest='group_filter')
+    ranged(interface, '-g', '--group', setting='option.group', default=None, dest='group_filter')
 
     part_filter: Optional[int] = None
-    interface.add_argument('--part', type=int, default=None, dest='part_filter')
+    ranged(interface, '--part', setting='option.part', default=None, dest='part_filter')
 
     retry_filter: bool = False
     interface.add_argument('--retries', action='store_true', dest='retry_filter')
@@ -1046,7 +1054,7 @@ def change_value(field: str, text: str) -> Any:
     return smart_coerce(text)
 
 
-class TaskUpdateApp(Application, SearchableMixin):
+class TaskUpdateApp(ReadingMixin, Application, SearchableMixin):
     """Update task metadata."""
 
     interface = Interface(UPDATE_PROGRAM, UPDATE_USAGE, UPDATE_HELP)
@@ -1070,7 +1078,7 @@ class TaskUpdateApp(Application, SearchableMixin):
     interface.add_argument('--desc', action='store_true', dest='order_desc')
 
     limit: int = None
-    interface.add_argument('-l', '--limit', type=int, default=None)
+    ranged(interface, '-l', '--limit', setting='option.limit', default=None)
 
     show_failed: bool = False
     show_completed: bool = False
@@ -1085,7 +1093,7 @@ class TaskUpdateApp(Application, SearchableMixin):
     search_alias_interface.add_argument('-X', '--cancelled', action='store_true', dest='show_cancelled')
 
     group_filter: Optional[int] = None
-    interface.add_argument('-g', '--group', type=int, default=None, dest='group_filter')
+    ranged(interface, '-g', '--group', setting='option.group', default=None, dest='group_filter')
 
     retry_filter: bool = False
     interface.add_argument('--retries', action='store_true', dest='retry_filter')

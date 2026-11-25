@@ -68,7 +68,7 @@ from hypershell.core.config_schema import Kind, read_value
 from hypershell.core.fsm import State, StateMachine
 from hypershell.core.pretty_print import format_bytes
 from hypershell.core.resource import check_resources, clear_processes, CPU_COUNT, MEMORY_TOTAL
-from hypershell.core.types import parse_bytes, parse_time, parse_delay, parse_rate, serialize, deserialize
+from hypershell.core.types import parse_bytes, serialize, deserialize, ranged
 from hypershell.core.thread import Thread, join_waking
 from hypershell.core.signal import check_signal, SIGNAL_MAP, SIGUSR1, SIGUSR2, SIGINT
 from hypershell.core.logging import HOSTNAME, INSTANCE, Logger
@@ -78,7 +78,8 @@ from hypershell.core.queue import (QueueClient, QueueConfig, QueueVersionError, 
                                    DEFAULT_REMOTE_TIMEOUT, DEFAULT_LOCAL_TIMEOUT)
 from hypershell.core.dispatch import build_version
 from hypershell.core.exceptions import (handle_exception, handle_disconnect,
-                                        handle_address_unknown, HostAddressInfo, get_shared_exception_mapping)
+                                        handle_address_unknown, HostAddressInfo, get_shared_exception_mapping,
+                                        ReadingMixin, reading)
 
 # Public interface
 __all__ = ['run_client', 'ClientThread', 'ClientApp', 'ClientInfo',
@@ -1645,21 +1646,22 @@ Options:
 """
 
 
-class ClientApp(Application):
+class ClientApp(ReadingMixin, Application):
     """Run individual client directly."""
 
     name = APP_NAME
     interface = Interface(APP_NAME, APP_USAGE, APP_HELP)
 
     num_threads: int = DEFAULT_NUM_THREADS
-    interface.add_argument('-N', '--num-threads', '--num-tasks', type=int, default=num_threads, dest='num_threads')
+    ranged(interface, '-N', '--num-threads', '--num-tasks', setting='relay.num_threads', hidden=('--num-tasks', ),
+           default=num_threads, dest='num_threads')
     # NOTE: --num-tasks maintained for backwards compatibility
 
     host: Optional[str] = None  # By client_host when not given (see check_args)
     interface.add_argument('-H', '--host', default=host)
 
     port: int = config.server.port
-    interface.add_argument('-p', '--port', type=int, default=port)
+    ranged(interface, '-p', '--port', setting='server.port', default=port)
 
     auth: Optional[str] = None  # The key is resolve_auth('server') (see run)
     refuse_key_option(interface)
@@ -1668,13 +1670,13 @@ class ClientApp(Application):
     interface.add_argument('-t', '--template', default=template)
 
     bundlesize: Optional[int] = None  # Advertised only when given (see advertised_size)
-    interface.add_argument('-b', '--bundlesize', type=int, default=bundlesize)
+    ranged(interface, '-b', '--bundlesize', setting='client.bundlesize', default=bundlesize)
 
     bundlewait: int = config.client.bundlewait
-    interface.add_argument('-w', '--bundlewait', type=parse_time, default=bundlewait)
+    ranged(interface, '-w', '--bundlewait', setting='client.bundlewait', default=bundlewait)
 
     delay_start: float = DEFAULT_DELAY
-    interface.add_argument('-d', '--delay-start', type=parse_delay, default=delay_start)
+    ranged(interface, '-d', '--delay-start', setting='option.delay', default=delay_start)
 
     zone: Optional[str] = None
     interface.add_argument('--zone', default=None)
@@ -1682,12 +1684,13 @@ class ClientApp(Application):
     task_timeout: Optional[int] = config.task.timeout or None
     client_timeout: Optional[int] = config.client.timeout or None
     ratelimit: Optional[float] = config.client.ratelimit or None
-    interface.add_argument('-T', '--timeout', type=parse_time, default=client_timeout, dest='client_timeout')
-    interface.add_argument('-W', '--task-timeout', type=parse_time, default=task_timeout, dest='task_timeout')
-    interface.add_argument('-R', '--ratelimit', type=parse_rate, default=ratelimit)
+    ranged(interface, '-T', '--timeout', setting='option.client.timeout', default=client_timeout, dest='client_timeout')
+    ranged(interface, '-W', '--task-timeout', setting='option.client.task_timeout', default=task_timeout,
+           dest='task_timeout')
+    ranged(interface, '-R', '--ratelimit', setting='client.ratelimit', default=ratelimit)
 
     task_signalwait: int = config.task.signalwait
-    interface.add_argument('-S', '--signalwait', type=parse_time, default=task_signalwait, dest='task_signalwait')
+    ranged(interface, '-S', '--signalwait', setting='task.signalwait', default=task_signalwait, dest='task_signalwait')
 
     no_confirm: bool = False
     interface.add_argument('--no-confirm', action='store_true')
@@ -1704,8 +1707,8 @@ class ClientApp(Application):
 
     client_cores: Optional[int] = config.client.cores or None
     client_memory: Optional[int] = config.client.memory or None
-    interface.add_argument('-C', '--client-cores', type=int, default=client_cores, dest='client_cores')
-    interface.add_argument('-M', '--client-memory', type=parse_bytes, default=client_memory, dest='client_memory')
+    ranged(interface, '-C', '--client-cores', setting='client.cores', default=client_cores, dest='client_cores')
+    ranged(interface, '-M', '--client-memory', setting='client.memory', default=client_memory, dest='client_memory')
 
     tls: Optional[TLSConfig] = None
     tls_enabled: bool = True
@@ -1740,7 +1743,8 @@ class ClientApp(Application):
         no_key = (not any(is_key_variable(name, sections=(('server', ), )) for name in os.environ)
                   and self.auth == DEFAULT_AUTH)
         try:
-            self.check_args()
+            with reading('configuration'):
+                self.check_args()
             self.enable_tls()
             run_client(num_threads=self.num_threads,
                        bundlesize=advertised_size(self.bundlesize),
@@ -1783,10 +1787,6 @@ class ClientApp(Application):
                 self.zone = zone_name(self.zone)
             except ValueError as error:
                 raise ArgumentError(str(error)) from error
-        if self.client_timeout is not None and self.client_timeout <= 0:
-            raise ArgumentError('Client --timeout should be positive integer')
-        if self.task_timeout is not None and self.task_timeout <= 0:
-            raise ArgumentError('Client --task-timeout should be positive integer')
         self.heartrate = config_seconds('client', 'heartrate')
         if self.host is None:
             self.host = client_host()

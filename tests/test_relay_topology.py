@@ -110,7 +110,7 @@ def test_relay_app_checks_each_zone_bounds() -> None:
     good = relay_app(['cpu', 'gpu'], {'cpu': {'max': 3}, 'gpu': {'min': 1, 'max': 2, 'init': 1}})
     assert good.zone_settings == {'cpu': {'max': 3}, 'gpu': {'min': 1, 'max': 2, 'init': 1}}
     good.check_bounds()
-    with pytest.raises(ArgumentError, match='relay.zone.gpu.max must be a whole number'):
+    with pytest.raises(ArgumentError, match='relay.zone.gpu.max: expected a whole number'):
         relay_app(['gpu'], {'gpu': {'max': 1.5}}).zone_settings  # noqa: checked when first read
     with pytest.raises(ArgumentError, match='client bounds of zone gpu'):
         relay_app(['gpu'], {'gpu': {'min': 2}}).check_bounds()

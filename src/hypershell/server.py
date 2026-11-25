@@ -64,14 +64,14 @@ from cmdkit.cli import Interface, ArgumentError
 from sqlalchemy import func
 
 # Internal libs
-from hypershell.core.exceptions import get_shared_exception_mapping
+from hypershell.core.exceptions import get_shared_exception_mapping, ReadingMixin, reading
 from hypershell.core.config import (config, default, find_available_ports, AUTH_ALLOWED_CHARS, AUTH_MINIMUM_LENGTH,
                                     AUTH_ENV, resolve_auth, refuse_key_option, config_seconds, blame,
                                     ConfigurationError)
-from hypershell.core.config_schema import Kind, FORMS, read_value
+from hypershell.core.config_schema import Kind, FORMS, SETTINGS, read_value
 from hypershell.core.tls import (TLSConfig, TLSError, DEFAULT_HANDSHAKE, handshake_seconds,
                                  from_namespace as tls_from_namespace)
-from hypershell.core.types import parse_bytes, parse_time, parse_period, UnitError
+from hypershell.core.types import parse_period, ranged
 from hypershell.core.logging import Logger
 from hypershell.core.fsm import State, StateMachine
 from hypershell.core.thread import Thread, join_waking
@@ -91,7 +91,7 @@ from hypershell.client import ClientInfo
 __all__ = ['serve_from', 'serve_file', 'serve_forever', 'ServerThread', 'ServerApp', 'is_file_input',
            'DEFAULT_BUNDLESIZE', 'DEFAULT_BUNDLEWAIT', 'DEFAULT_ATTEMPTS',
            'DEFAULT_EVICT', 'DEFAULT_EAGER_MODE', 'DEFAULT_SERVER_POLL', 'EVICT_MINIMUM', 'EVICT_MAXIMUM',
-           'check_evict', 'configured_eager', 'configured_retries',
+           'configured_eager', 'configured_retries',
            'DEFAULT_BIND', 'DEFAULT_PORT', 'DEFAULT_AUTH']
 
 # Initialize logger
@@ -816,22 +816,11 @@ class HeartbeatState(State, Enum):
 DEFAULT_EVICT: Final[int] = default.server.evict
 """Default client eviction period in seconds."""
 
-EVICT_MINIMUM: Final[int] = 10
+EVICT_MINIMUM: Final[int] = SETTINGS['server.evict'].low
 """Shortest client eviction period in seconds."""
 
-EVICT_MAXIMUM: Final[int] = timedelta.max.days * 86_400
-"""Longest client eviction period in seconds (999,999,999 days, the most a heartbeat monitor's interval holds)."""
-
-
-def check_evict(seconds: int | float) -> int | float:
-    """The eviction period `seconds`, refused with `RuntimeError` under the floor, when not finite, or over the cap."""
-    if not seconds >= EVICT_MINIMUM:
-        raise RuntimeError(f'Evict period must be greater than {EVICT_MINIMUM} seconds: given {seconds}')
-    if seconds > EVICT_MAXIMUM:  # Compared exactly, so an integer wider than a float is refused here too.
-        if seconds == math.inf:
-            raise RuntimeError(f'Evict period must be a finite number of seconds: given {seconds}')
-        raise RuntimeError(f'Evict period must be at most {EVICT_MAXIMUM} seconds: given {seconds}')
-    return seconds
+EVICT_MAXIMUM: Final[int] = SETTINGS['server.evict'].high
+"""Longest client eviction period in seconds (the longest duration of the table)."""
 
 
 class HeartMonitor(StateMachine):
@@ -886,7 +875,11 @@ class HeartMonitor(StateMachine):
         self.ignored_sites = set()
         self.in_memory = in_memory
         self.no_confirm = no_confirm
-        check_evict(evict_after)
+        if isinstance(evict_after, (int, float)) and not isinstance(evict_after, bool):
+            # An int too wide for a float is compared as an int: math.isfinite would overflow on it
+            if isinstance(evict_after, float) and not math.isfinite(evict_after) \
+                    or not SETTINGS['server.evict'].inside(evict_after):
+                raise RuntimeError(SETTINGS['server.evict'].refusal('evict_after', evict_after))
         self.wait_check = timedelta(seconds=int(evict_after / 10))
         self.evict_after = timedelta(seconds=evict_after)
 
@@ -1824,7 +1817,7 @@ Options:
 """
 
 
-class ServerApp(Application):
+class ServerApp(ReadingMixin, Application):
     """Run server in stand-alone mode."""
 
     name = APP_NAME
@@ -1834,21 +1827,21 @@ class ServerApp(Application):
     interface.add_argument('filepath', nargs='?', default=None)
 
     bundlesize: int = config.server.bundlesize
-    interface.add_argument('-b', '--bundlesize', type=int, default=bundlesize)
+    ranged(interface, '-b', '--bundlesize', setting='server.bundlesize', default=bundlesize)
 
     bundlewait: int = config.submit.bundlewait
-    interface.add_argument('-w', '--bundlewait', type=parse_time, default=bundlewait)
+    ranged(interface, '-w', '--bundlewait', setting='submit.bundlewait', default=bundlewait)
 
     task_cores: Optional[int] = config.task.cores or None
     task_memory: Optional[int] = config.task.memory or None
     task_timeout: Optional[int] = config.task.timeout or None
-    interface.add_argument('-c', '--task-cores', type=int, default=task_cores)
-    interface.add_argument('-m', '--task-memory', type=parse_bytes, default=task_memory)
-    interface.add_argument('-W', '--task-timeout', type=parse_time, default=task_timeout)
+    ranged(interface, '-c', '--task-cores', setting='task.cores', default=task_cores)
+    ranged(interface, '-m', '--task-memory', setting='task.memory', default=task_memory)
+    ranged(interface, '-W', '--task-timeout', setting='task.timeout', default=task_timeout)
 
     eager_mode: bool = config.server.eager
     max_retries: int = configured_retries()
-    interface.add_argument('-r', '--max-retries', type=int, default=max_retries)
+    ranged(interface, '-r', '--max-retries', setting='option.max_retries', default=max_retries)
     interface.add_argument('--eager', action='store_true', dest='eager_mode', default=eager_mode)
 
     forever_mode: bool = False
@@ -1862,17 +1855,19 @@ class ServerApp(Application):
     autoscaling_period: int = config.autoscale.period
     interface.add_argument('-A', '--autoscaling', nargs='?', default=None,
                            const=config.autoscale.policy, dest='autoscaling_policy')
-    interface.add_argument('-F', '--factor', type=float, default=autoscaling_factor, dest='autoscaling_factor')
-    interface.add_argument('-P', '--period', type=parse_period, default=autoscaling_period, dest='autoscaling_period')
+    ranged(interface, '-F', '--factor', setting='autoscale.factor', default=autoscaling_factor,
+           dest='autoscaling_factor')
+    ranged(interface, '-P', '--period', setting='autoscale.period', default=autoscaling_period,
+           dest='autoscaling_period')
 
     poll: int = config.server.poll
-    interface.add_argument('-Q', '--poll', type=parse_time, default=poll)
+    ranged(interface, '-Q', '--poll', setting='server.poll', default=poll)
 
     host: str = config.server.bind
     interface.add_argument('-H', '--bind', default=host, dest='host')
 
     port: int = config.server.port
-    interface.add_argument('-p', '--port', type=int, default=port)
+    ranged(interface, '-p', '--port', setting='server.port', default=port)
 
     auth: Optional[str] = None  # The key is resolve_auth('server') (see run)
     refuse_key_option(interface)
@@ -1917,8 +1912,9 @@ class ServerApp(Application):
         """Run server."""
         if self.special_options():
             return
-        self.auth = resolve_auth('server')
-        self.check_args()
+        with reading('configuration'):
+            self.auth = resolve_auth('server')
+            self.check_args()
         self.enable_tls()
         self.check_database()
         self.prepare_source()
@@ -1970,11 +1966,8 @@ class ServerApp(Application):
 
     def check_args(self: ServerApp) -> None:
         """Fail particular argument combinations."""
-        try:
-            # A number from the configuration is not parsed by the option.
-            self.autoscaling_period = parse_period(self.autoscaling_period)
-        except UnitError as error:
-            raise ArgumentError(f'autoscale.period: {error}') from error
+        # A number from the configuration (checked as it loaded) is not parsed by the option: under one second is one.
+        self.autoscaling_period = parse_period(self.autoscaling_period)
         if self.autoscaling_policy is not None:
             self.check_autoscaling()
         if self.filepath and self.forever_mode:
@@ -1991,7 +1984,7 @@ class ServerApp(Application):
             raise ArgumentError(f'Authentication key must be at least {AUTH_MINIMUM_LENGTH} characters')
         if not AUTH_ALLOWED_CHARS.fullmatch(self.auth):
             raise ArgumentError(f'Authentication key must contain only "{AUTH_ALLOWED_CHARS.pattern}"')
-        self.evict_after = check_evict(config_seconds('server', 'evict'))
+        self.evict_after = config_seconds('server', 'evict')
         self.eager_mode = configured_eager(self.eager_mode)
         if not self.tls_enabled:
             log.warning('TLS is disabled - this is not recommended for production!')

@@ -35,4 +35,10 @@ Description
    With ``--queue`` and no ``-H``, it dials ``server.advertise`` or a specific ``server.bind`` when
    ``server.host`` is not given, as `client` does; before, *localhost*.
 
+.. versionchanged:: 2.9.0
+   Each numeric option has a range, given with the option below. A value outside it, or one that is
+   not a number of the option's kind, stops the command before it starts, with one line naming the
+   option, the range and the value (exit status 2). ``-b 0``, ``-c`` above 32,767 and ``-m`` of
+   ``8388608TB`` (2\ :sup:`63` bytes) or more are refused.
+
 .. include:: ../_include/submit_help.rst

@@ -67,6 +67,12 @@ Description
    group is refused before anything runs; tasks still in flight from an interrupted run do not
    count. A stream's late lower group still runs, with a warning.
 
+.. versionchanged:: 2.9.0
+   Each numeric option has a range, given with the option below. A value outside it, or one that is
+   not a number of the option's kind, stops the command before it starts, with one line naming the
+   option, the range and the value (exit status 2). An option with an advisory limit takes a value
+   past it and runs, with one warning.
+
 .. include:: ../_include/server_help.rst
 
 .. _cli_server_sites:

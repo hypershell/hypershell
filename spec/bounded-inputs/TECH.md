@@ -1,0 +1,476 @@
+---
+slug: bounded-inputs
+title: Every numeric setting has one declared range, one parser and one error
+kind: fix
+appetite: big
+status: done
+branch: fix/bounded-inputs
+base: develop
+current_phase: done
+last_updated: '2026-11-24'
+phases:
+- id: P1
+  name: 'Tests first: merge develop; the nine test files, the flipped tests, the red
+    list on 8548053b and the guards'
+  status: done
+  satisfies:
+  - R11
+  depends_on: []
+  parallel: false
+  hammerable: false
+  hill: downhill
+  verify: test -n "$HS_TEST_POSTGRES" && git merge-base --is-ancestor d132d45c HEAD
+    && RED_LIST=spec/bounded-inputs/drive/red.txt RED_BASE_REV=8548053b python3 spec/submit-input-checks/drive/bounded.py
+    2700 sh spec/relay-hardening/drive/red_check.sh && sh spec/submit-input-checks/drive/run_list.sh
+    spec/bounded-inputs/drive/guards.txt 1200 && python3 spec/submit-input-checks/drive/bounded.py
+    120 uv run pytest -q -p no:cacheprovider --collect-only tests/test_bounded_table.py
+    tests/test_bounded_parsers.py tests/test_bounded_options.py tests/test_bounded_config.py
+    tests/test_bounded_config_set.py tests/test_bounded_tags.py tests/test_bounded_backstop.py
+    tests/test_bounded_advisory.py tests/test_bounded_docs.py
+- id: P2
+  name: 'The table, the parsers and every option: SETTINGS beside KEYS, one parser
+    per kind, RangedOption on all 59 numeric options, the advisory tier, help snippets'
+  status: done
+  satisfies:
+  - R1
+  - R2
+  - R3
+  - R4
+  - R6
+  - R13
+  depends_on:
+  - P1
+  parallel: false
+  hammerable: false
+  hill: downhill
+  verify: test -n "$HS_TEST_POSTGRES" && python3 spec/submit-input-checks/drive/bounded.py
+    2400 uv run pytest -q -p no:cacheprovider tests/test_bounded_table.py tests/test_bounded_parsers.py
+    tests/test_bounded_options.py tests/test_group_integer.py tests/test_submit.py
+    && python3 spec/submit-input-checks/drive/bounded.py 1200 uv run pytest -q -p
+    no:cacheprovider tests/test_duration_options.py tests/test_size_duration.py tests/test_period_floor.py
+    tests/test_bounded_advisory.py tests/test_bounded_docs.py -k "option or help or
+    parse" && sh spec/submit-input-checks/drive/run_list.sh spec/bounded-inputs/drive/guards.txt
+    1200 && for m in options advise; do .agents/factory/bin/temp_site.sh uv run sh
+    "$PWD/spec/bounded-inputs/drive/bounds_drive.sh" $m || exit 1; done
+- id: P3
+  name: 'Configuration: the check at load with write-back, the hs config exemption,
+    the retired checks as entries, hs config set, the backstop, API defaults'
+  status: done
+  satisfies:
+  - R3
+  - R4
+  - R5
+  - R6
+  - R7
+  - R8
+  - R10
+  - R13
+  depends_on:
+  - P2
+  parallel: false
+  hammerable: false
+  hill: downhill
+  verify: test -n "$HS_TEST_POSTGRES" && python3 spec/submit-input-checks/drive/bounded.py
+    2700 uv run pytest -q -p no:cacheprovider tests/test_bounded_table.py tests/test_bounded_parsers.py
+    tests/test_bounded_options.py tests/test_bounded_config.py tests/test_bounded_config_set.py
+    tests/test_bounded_backstop.py tests/test_bounded_advisory.py tests/test_config_schema.py
+    tests/test_env_config.py tests/test_env_duration.py tests/test_env_blame.py tests/test_config_set_types.py
+    tests/test_cluster_evict.py tests/test_period_floor.py tests/test_config_unread.py
+    tests/test_autoscale_failed_launches.py tests/test_retry_defaults.py && python3
+    spec/submit-input-checks/drive/bounded.py 900 uv run pytest -q -p no:cacheprovider
+    tests/test_bounded_docs.py -k "not agents" && sh spec/submit-input-checks/drive/run_list.sh
+    spec/bounded-inputs/drive/guards.txt 1200 && sh spec/bounded-inputs/drive/no_bypass.sh
+    && for m in options config set advise; do .agents/factory/bin/temp_site.sh uv
+    run sh "$PWD/spec/bounded-inputs/drive/bounds_drive.sh" $m || exit 1; done
+- id: P4
+  name: Resource tags through the parsers with one advisory summary; PostgreSQL storage;
+    AGENTS.md, invariants, rubric; the whole suite, the red list green and the docs
+    build
+  status: done
+  satisfies:
+  - R9
+  - R11
+  - R12
+  - R13
+  depends_on:
+  - P3
+  parallel: false
+  hammerable: false
+  hill: downhill
+  verify: test -n "$HS_TEST_POSTGRES" && env -u HS_TEST_POSTGRES python3 spec/submit-input-checks/drive/bounded.py
+    7200 uv run pytest -q -p no:cacheprovider && python3 spec/submit-input-checks/drive/bounded.py
+    2700 uv run pytest -q -p no:cacheprovider tests/test_bounded_tags.py tests/test_bounded_advisory.py
+    tests/test_group_integer.py tests/test_group_stream.py tests/test_memory_column.py
+    tests/test_size_duration.py && sh spec/submit-input-checks/drive/run_list.sh spec/bounded-inputs/drive/red.txt
+    2700 && sh spec/submit-input-checks/drive/run_list.sh spec/bounded-inputs/drive/guards.txt
+    1200 && sh spec/bounded-inputs/drive/no_bypass.sh && for m in options config set
+    tags advise; do .agents/factory/bin/temp_site.sh uv run sh "$PWD/spec/bounded-inputs/drive/bounds_drive.sh"
+    $m || exit 1; done && python3 spec/submit-input-checks/drive/bounded.py 900 uv
+    run --python 3.12 --group docs sphinx-build -W --keep-going -q -E -b html docs
+    /tmp/claude-501/docs-html-bnd && python3 spec/submit-input-checks/drive/bounded.py
+    900 uv run --python 3.12 --group docs sphinx-build -W --keep-going -q -E -b man
+    docs /tmp/claude-501/docs-man-bnd
+review:
+  last_reviewed_commit: eea98e09
+  verdict: approved
+  blocked_reason: 'Review cycle 2: N1 (JSON string decimal unconverted), N2 (JSON
+    timeout rounding docs)'
+  cycle: 3
+---
+# TECH.md — Every numeric setting has one declared range, one parser and one error
+
+The **context engine and finite-state machine** for building this cycle. The YAML frontmatter above
+is the resume ground-truth (read it with
+`uv run python .agents/factory/bin/next_phase.py spec/bounded-inputs/TECH.md`); the per-phase
+checklists below are the work. `hs-build` executes the next actionable phase, runs its `verify:`
+command, updates state via `uv run python .agents/factory/bin/set_phase.py …`, and makes one atomic
+code+state commit.
+
+- **Vision / requirements (locked):** [`GOAL.md`](GOAL.md) — R1–R13 are the contract.
+- **Authoritative design:** [`PLAN.md`](PLAN.md).
+- **Backing research:** [`research/00-digest.md`](research/00-digest.md) + briefs `01`–`05`.
+
+## Frontmatter field reference
+
+As the template: top `status` `planned | in_progress | blocked | in_review | done`; phase `status`
+`pending | in_progress | done | blocked`; `satisfies` the GOAL R-IDs; `depends_on`; `parallel`
+(false throughout: every phase touches `core/*`); `hammerable` (false throughout: correctness);
+`hill`; `attempts` (the durable circuit breaker); `verify`; `review.cycle`.
+
+## Conventions (apply to every phase)
+
+- `AGENTS.md` is the constitution; [`.agents/factory/invariants.md`](../../.agents/factory/invariants.md)
+  §3, §7, §10, §11 and §12 are the ones this cycle touches (PLAN § 3).
+- One phase per `hs-build` invocation; one atomic, signed commit with the code and this file's state,
+  subject `[fix] Build bounded-inputs P<n>: …`. **No `Co-Authored-By` trailer.**
+- An option change updates its `docs/_include/*_help.rst` snippet (and `share/` completions where a
+  value list changes) **in the same commit**; each changed prose passage carries
+  `.. versionchanged:: 2.9.0` above it (never inside an included snippet).
+- Python: `UV_PROJECT_ENVIRONMENT=/tmp/claude-501/venv314-bnd`, `UV_CACHE_DIR` writable; pytest
+  serially, never `-n`. PostgreSQL lines and the docs build need the sandbox off. Bind 127.0.0.1.
+- Docs and help name top-level commands only; no example shows the key option.
+
+## Ranges changed under R1
+
+R1 allows a change only to (a) widen so a value that works and means something today stays in, (b)
+lower a ceiling to a narrower place the value is stored or used, (c) raise a floor of 0 where 0 hangs
+or spins. Each change, with its reason:
+
+| Setting | GOAL | Plan | Rule | Reason |
+| --- | --- | --- | --- | --- |
+| Threads (`-N/--num-threads`, `relay.num_threads`) | 1 … 4,194,304 | **0** … 4,194,304; 0 is "all cores" | (a) | `-N 0` sets `CPU_COUNT` threads (`client.py:1362`), documented in `client_help.rst` and `cluster_help.rst` ("0=auto") and offered by both shells' completions. Refusing it would break a documented form. The advisory limit (above 1,024) is unchanged; 0 is never advised. |
+| Interval (`-n/--interval`, `hs wait`, `hs run`) | 0 … 2³¹−1 s | **1 s** … 2³¹−1 s | (c) | `-n 0` polls the database in a tight loop (research 01). Durations round up, so 1 s is the least non-zero interval. |
+| `server.tls.handshake` | 0 … 2³¹−1 s (Duration) | **1 … 86,400 s**, its own entry | (b) | `core/tls.py` `handshake_seconds` already refuses anything above one day (`MAX_HANDSHAKE`) and 0; the narrower place it is used. The floor stays 1, as today (0 is refused today, so no value accepted today is refused). |
+| `hs client -T/--timeout`, `-W/--task-timeout` (the options only) | 0 … 2³¹−1 s (the keys' Duration range) | **1 s** … 2³¹−1 s, entries `option.client.timeout` and `option.client.task_timeout` | R2 (plan gate) | Refused at 0 today, exit 2 (`client.py:1786-1790`). R2: a value that works today behaves as today, and a value refused today stays refused rather than gain a new meaning ("none") in this cycle. Ruled at the plan gate, 2026-11-24. The keys `client.timeout` and `task.timeout`, and `hs cluster`'s `-T`/`-W`, keep the Duration range from 0 ("none"). |
+
+Not range changes, stated so the review grades them as intended:
+
+- `-N/--num-threads` is named so in messages; its third flag `--num-tasks` is a hidden alias.
+- "Count or none": only `relay.min`, `relay.max` and `relay.init` take `<none>` (`int_or_none`);
+  `logging.file.keep`, `autoscale.failed_launches`, `autoscale.size.*` and zone `min`/`max`/`init`
+  are whole numbers from 0.
+- The size parser is exact, so 2⁶³−1 bytes (`9223372036854775807`) is reachable and 2⁶³ refused.
+- `database.port` has no built-in default; R1's default test skips it.
+
+Advisory limits (R13), as the GOAL's *Advisory limits*: threads above 1,024; `server.attempts` above
+100 and `-r` above 99; cores above 1,024 (`task.cores`, `client.cores`, the `cores` tag); factor above
+100; period above 3,600 s; rate below 0.001 other than 0. Every built-in default is inside them.
+
+---
+
+## Phase P1 — Tests first
+**Satisfies:** R11 · **Depends on:** —
+**Goal:** the branch carries develop (and `update-group-and-legacy-filters` if it has landed), and every
+new test exists, collects on the base, and either fails there for what it checks (the red list) or
+passes there (the guards).
+
+- [x] Merge develop into the branch (signed merge commit); at plan time `d132d45c`. If
+      `update-group-and-legacy-filters` has landed, it comes with it; its `change_value` calls
+      `parse_group`, which this cycle keeps (PLAN § 2.6).
+- [x] Shared helpers reused, not copied: `tests/input_checks.py` (`bounded`, `db_site`, `rows`),
+      `tests/test_config_unread.py` (`file_layer`, `child_env`, `run_bounded`). A small
+      `tests/bounded_checks.py` (not collected) for the R4 message regex and one CLI runner.
+- [x] `tests/test_bounded_table.py` (R1, R6, R13): `SETTINGS` keys = numeric `KEYS` + `relay.zone.*`
+      zone keys + the `option.*` entries, by set equality; `SETTINGS` kinds match `KEYS`; every default
+      leaf of `core/config.py` `default` parses into range and is inside its advisory limit
+      (`database.port` skipped); every option that takes a value, walked over
+      `HyperShellApp.commands` and each `interface._actions`, is a `RangedOption` naming an entry, or
+      is in `TEXT_OPTIONS` (set equality); `test_no_plain_numeric_option_type` (no `type` is `int` or
+      `float`; RED on the base by assertion); each `RangedOption`'s default in range.
+- [x] `tests/test_bounded_parsers.py` (R2–R4, unit): per kind and entry, each bound, one past each
+      bound, `x`, `nan`, `inf`, `-inf`, a 4,300-digit and a 5,000-digit integer (text and `int`),
+      `True`, a float for a whole kind, text for a numeric key; the message form; `shown` never raises
+      and cuts; the duration and size forms and rounding as today; `parse_bytes('9223372036854775807')`
+      exact; the period's `0.5` → 1; the delay's random form.
+- [x] `tests/test_bounded_options.py` (R2–R4, R6): `test_option_refused[...]` per `drive/red.txt` and
+      one per kind for every command, exit 2, the R4 line naming the option as defined, no traceback,
+      nothing started (no database file created, nothing bound); `test_option_in_range_unchanged`
+      (each upper bound accepted and stored or used, joins the guards); the task-command aliases.
+- [x] `tests/test_bounded_config.py` (R3–R6, R10): file and variable refusals exit 3 with
+      ` (from: …)` for every command family, before work; `_env`/`_eval` checked; `hs config get` and
+      `hs config set` run with a bad file value, and a bad variable still refuses; `attempts = "3"`
+      runs three attempts; the C1 status changes (period, ratelimit, evict → 3); gate (a)
+      `test_loaded_numeric_keys_checked`; an API default from configuration (`ServerThread`'s
+      `max_retries`) reads the checked value; `test_file_value_in_range_unchanged` (joins the guards).
+- [x] `tests/test_bounded_config_set.py` (R7): numeric and zone keys refused per entry, untyped
+      integers outside 64 bits, a 4,300-digit value; exit 2, the key named, the file byte-identical.
+- [x] `tests/test_bounded_backstop.py` (R8): a child patches a start check, then an argument parse, to
+      raise `OverflowError`/`ValueError`; exit 3/2, one line, no traceback; a `ValueError` after work
+      starts keeps today's path.
+- [x] `tests/test_bounded_tags.py` (R9, R11): `-t cores:100000`/`memory:8388608TB`/`timeout:2147483648`
+      exit 2; a file, stdin and `--from-json` refused whole (exit 5, nothing inserted, the value and line
+      or record named) over `db_site`; a stream refuses only the line; on PostgreSQL the largest
+      `cores` (32,767), `memory` (2⁶³−1), `timeout` (2³¹−1) and `attempt` (32,767, written through
+      the engine and read back) are stored.
+- [x] `tests/test_bounded_advisory.py` (R13): for each advisory limit, just past it through an option,
+      a file key and (for cores) a tag: one WARNING naming the setting, value and limit, the run goes
+      on, exit 0 where the command completes; at the limit, no warning; twice in one process, one
+      warning; many tag lines past the limit, one summary with the count and the first line.
+- [x] `tests/test_bounded_docs.py` (R12, R13): each help snippet gives each ranged option's range and
+      any advisory limit (`rst_entry`, `MARKER` from `tests/test_client_host_default.py`); each
+      `config_param_ref.rst` entry gives its key's range and advisory limit (`parse_reference`); the
+      environment page, API pages, `AGENTS.md` § Configuration and the review rubric name the table.
+- [x] Flip the tests PLAN § 5.5 lists (research 05 § 5): `test_cluster_evict.py` (`REFUSALS` → exit 3,
+      cap 2³¹−1, message), `test_period_floor.py::test_period_key_refused` (→ 3),
+      `test_config_unread.py`'s three rate refusals (→ 3) and
+      `test_cluster_rate_option_over_not_finite_key` (→ 3, C2), `test_config_set_types.py` `SIZED`
+      evict cases (→ refused), the four message regexes.
+- [x] `drive/bounds_drive.sh` (modes `options`, `config`, `set`, `tags`, `advise`), in a `temp_site`;
+      a plan dry run shows each mode fails on the base.
+- [x] Name tests so each phase's `verify:` selects what it lands: option tests carry `option`,
+      help-page tests `help`, parser tests `parse`; the agent-docs test is
+      `test_agents_and_rubric_name_table` (P4 only).
+- [x] Make every id in `drive/red.txt` and `drive/guards.txt` exist; amend the lists only to fix an id,
+      never to drop a requirement. Add the two new in-range tests to the guards.
+- **Built (P1 notes):** the resource tags' advisory summary test and the task-input docs test live in
+  `tests/test_bounded_tags.py` (`test_tags_advised_once_per_submission`, `test_tag_docs_give_ranges`), not in
+  the advisory and docs files, so that P3's run of `test_bounded_advisory.py` and of `test_bounded_docs.py -k
+  "not agents"` selects only what P3 lands; the red list's id is fixed to match. A third in-range guard,
+  `test_option_in_range_stored`, joins the guards. `test_rate_option_takes_number` (a guard) drops `-1`, which
+  the GOAL refuses (release note 1); it joins `test_rate_option_refused`.
+- **Verify:** red list RED on `8548053b` (PostgreSQL lines included), guards green, all new files
+  collect.
+- **Touches:** `tests/`, `spec/bounded-inputs/drive/`.
+
+## Phase P2 — The table, the parsers and every option
+**Satisfies:** R1, R2, R3, R4, R6, R13 (options) · **Depends on:** P1
+**Goal:** `SETTINGS` holds every range and advisory limit; one parser per kind; every numeric option of
+every command reads through it, refuses with the R4 line (exit 2) and advises once.
+
+- [x] `core/config_schema.py`: `Range`, the classes and `SETTINGS` (PLAN § 2.1), with this file's R1
+      changes; the duration and size grammar moved in from `core/types.py`, the size exact; the
+      whole-number length check; `parse_setting`, `Range.parse`, `SettingError`, `shown`, `advise`
+      and its pending queue (flushed by `HyperShellApp.main` once logging is up).
+- [x] `core/types.py`: `parse_time`, `parse_bytes`, `parse_delay`, `parse_period`, `parse_rate` as
+      wrappers over the entries (messages in the R4 form); `RATE_MINIMUM` from `RATE`;
+      `RangedOption` and `ranged(...)` raising cmdkit's `ArgumentError`.
+- [x] `data/model.py`: `GROUP_MIN`/`GROUP_MAX` from `GROUP`; `parse_group`/`ensure_group` keep name,
+      signature and `TaskGroupError`, the body the table's parser (PLAN § 2.6).
+- [x] Every numeric option to `ranged(...)` (research 01's 59, by command and destination):
+      `submit.py`, `server.py`, `client.py`, `cluster/__init__.py`, `relay/__init__.py`, `task.py`
+      (`hs list -l/-g/--part`, `hs update -l/-g`, `hs wait`/`hs run -n`). Remove the option checks the
+      table replaces (`client.py:1786-1790` becomes the floor of `hs client`'s `-T`/`-W` entries,
+      the relay's size < 1, the option halves of `check_arguments`); keep the relations.
+- [x] Help snippets (`docs/_include/*_help.rst`) give each ranged option's range and advisory limit;
+      the `versionchanged:: 2.9.0` above each `.. include::` in `docs/cli/*.rst`; completions unchanged
+      (`-N` still offers 0, PLAN § 5.1).
+- [x] Amend tests only where the GOAL changed the behaviour they pin; the red list's option lines,
+      the table and parser tests, the option advisory tests and the help-page docs test pass.
+- **Built (P2 notes):** `Range` keeps a few fields beyond PLAN § 2.1 (`least` for the rate's least non-zero
+  value, `rounds_to` for the period, `signed` for the delay's random form, `per` for the rate's unit, `detail` for
+  the delay's forms). A refusal of a value that is not of its kind at all adds the kind's forms after the value
+  (`; a duration is …`), so the duration, size and delay messages still list them. The `parse_*` wrappers take a
+  `name` (by default `duration`, `size`, `rate`, `autoscale.period`). Tests amended where the GOAL changed the
+  behaviour they pin: a numeric `task.timeout` of `1.5` reads as given (the `Fraction` case dropped); `-n 0` is
+  refused (`test_seconds_option_parsed`); a launched delay past the longest delay is refused by the client option
+  (`test_launched_delay_is_plain_decimal`); the relay's size refusal is the one form (`test_relay_fsm.py`). Two P1
+  test setups fixed: `test_option_advised_once` starts its server with a key, and `-c 1025` on `hs cluster` runs
+  with no output (the host has fewer cores; the task is refused for resources, as before). `bounds_drive.sh`: its
+  refusal count reads the pattern with `grep -e` (a name starting `-c` was taken for an option) and strips the
+  CSV's carriage return.
+- **Verify:** the frontmatter `verify:` (the new table, parser and option suites; the option, help and parser tests of the touched suites; guards;
+  `bounds_drive.sh options` and `advise`).
+- **Touches:** `src/hypershell/core/config_schema.py`, `core/types.py`, `data/model.py`, `submit.py`,
+  `server.py`, `client.py`, `cluster/__init__.py`, `relay/__init__.py`, `task.py`, `__init__.py`,
+  `docs/_include/*_help.rst`, `docs/cli/*.rst`, `tests/`.
+
+## Phase P3 — Configuration at load, `hs config set` and the backstop
+**Satisfies:** R3, R4, R5, R6, R7, R8, R10, R13 (configuration) · **Depends on:** P2
+**Goal:** every numeric key of the merged configuration is checked once at import and written back;
+the retired checks are table entries; `hs config` still repairs a bad file; `hs config set` refuses by
+the table; nothing numeric before work ends in a traceback.
+
+- [x] `core/config.py`: `CONFIG_COMMAND` (moved above the load, with `_relay_requested`);
+      `check_settings(config, exempt_files=CONFIG_COMMAND)` inside the import-time `try`, before
+      `check_auth_forms` and the relay swap (PLAN § 2.3); `_env`/`_eval` of numeric keys resolved once
+      and written back; zone tables walked; refused file values replaced by defaults in the checked
+      view under `hs config`; an unchecked view for `hs config get`/`which`; the refusal printed as
+      one line without a class prefix, exit 3; `config_seconds` over the table.
+- [x] `core/config_schema.py` `read_value`: numeric kinds through the table's parsers (same message).
+- [x] Retire into entries (R6): `check_evict` and its call sites (`server.py`, `cluster/__init__.py`,
+      the relay's evict read); `configured_failed_launches`; `configured_retries` (reads the checked
+      value); `check_arguments`' period and rate; `handshake_seconds`' range; `set_retention_count`;
+      the range parts of `relay_bounds`/`zone_settings`/`zone_bounds`. `HeartMonitor`'s explicit
+      `evict_after` guard reads `EVICT`'s bounds (PLAN § 3 deviation).
+- [x] `config.py` `ConfigSetApp` (R7): numeric and zone keys through their entries; untyped integers
+      outside −2⁶³ … 2⁶³−1 refused (digit count first); exit 2, nothing written, the value cut.
+- [x] `reading(stage)` (R8) in `core/exceptions.py`; applied around `from_cmdline` (mixin), the start
+      checks, the import-time load and the app imports in `hypershell/__init__.py` (PLAN § 2.4).
+- [x] R10: API defaults from configuration read the checked values; `docs/api/*.rst` name the ranges.
+- [x] Docs: `config_param_ref.rst` gives each numeric key's range and advisory limit (a `Range:`
+      sentence after the forms sentence, its marker in the entry's `.. only:: html` group);
+      `config_intro.rst` (and `config_intro_alt.rst`) say a variable is held to its key's range and
+      drop "checked by the command that reads it"; `invariants.md` §10 and `AGENTS.md` § Configuration
+      updated for the load-time check (§10's `check_evict` sentence).
+- **Built (P3 notes):** the environment layer reads a whole number or number through its entry's kind
+  (`Range.read`), so a variable's kind error has the one form at once; its range is checked with every other key
+  by `check_settings`, which shows a refused variable's text as given and gives an advisory the value as the layer
+  holds it. A configuration refusal names its source last and lists no forms (the option and tag refusals still
+  do). Under `hs config` the load check neither refuses a file's value (it gives way to the default) nor warns.
+  `SettingRefused` (a `ConfigurationError`) prints its line as written; `reading(stage)` and `ReadingMixin` are the
+  backstop. The relay's in-place reads (`relay_bounds`, `zone_settings`, `site_period`) go through the entries;
+  `zone_bounds`, a relations helper with explicit arguments, keeps its own type check. `config_seconds` holds a
+  key to its entry's range. Tests amended where the GOAL changed what they pin: `test_env_duration.py`'s reader
+  cases sit inside `server.evict`'s range and its refusal names `expected a duration`; the relay's zone message.
+  One P1 setup fixed: `test_file_value_refused` unsets the fixture's `HYPERSHELL_SERVER_PORT`, so the file's port
+  decides.
+- **Verify:** the frontmatter `verify:` (configuration, `hs config set`, backstop and advisory suites;
+  the touched suites; docs tests but the agent docs; guards; `no_bypass.sh` clean; `bounds_drive.sh`
+  `options`, `config`, `set`, `advise`).
+- **Touches:** `src/hypershell/core/config.py`, `core/config_schema.py`, `core/exceptions.py`,
+  `core/tls.py`, `core/logging.py`, `config.py`, `server.py`, `cluster/__init__.py`,
+  `cluster/remote.py`, `relay/__init__.py`, `__init__.py`, `docs/`, `AGENTS.md`,
+  `.agents/factory/invariants.md`, `tests/`.
+
+## Phase P4 — Resource tags, the agent docs and the whole suite
+**Satisfies:** R9, R11, R12, R13 (tags) · **Depends on:** P3
+**Goal:** `cores`, `memory` and `timeout` tags are read by their `task.*` entries and refused as #118
+refuses a group; one advisory summary per submission; every doc names the table; the whole suite,
+the red list and the docs build pass.
+
+- [x] `data/model.py`: `TaskInputError` base of `TaskGroupError` and a new `TaskResourceError`;
+      `ensure_resources(tags, texts)` beside `ensure_group`, called from `split_argline`, `check_tags`
+      and the JSON record check (`validate_json_records`, alias `validate_json_groups` kept).
+- [x] `submit.py`: the four group-error catches widen to `TaskInputError`; the whole-input scan and
+      the stream `Loader` count advisory tags and log one summary per submission.
+- [x] PostgreSQL: the largest `cores`, `memory`, `timeout` and `attempt` stored (the P1 test).
+- [x] Docs: the task-input page (`docs/_include/submit_desc.rst` and the task tags page) gives the
+      resource tags' ranges, advisory limit and refusal; `AGENTS.md` § Configuration names the table and
+      the advisory tier; `invariants.md` §3 names `TaskInputError` and the resource check; the review
+      rubric's "Absurd input is not a finding" drops "before `bounded-inputs` lands" and points at
+      `SETTINGS`.
+- [x] The whole suite serially (bounded 7,200 s), the red list passing, the guards, `no_bypass.sh`,
+      every `bounds_drive.sh` mode, and the docs build (html and man, `-W`, sandbox off).
+- [x] A `RELEASE-NOTE.md` draft naming the six user-visible changes, the R1 range changes and the
+      `_eval`-once note, for `hs-publish`'s squash body.
+- **Built (P4 notes):** `ensure_resources` reads a tag's text as written (a line, `-t`) as the option
+  reads it, and a JSON value as a file's value; it runs in `split_argline` before the tag character checks, so a
+  resource tag after a bare tag is read too. The advisory summary is `TagAdvice` (`submit.py`): the whole-input
+  scan and the JSON record check log it, and a stream's `Loader` logs it when its input ends; each setting at
+  most once per process, so a source scanned twice still gives one. `Task.new`'s own `memory`/`timeout` reads
+  name their `task.*` key. There is no separate task tags page: `submit_desc.rst` carries the ranges. A test
+  amended where the GOAL changed what it pins: a `timeout` tag after a bare tag is read by its entry
+  (`test_timeout_tag_refused`). The whole suite found more such pins, amended the same way: a variable's bad
+  duration exits 3 at load for every command, in the one form (`test_seconds_key_refused`,
+  `test_relay_refuses_bad_period`, `test_client_bundlewait_refused`); a period set after load is a configuration
+  refusal (`test_relay_site_period_refused`); a zone table's size refusal is the one form and its text `'2'` reads
+  as 2 (`test_zone_table_size_must_be_a_whole_number_of_at_least_one`); the never-ran retry case asks for
+  `cores:32767`, inside the range (`test_cluster_does_not_retry_never_ran`). The key-option sweep allows
+  `TEXT_OPTIONS`'s line in `tests/test_bounded_table.py`. Develop had not moved (`d132d45c`), so no merge.
+- **Verify:** the frontmatter `verify:`.
+- **Touches:** `src/hypershell/data/model.py`, `submit.py`, `cluster/__init__.py`, `docs/`,
+  `AGENTS.md`, `.agents/factory/invariants.md`, `.agents/factory/review-rubric.md`,
+  `spec/bounded-inputs/RELEASE-NOTE.md`, `tests/`.
+
+## Review-cycle-1 remediation
+
+REVIEW.md F1–F8, cycle 1 → 2. **The maintainer signed off on this remediation on 2026-11-24**,
+which covers the human gate for `server.py` (F7) and the tag path (`data/model.py`, F2, F8).
+
+- [x] F1: `docs/_include/config_set_desc.rst` says `hs config set` refuses a value outside its key's
+      range (exit 2, nothing written), refuses an untyped integer outside 64 bits, and writes a
+      value past an advisory limit with a warning; "checked by the command that reads it" is gone;
+      a `versionchanged:: 2.9.0` in `docs/cli/config_set.rst`. `hs config set --help` never carried
+      the sentence, so no help text changed. Test: `test_config_set_page_names_ranges`.
+- [x] F2: `-t` resource tags on `hs run` and the one-task submit go through `read_tag_options`
+      (`submit.py`, shared with `hs submit`'s `check_tags`): exit 2 naming the `task.*` entry,
+      before the database is opened; `Task.new` stays unchecked (C3). `hs cluster` and `hs server`
+      take no `-t`; the `-t` of `hs list` and `hs update` are filters. Tests on SQLite and
+      PostgreSQL (`test_single_task_tag_option_refused`, `test_single_task_tag_option_stored`).
+- [x] F3: `--delay-start=-10m` in `tests/test_bounded_options.py`; no other new test passes a
+      negative value as its own token that 3.11's negative-number pattern does not take.
+- [x] F4: `check_settings` treats a file's `_env`/`_eval` that cannot resolve as a refused file
+      value under the `hs config` exemption; a variable's still stops it, and other commands exit 3.
+      Tests: `test_config_command_runs_with_unresolved_file` (get, which, edit, set),
+      `test_config_command_stops_on_unresolved_variable`.
+- [x] F5: `advise_one_task` gives a single task from arguments (`hs submit -- ARGS` in either
+      mode, `hs run`, the one-task submit) the one summary, for its `-t` and inline tags, naming
+      the command line. Test: `test_one_task_tags_advised`.
+- [x] F6: `issues/api-argument-ranges.md` no longer lists `evict_after=10**30` (bounded by the
+      plan-gate ruling) or `num_threads=0` (in range); its other examples were checked on the
+      branch (`bundlesize=0`, `max_retries=100000` are taken as given).
+- [x] F7: `HeartMonitor` asks finiteness of a float only, so `10**400` raises the evict entry's
+      `RuntimeError`. Test: `test_heartmonitor_evict_refused`. The API pages name `evict_after` as
+      the explicit argument held to its range.
+- [x] F8 (**maintainer ruling, 2026-11-24: accept a whole decimal**): `ensure_resources` reads a
+      whole-number tag written with a zero fraction (`cores:4.0`, `4.00`) as that integer, from an
+      inline tag, `-t`, stdin, a file, a stream or a JSON string, as develop and a JSON `4.0` do;
+      `cores:4.5` is refused and the refusal shows the text as written. `timeout` keeps rounding a
+      fraction of a second up (`timeout:90.5` is 91), documented beside the tag ranges in
+      `submit_desc.rst`. Scope: the tag path only. On develop `-c 4.0` was refused (`type=int`) and a
+      variable's `4.0` was refused (`INT_FORM`), and a TOML `4.0` is already read as 4, so options and
+      configuration keys keep R2 unchanged. Tests: `test_whole_decimal_tags_stored`,
+      `test_whole_decimal_option_refused`.
+- [x] Release note: checked for `-N 0` or `-N`'s floor listed as newly refused; it is not (the
+      note says `-N` keeps 0). F2, F4, F5 and F8 added where they change what a user sees.
+- **Gate (2026-11-24):** the cycle's targeted files on 3.14 with PostgreSQL, 2,500 passed;
+  `tests/test_bounded_*.py` and the touched suites on 3.11 with PostgreSQL, 1,603 passed, 2 skipped;
+  P4's `verify:` as written (the whole suite with `HS_TEST_POSTGRES` unset, as the line has it:
+  5,527 passed, 265 skipped; the tag and group files with PostgreSQL, the red list, the guards,
+  `no_bypass.sh`, every `bounds_drive.sh` mode), all green. The docs build ran with the docs venv's
+  `sphinx-build` (html and man, `-W`) in place of the line's `uv run --python 3.12 --group docs`,
+  which would rebuild the shared venv; both passed.
+
+## Review-cycle-2 remediation
+
+REVIEW.md N1, N2, cycle 2 → 3 (the last the bound allows). **Human gate: pending maintainer
+sign-off** (N1 touches `data/model.py` again; the 2026-11-24 sign-off covered cycle 1 only).
+
+- [x] N1: a `--from-json` record's resource tags are read by their entries again where the record
+      becomes a task: `json_record_tags` (the Loader and the fingerprints, so `hs submit` and
+      `hs cluster --from-json` alike) applies `read_resources`, which reads as `ensure_resources`
+      does and never refuses (the command line refused a bad value in `validate_json_records`; a
+      record given to the Python API is taken as given, C3). `"cores": "4.0"` stores 4 on
+      PostgreSQL instead of hanging. **Deviation from the brief's "write back into the record":**
+      the record itself is not rewritten, because a template expands the record's fields, and a
+      rewritten record would expand `{memory}` of `"2G"` as `2147483648` and `{timeout}` of `"1h"`
+      as `3600`, unlike develop. `group` needs no write-back: a JSON group must be a JSON integer.
+- [x] N2: `_read_resource` gives a duration whole seconds (a fraction rounded up, as `-W`) and a
+      size whole bytes (rounded down, as `-m`), for a JSON number too: `"timeout": 90.5` stores 91,
+      `"memory": 1.5` stores 1. `submit_desc.rst` says so for `--from-json`; marker and release note
+      amended.
+- [x] A JSON number 4.5 for `cores` stays refused (since P4); develop stored 4.5 on SQLite.
+- [x] Tests on SQLite and PostgreSQL, every command bounded: `test_json_values_stored_whole`,
+      `test_cluster_json_values_stored_whole` (string and number forms of `cores`, `timeout`,
+      `memory`, stored as integers; a template expanding as written), and
+      `test_json_value_refused_on_every_backend`. On the previous HEAD the stored cases hang on
+      PostgreSQL and store decimals on SQLite.
+- **Gate (2026-11-24):** `tests/test_bounded_*.py` with `test_submit`, `test_group_integer`,
+  `test_group_stream`, `test_memory_column`, `test_size_duration`, with PostgreSQL: 1,389 passed on
+  3.14 and 1,389 on 3.11. P4's `verify:` as written (whole suite with `HS_TEST_POSTGRES` unset as the
+  line has it: 5,538 passed, 276 skipped; the tag and group files with PostgreSQL 485 passed; red
+  list 53; guards 427; `no_bypass.sh` clean; every `bounds_drive.sh` mode ok), with the same docs
+  substitution as cycle 1 (the docs venv's `sphinx-build`, html and man, `-W`): all green.
+
+---
+
+## How `hs-build` drives this
+
+1. `next_phase.py` prints the next actionable phase (statuses are authoritative).
+2. Pre-flight: clean tree, on `fix/bounded-inputs`, develop reachable.
+3. Execute every `[ ]` in the phase (consult `PLAN.md` / `research/` for detail).
+4. Run the phase's `verify:` — never advance on a checkbox alone.
+5. Amend this file freely if reality diverges (through `set_phase.py`; note it in the commit body).
+   STOP and escalate only on a `GOAL.md` contradiction. If P2 or P3 overruns, the fallback is C4's
+   split (R9 and R10 to a follow-up), ruled at that phase's gate, never a fifth phase.
+6. Mark the phase `done`, advance `current_phase`, `--touch`; one signed `[fix]` commit; stop.

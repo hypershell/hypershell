@@ -54,8 +54,9 @@ gracefully. Report it only when:
 - the declared range itself is wrong for real use.
 
 Otherwise list it at most as a one-line note in `REVIEW.md`, never as a finding. It never loops a
-cycle or triggers the human gate. Where no central range exists yet (before `bounded-inputs`
-lands), note the case for that seed and move on (2026-11-22, maintainer).
+cycle or triggers the human gate. The ranges are the table `SETTINGS` in `core/config_schema.py`,
+with the advisory limits past which a value runs with a warning; a new numeric setting needs its
+entry there (2026-11-22, maintainer).
 
 ## Reviewer conduct (the subagent)
 

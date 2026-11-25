@@ -1,5 +1,5 @@
 ---
-status: unshaped
+status: adopted:bounded-inputs
 kind: fix
 appetite: small
 target: 2.9.x

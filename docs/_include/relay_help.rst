@@ -9,6 +9,8 @@ Options
 ``-p``, ``--upstream-port`` *NUM*
     Port number of the upstream *server* (default: 50001).
 
+    Range: 1 to 65,535.
+
     See also ``relay.upstream.port``.
 
 ``--no-tls``
@@ -27,6 +29,8 @@ Options
 
 ``-N``, ``--size`` *NUM*
     Number of *clients* the relay keeps launched at its site (default: 1).
+
+    Range: 1 to 2,147,483,647.
 
     A *client* that exits is launched again. The size must be at least 1: with no *client* at the
     site the relay would never ask upstream for work. Against an upstream *server* autoscaling with
@@ -84,6 +88,8 @@ Options
 
 ``--port`` *NUM*
     Port of the relay-local *server* (default: 50002).
+
+    Range: 1 to 65,535.
 
     The default differs from the *server* default (50001), so a relay can run beside a
     *server* on the same host. See also ``relay.port``.

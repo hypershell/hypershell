@@ -22,6 +22,14 @@ passed by the caller, and configuration does not override the defaults below.
    :pr:`119`: a ``max_retries`` not given follows ``server.attempts`` (none with the built-in
    default).
 
+.. versionchanged:: 2.9.0
+   Importing :mod:`hypershell` loads the configuration and holds each numeric key to its range
+   (see the :ref:`parameter reference <config_params>`), so the settings read here are inside it.
+   A value passed as an explicit argument is used as given: the ranges apply to the configuration
+   and the command line, not to explicit arguments, except ``evict_after``, which is held to
+   ``server.evict``'s range (10 s to 2,147,483,647 s) and raises ``RuntimeError`` outside it, however
+   wide the number.
+
 |
 
 .. warning::

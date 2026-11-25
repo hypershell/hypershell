@@ -53,7 +53,6 @@ import functools
 import threading
 from enum import Enum
 from datetime import datetime
-from argparse import ArgumentTypeError
 from dataclasses import dataclass
 from queue import Queue, Empty as QueueEmpty, Full as QueueFull
 from multiprocessing import AuthenticationError
@@ -73,19 +72,23 @@ from hypershell.core.queue import (QueueClient, QueueConfig, QueueSubmitRefused,
                                   DEFAULT_LOCAL_TIMEOUT, DEFAULT_REMOTE_TIMEOUT)
 from hypershell.core.thread import Thread, join_waking
 from hypershell.core.template import Template, DEFAULT_TEMPLATE
-from hypershell.core.types import JSONData, parse_bytes, parse_time
+from hypershell.core.types import JSONData, ranged
+from hypershell.core.config_schema import SETTINGS, figure
 from hypershell.core.pretty_print import format_tag
 from hypershell.core.tag import Tag
 from hypershell.core.exceptions import (handle_exception, handle_disconnect,
-                                        handle_address_unknown, HostAddressInfo, get_shared_exception_mapping)
+                                        handle_address_unknown, HostAddressInfo, get_shared_exception_mapping,
+                                        ReadingMixin, reading)
 from hypershell.data.model import (Task, Source, Zone, DIRECT_SOURCE_ID, STDIN_SOURCE_ID, DEFAULT_TASK_GROUP,
-                                   TaskGroupInfo, TaskGroupError, ensure_group, parse_group, tag_text,
+                                   TaskGroupInfo, TaskGroupError, TaskInputError, ensure_group, ensure_resources, read_resources,
+                                   RESOURCE_SETTINGS, tag_text,
                                    serialize_tasks, zone_name)
 from hypershell.data import initdb, checkdb, DATABASE_DIALECT, DATABASE_ENABLED
 
 # Public interface
 __all__ = ['submit_from', 'submit_file', 'load_json_tasks', 'load_json_source', 'json_source_key',
-           'validate_json_expansion', 'validate_json_groups',
+           'validate_json_expansion', 'validate_json_groups', 'validate_json_records', 'TagAdvice',
+           'read_tag_options', 'advise_one_task',
            'GatedSource', 'InputScan', 'scan_task_lines', 'read_in_full', 'source_fingerprint', 'is_file_input',
            'source_name',
            'source_fingerprint_and_count', 'apply_source_gate', 'decide_source_gate', 'GateDecision',
@@ -198,25 +201,76 @@ class InputScan:
     groups: List[Optional[int]]
 
 
+class TagAdvice:
+    """Tasks whose resource tags are past an advisory limit, counted for one summary per submission."""
+
+    logged: set = set()  # The settings this process has summarized
+
+    def __init__(self: TagAdvice) -> None:
+        """Start with no task counted."""
+        self.count: Dict[str, int] = {}
+        self.first: Dict[str, str] = {}
+
+    def note(self: TagAdvice, tags: Dict[str, JSONData], origin: str) -> None:
+        """Count the task whose `tags` came from `origin`, for each resource tag past its advisory limit."""
+        for name, setting in RESOURCE_SETTINGS.items():
+            if name in tags and SETTINGS[setting].advised(tags[name]):
+                self.count[setting] = self.count.get(setting, 0) + 1
+                self.first.setdefault(setting, origin)
+
+    def log(self: TagAdvice) -> None:
+        """One WARNING for each setting past its advisory limit: the count of tasks and the first one."""
+        for setting, count in self.count.items():
+            if setting in TagAdvice.logged:
+                continue
+            TagAdvice.logged.add(setting)
+            entry = SETTINGS[setting]
+            direction, limit, reason = entry.advise
+            tasks = '1 task' if count == 1 else f'{count:,} tasks'
+            log.warning(f'{setting}: {tasks} {direction} the advised {figure(limit)}{entry.unit} ({reason}), '
+                        f'the first at {self.first[setting]}; running anyway')
+
+
+def read_tag_options(taglist: Optional[List[str]]) -> Dict[str, JSONData]:
+    """The tags given by `-t` (`key:value` tokens), each resource tag read by its `task.*` entry.
+
+    A resource tag's text is read as written, as the option of that resource reads it. Raises
+    :class:`~hypershell.data.model.TaskInputError` naming the entry (``task.memory``), for the
+    command to refuse with exit status 2 before anything is written.
+    """
+    tags = {} if not taglist else Tag.parse_cmdline_list(taglist)
+    return ensure_resources(tags, {name: tag_text(taglist, name) for name in RESOURCE_SETTINGS if name in tags})
+
+
+def advise_one_task(args: str, tags: Optional[Dict[str, JSONData]] = None) -> None:
+    """One advisory summary for a single task given as arguments: its `-t` `tags` with its inline tags over them."""
+    advice = TagAdvice()
+    advice.note({**(tags or {}), **Task.split_argline(args)[1]}, 'the command line')
+    advice.log()
+
+
 def task_lines(lines: Iterable[str], *, template: str = DEFAULT_TEMPLATE,
                tags: Optional[Dict[str, JSONData]] = None,
-               name: str = '<input>') -> Iterator[Tuple[str, str, Dict[str, JSONData]]]:
+               name: str = '<input>', advice: Optional[TagAdvice] = None) -> Iterator[Tuple[str, str, Dict[str, JSONData]]]:
     """Replay the Loader's line rules over `lines`: each task's command, expanded command and tags.
 
     Lines are split as the Loader splits them (:func:`split_task_line`) and numbered from 1 as
     physical lines. A tag-only line updates a running copy of `tags`, and only after its group is
     accepted; a task's tags are the running tags with its inline tags over them. A group that is
-    not an integer raises :class:`~hypershell.data.model.TaskGroupError` naming the value as
-    written and ``{name}, line {n}``.
+    not an integer, or a resource tag out of its range, raises
+    :class:`~hypershell.data.model.TaskInputError` naming the value as written and ``{name}, line {n}``.
+    A task whose resource tags are past an advisory limit is counted in `advice`.
     """
     engine = Template(template)
     running = dict(tags or {})
     for number, line in enumerate(lines, start=1):
         try:
             command, args, inline_tags = split_task_line(line, engine)
-        except TaskGroupError as error:
+        except TaskInputError as error:
             raise error.at(f'{name}, line {number}') from error
         if args:
+            if advice is not None:
+                advice.note({**running, **inline_tags}, f'{name}, line {number}')
             yield command, args, {**running, **inline_tags}
         elif not command and inline_tags:
             running.update(inline_tags)
@@ -230,8 +284,10 @@ def scan_task_lines(lines: Iterable[str], *, template: str = DEFAULT_TEMPLATE,
     The Loader's own line rules (:func:`task_lines`) are replayed over `lines`; a task's group is
     its tags' group, else `group`. Nothing is read from or written to the database.
     """
+    advice = TagAdvice()
     groups = [task_tags.get('group', group)
-              for _, _, task_tags in task_lines(lines, template=template, tags=tags, name=name)]
+              for _, _, task_tags in task_lines(lines, template=template, tags=tags, name=name, advice=advice)]
+    advice.log()
     return InputScan(count=len(groups), groups=groups)
 
 
@@ -244,9 +300,15 @@ def task_fingerprints(lines: Iterable[str], *, template: str = DEFAULT_TEMPLATE,
 
 
 def json_record_tags(record: dict) -> Dict[str, JSONData]:
-    """The tags of a JSON task record: every key but ``args``, nested values serialized as JSON."""
-    return {key: (json.dumps(value, separators=(',', ':')) if isinstance(value, (dict, list)) else value)
-            for key, value in record.items() if key != 'args'}
+    """The tags of a JSON task record: every key but ``args``, nested values serialized as JSON.
+
+    The resource tags (``cores``, ``memory``, ``timeout``) are read by their entries, as
+    :func:`validate_json_records` checked them, so the task's columns hold whole numbers (``"4.0"``
+    is 4, a ``timeout`` of 90.5 is 91). The record itself is left as given: a template expands its
+    fields as written (``{memory}`` stays ``2G``).
+    """
+    return read_resources({key: (json.dumps(value, separators=(',', ':')) if isinstance(value, (dict, list)) else value)
+                           for key, value in record.items() if key != 'args'})
 
 
 def json_fingerprints(records: List[dict], *, group: Optional[int] = DEFAULT_TASK_GROUP,
@@ -514,6 +576,7 @@ class Loader(StateMachine):
         self.name = source_name(source)
         self.line = 0
         self.refuse_lines = not is_file_input(source)
+        self.advice = TagAdvice()
 
     @functools.cached_property
     def actions(self: Loader) -> Dict[LoaderState, Callable[[], LoaderState]]:
@@ -546,7 +609,7 @@ class Loader(StateMachine):
         self.line += 1
         try:
             return self.load_line_task(item)
-        except TaskGroupError as error:
+        except TaskInputError as error:
             if not self.refuse_lines:
                 raise error.at(f'{self.name}, line {self.line}') from error
             log.error(f'Refused line {self.line} of {self.name}: {error}')
@@ -561,6 +624,7 @@ class Loader(StateMachine):
         """
         command, args, inline_tags = split_task_line(line, self.template)
         if args:
+            self.advice.note({**self.tags, **inline_tags}, f'{self.name}, line {self.line}')
             self.task = Task.new(args=args, raw_args=command, parse_inline=False,
                                  source=self.source_id, zone=self.zone_id,
                                  cores=self.cores, memory=self.memory, timeout=self.timeout,
@@ -616,7 +680,12 @@ class Loader(StateMachine):
             return LoaderState.PUT
 
     def finalize(self: Loader) -> LoaderState:
-        """Log the de-dup tally (when active) and return HALT."""
+        """Log the de-dup tally (when active) and a stream's advisory summary, and return HALT.
+
+        Input read in full was summarized as it was checked, so only a stream's tags are summarized here.
+        """
+        if self.refuse_lines:
+            self.advice.log()
         if self.skip_fingerprints is not None:
             log.info(f'{self.present} tasks already present; submitting {self.count} new tasks')
         log.debug('Done (loader)')
@@ -1446,27 +1515,27 @@ def validate_json_expansion(records: List[dict], template: str = DEFAULT_TEMPLAT
                                 f'(provide an "args" field or a --template with fields)')
 
 
-def validate_json_groups(records: List[dict]) -> None:
-    """Fail-fast pre-flight: ensure the ``group`` of every record in `records` is a JSON integer in range.
+def validate_json_records(records: List[dict]) -> None:
+    """Fail-fast pre-flight: the ``group`` of every record in `records` is a JSON integer in range, and its
+    resource tags (``cores``, ``memory``, ``timeout``) are inside their ranges.
 
-    Raises :class:`~hypershell.data.model.TaskGroupError` naming the value and its record (numbered
+    Raises :class:`~hypershell.data.model.TaskInputError` naming the value and its record (numbered
     from 0, as :func:`validate_json_expansion` does) on the first refusal, before any task is
-    committed.
+    committed. Records past an advisory limit give one summary.
     """
+    advice = TagAdvice()
     for index, record in enumerate(records):
-        if 'group' in record:
-            try:
+        try:
+            if 'group' in record:
                 ensure_group(record['group'])
-            except TaskGroupError as error:
-                raise error.at(f'record {index}') from error
+            advice.note(ensure_resources({name: record[name] for name in RESOURCE_SETTINGS if name in record}),
+                        f'record {index}')
+        except TaskInputError as error:
+            raise error.at(f'record {index}') from error
+    advice.log()
 
 
-def group_option(text: str) -> int:
-    """The `-g/--group` option's type: a task group by :func:`~hypershell.data.model.parse_group` (else exit 2)."""
-    try:
-        return parse_group(text)
-    except TaskGroupError as error:
-        raise ArgumentTypeError(str(error)) from error
+validate_json_groups = validate_json_records  # The name callers knew it by
 
 
 def refuse_below_reached_group(groups: List[Optional[int]], reached: Optional[int], *,
@@ -1562,7 +1631,7 @@ Options:
 """
 
 
-class SubmitApp(Application):
+class SubmitApp(ReadingMixin, Application):
     """Submit tasks to the database."""
 
     name = APP_NAME
@@ -1583,24 +1652,24 @@ class SubmitApp(Application):
     interface.add_argument('--from-json', default=from_json, dest='from_json')
 
     bundlesize: int = config.submit.bundlesize
-    interface.add_argument('-b', '--bundlesize', type=int, default=bundlesize)
+    ranged(interface, '-b', '--bundlesize', setting='submit.bundlesize', default=bundlesize)
 
     bundlewait: int = config.submit.bundlewait
-    interface.add_argument('-w', '--bundlewait', type=parse_time, default=bundlewait)
+    ranged(interface, '-w', '--bundlewait', setting='submit.bundlewait', default=bundlewait)
 
     template: str = DEFAULT_TEMPLATE
     interface.add_argument('--template', default=template)
 
     cores: Optional[int] = config.task.cores or None
     memory: Optional[int] = config.task.memory or None
-    interface.add_argument('-c', '--cores', type=int, default=cores)
-    interface.add_argument('-m', '--memory', type=parse_bytes, default=memory)
+    ranged(interface, '-c', '--cores', setting='task.cores', default=cores)
+    ranged(interface, '-m', '--memory', setting='task.memory', default=memory)
 
     timeout: Optional[int] = config.task.timeout or None
-    interface.add_argument('-W', '--timeout', type=parse_time, default=timeout)
+    ranged(interface, '-W', '--timeout', setting='task.timeout', default=timeout)
 
     group: Optional[int] = None
-    interface.add_argument('-g', '--group', type=group_option, default=group)
+    ranged(interface, '-g', '--group', setting='option.group', default=group)
 
     repeat_mode: bool = False
     interface.add_argument('--repeat', action='store_true', dest='repeat_mode')
@@ -1618,7 +1687,7 @@ class SubmitApp(Application):
     queue_auth: Optional[str] = None  # The key is resolve_auth('server') (see run)
     interface.add_argument('-q', '--queue', action='store_true', dest='queue_mode')
     interface.add_argument('-H', '--host', default=queue_server, dest='queue_server')
-    interface.add_argument('-p', '--port', type=int, default=queue_port, dest='queue_port')
+    ranged(interface, '-p', '--port', setting='server.port', default=queue_port, dest='queue_port')
     refuse_key_option(interface, advice=SUBMIT_KEY_ADVICE)
 
     tls: Optional[TLSConfig] = None
@@ -1670,8 +1739,9 @@ class SubmitApp(Application):
         group against the database's reached group (exit 2); only then the zone, the source and
         the tasks.
         """
-        self.check_arguments()
-        self.check_tags()
+        with reading('configuration'):
+            self.check_arguments()
+            self.check_tags()
         self.check_source()
         self.queue = None
         if self.queue_mode:
@@ -1765,9 +1835,11 @@ class SubmitApp(Application):
             submit_from([args, ], queue_config=self.queue,
                         cores=self.cores, memory=self.memory, timeout=self.timeout, group=self.group,
                         tags=self.tags)
+            advise_one_task(args, self.tags)
         else:
             task = Task.new(args=args, cores=self.cores, memory=self.memory, timeout=self.timeout,
                             group=self.group, tag=self.tags, source=self.source_id, zone=self.zone_id)
+            advise_one_task(args, self.tags)
             Task.add(task)
             log.info(f'Submitted task ({task.id})')
 
@@ -1787,12 +1859,12 @@ class SubmitApp(Application):
         Tags are checked in both modes, but only a submission to the database applies them: queue
         mode leaves them unset, as it always has.
         """
-        tags = {} if not self.taglist else Tag.parse_cmdline_list(self.taglist)
         try:
+            tags = read_tag_options(self.taglist)
             Task.ensure_valid_tag(tags)
             if 'group' in tags:
                 tags['group'] = ensure_group(tags['group'], text=tag_text(self.taglist, 'group'))
-        except (ValueError, TypeError, TaskGroupError) as error:
+        except (ValueError, TypeError, TaskInputError) as error:
             raise ArgumentError(str(error)) from error
         if not self.queue_mode:
             self.tags = tags
@@ -1804,7 +1876,7 @@ class SubmitApp(Application):
                 raise ArgumentError('Cannot combine --from-json with -f/--task-file or positional arguments')
             records, self.json_fingerprint = load_json_source(self.from_json)
             validate_json_expansion(records, self.template)
-            validate_json_groups(records)
+            validate_json_records(records)
             log.debug(f'Loaded {len(records)} tasks from JSON ({self.from_json})')
             self.source = records
             return
@@ -1868,7 +1940,7 @@ class SubmitApp(Application):
         if self.source is None:
             try:
                 Task.split_argline(self.direct_args)
-            except TaskGroupError as error:
+            except TaskInputError as error:
                 raise error.at('arguments') from error
             return
         if isinstance(self.source, list):

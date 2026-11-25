@@ -26,7 +26,7 @@ from sqlalchemy.engine import create_engine
 from hypershell.core.logging import Logger
 from hypershell.core.config import config
 from hypershell.core.exceptions import (handle_exception, display_critical, DatabaseUninitialized,
-                                        get_shared_exception_mapping)
+                                        get_shared_exception_mapping, ReadingMixin)
 from hypershell.core.pretty_print import format_bytes
 from hypershell.data.core import Session, engine, in_memory, schema, providers, TIMESCALE_ALIASES, timescale_config
 from hypershell.data.model import Entity, Task
@@ -237,7 +237,7 @@ Options:
 """
 
 
-class InitDBApp(Application):
+class InitDBApp(ReadingMixin, Application):
     """Initialize or upgrade database (automatic for SQLite/Turso)."""
 
     interface = Interface(INITDB_PROGRAM, INITDB_USAGE, INITDB_HELP)

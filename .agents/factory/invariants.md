@@ -118,7 +118,17 @@ subsystems.
   before any input is read), a `--from-json` `group` key. Anything else raises `TaskGroupError`
   (exit 5) naming the value and its line or record. `hs update group=VALUE` and
   `hs update ID group VALUE` take it by `parse_group` (exit 2, before counting or writing).
-  `Task.new(group=…)` stays unchecked (queue mode
+  The resource tags `cores`, `memory` and
+  `timeout` follow the same paths (`ensure_resources`, by the `task.*` entries of `SETTINGS`, the
+  text as written; a whole-number tag with a zero fraction, `cores:4.0`, reads as 4; a duration
+  rounds up to whole seconds and a size down to whole bytes, a JSON number too), raising
+  `TaskResourceError`; both are a `TaskInputError`, which every catch site catches. `-t` on
+  `hs submit`, `hs run` and the one-task submit reads its tags by `read_tag_options` (exit 2, before
+  the database is opened). Tags past an advisory limit give one summary per submission, a single
+  task from arguments included (`advise_one_task`). A JSON record is checked whole
+  (`validate_json_records`) and its resource tags are read again as it becomes a task
+  (`json_record_tags` → `read_resources`, which never refuses), so a column never receives text; the
+  record itself is not rewritten, so a template expands its fields as written. `Task.new(group=…)` stays unchecked (queue mode
   passes None), and a retry (`Task.new_retry`) copies the stored group, a legacy text group too. Read-in-full input (a named file to `hs submit`,
   `hs cluster` or `hs server`, `--from-json`, arguments, and `hs submit` stdin with a database) is
   scanned whole (`scan_task_lines`) before any write, with or without a database; a stream's
@@ -235,6 +245,15 @@ subsystems.
 
 - `config` is built **once at import** — an effectively immutable per-process singleton. `hs config
   set` writes disk but does **not** mutate the live singleton (needs restart).
+- **Every numeric key is checked at load** (`check_settings`, inside the import-time `try`, before
+  `check_auth_forms` and the relay swap): each key a file or the environment gives, `_env`/`_eval`
+  resolved **once** there, is read by its `SETTINGS` entry (`core/config_schema.py`) and written
+  back into the layer that gave it (numbers as numbers, durations and sizes as given), so every
+  later read, class bodies and API defaults included, sees a checked value. A refusal is one line
+  (`SettingRefused`, no class prefix), exit 3, naming the key, range, value and source. Under
+  `hs config` (`CONFIG_COMMAND`) a file's refused value, or a file's `_env`/`_eval` that cannot
+  resolve, gives way to its default so the file can be repaired; `hs config get`/`which` read `unchecked_config`. A new numeric key needs its `SETTINGS`
+  entry (`tests/test_bounded_table.py`).
 - Sentinels: `'<auto>'` (materialize), `'<none>'` (unset). The `X or None` idiom means **`0` =
   unlimited/auto** for many numeric knobs.
 - `data/core.py` creates engine + `Session` at import and can `sys.exit(3)` on bad config; SQLite
@@ -251,10 +270,12 @@ subsystems.
   `EMPTY_UNSET` is not given.
 - `hs config set` reads its value by the same rule (`match_path`, the dotted path matched as
   written, then `read_value`): a value that does not convert exits 2 before `update()`, and nothing
-  is written; `update()` reads and writes the file as UTF-8 whatever the locale. `server.eager` and
-  `server.evict` are read at each command's start check
-  (`configured_eager`, `check_evict`), never at import. `server.attempts` is read when a Python API
-  entry point is built without `max_retries` (`configured_retries()`).
+  is written; `update()` reads and writes the file as UTF-8 whatever the locale. A numeric key's
+  value goes through its `SETTINGS` entry (range and kind) and any other key's integer must fit 64
+  bits, exit 2 otherwise. `server.eager` is read at each command's start check (`configured_eager`);
+  `server.evict` is checked at load like every numeric key and read by `config_seconds`.
+  `server.attempts` is read when a Python API entry point is built without `max_retries`
+  (`configured_retries()`), already checked.
 - **Relay process:** `core/config.py` replaces the whole `[database]` section with the relay's private
   SQLite file at import (`RELAY_PROCESS`), so one relay runs per process and a late start re-executes,
   handing the new process its own program in `_HYPERSHELL_RELAY_PROGRAM` (beside
