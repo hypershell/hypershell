@@ -813,7 +813,9 @@ stores naive local times), who sweeps, and reaching tasks already running or hel
 `SecureManager.start` still serves the queue from a forked child, though every command serves
 in-process through `QueueServer`. Only one test uses it, but it keeps a second server path in the
 decref and handshake logic. `SecureManager` is public, so retiring the method is a 2.10.0 interface
-change. Deferred by `queue-wire-codec`, which gives the path the new codec unchanged.
+change. Deferred by `queue-wire-codec`, which gives the path the new codec unchanged. Also in scope:
+`SecureManager` used directly as a client should build its proxies only from the methods its caller
+registers, as HyperShell's own client has since #123.
 
 *Target: 2.10.0 · Horizon: after 2.9.0, small · Depends on: — (`queue-wire-codec` landed, #123) · Refs:
 `src/hypershell/core/queue.py` (`SecureManager.start`, `_child_bootstrap`)*
