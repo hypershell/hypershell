@@ -3,7 +3,7 @@ slug: update-typed-columns
 title: hs update reads every column it writes by the column's kind
 kind: fix
 appetite: big
-status: in_review
+status: blocked
 branch: fix/update-typed-columns
 base: develop
 current_phase: done
@@ -230,10 +230,10 @@ phases:
     900 uv run --python 3.12 --group docs sphinx-build -W --keep-going -q -E -b html
     docs "${TMPDIR:-/tmp}/docs-html-utc"'
 review:
-  last_reviewed_commit: ''
-  verdict: none
-  blocked_reason: ''
-  cycle: 0
+  last_reviewed_commit: 2abf860d
+  verdict: changes-requested
+  blocked_reason: 'review cycle 1: F1, a calendar-edge ISO date exits 5 (R9/R6)'
+  cycle: 1
 ---
 # TECH.md — `hs update` reads every column it writes by the column's kind
 
