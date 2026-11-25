@@ -70,9 +70,9 @@ Tasks past the advisory limit run as before; one warning for the whole submissio
 count and the first such line (or record, or the command line for one task given as arguments).
 
 .. versionchanged:: 2.9.0
-   A resource tag outside its range, or not of its kind, is refused as a group that is not an
-   integer is; before, it was stored as given, or stopped the submission while it was written.
-   ``hs run -t`` refuses one the same way. A ``cores`` tag of ``4.0`` is still read as 4. A
+   :pr:`125`: a resource tag outside its range, or not of its kind, is refused as a group that is
+   not an integer is; before, it was stored as given, or stopped the submission while it was
+   written. ``hs run -t`` refuses one the same way. A ``cores`` tag of ``4.0`` is still read as 4. A
    ``--from-json`` record's resource value is stored as a whole number: before, a decimal
    ``timeout`` or ``memory`` number was stored as given.
 

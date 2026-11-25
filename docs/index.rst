@@ -58,12 +58,14 @@ Design elements include but are not limited to:
       sites. With ``--autoscaling``, ``hs cluster`` scales each zone on its own, and ``hs server``
       spreads clients across relay sites within the bounds each relay sets.
     * **TimescaleDB and in-place upgrades:** a TimescaleDB provider with compression, and the first
-      2.9 process upgrades a 2.8 database in place.
-    * **Task files:** submit tasks from JSON, submit the same file again safely, and pin each task
-      to its own core or GPU. A ``#`` inside a command now stays in it, and a task group must be a
-      whole number.
+      2.9 process upgrades a 2.8 database in place. On PostgreSQL a task can now ask for more than
+      2 GB of memory.
+    * **Task files and checked values:** submit tasks from JSON, submit the same file again safely,
+      and pin each task to its own core or GPU. Every numeric option and setting has a range,
+      checked before a command starts, and ``hs update`` reads each value by its column's kind.
     * **Installing 2.9:** it is a pre-release, so use ``pip install --pre hypershell``. Upgrade the
-      server and every client together, and back up the database first.
+      server and every client together, and back up the database first: 2.9.0a10 cannot connect to
+      2.9.0a9 or earlier.
     * **2.8.1 to 2.8.7:** fixes for cancelled tasks, retries, and stranded task groups, and the run
       key kept off command lines. If you run 2.8, upgrade to 2.8.7.
 

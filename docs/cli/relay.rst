@@ -29,9 +29,9 @@ Description
 |
 
 .. versionchanged:: 2.9.0
-   Each numeric option has a range, given with the option below. A value outside it, or one that is
-   not a number of the option's kind, stops the command before it starts, with one line naming the
-   option, the range and the value (exit status 2).
+   :pr:`125`: each numeric option has a range, given with the option below. A value outside it, or
+   one that is not a number of the option's kind, stops the command before it starts, with one line
+   naming the option, the range and the value (exit status 2).
 
 .. include:: ../_include/relay_help.rst
 
@@ -39,7 +39,7 @@ Description
    ``--advertise`` (:pr:`116`).
 
 .. versionadded:: 2.9.0
-   ``--remote-exe``: site clients are launched as the relay's own ``hs``, not the legacy
+   ``--remote-exe`` (:pr:`121`): site clients are launched as the relay's own ``hs``, not the legacy
    ``hyper-shell``.
 
 

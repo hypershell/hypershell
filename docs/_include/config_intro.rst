@@ -90,8 +90,8 @@ file can be shown and edited; such a variable still stops it.
 .. only:: html
 
     .. versionchanged:: 2.9.0
-       A numeric key's ``_env`` or ``_eval`` form is resolved as the configuration loads; ``hs config``
-       runs on a file whose form cannot resolve.
+       :pr:`125`: a numeric key's ``_env`` or ``_eval`` form is resolved as the configuration loads;
+       ``hs config`` runs on a file whose form cannot resolve.
 
 The `edit` command makes it easy to open the correct configuration file path for your platform
 using the default editor. Set the ``EDITOR`` environment variable (or ``VISUAL`` on `Windows`).
@@ -213,6 +213,6 @@ hold (e.g., a zone ``gpu-a100``).
        not given.
 
     .. versionchanged:: 2.9.0
-       A variable's numeric value is held to its key's range when the configuration loads, for
-       every command; before, a duration or a size was checked by the command that read it, and
-       most numbers not at all. A numeric key's ``_EVAL`` command runs once per process.
+       :pr:`125`: a variable's numeric value is held to its key's range when the configuration
+       loads, for every command; before, a duration or a size was checked by the command that read
+       it, and most numbers not at all. A numeric key's ``_EVAL`` command runs once per process.

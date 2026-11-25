@@ -21,7 +21,7 @@ Description
    ``--zone`` (:pr:`78`).
 
 .. versionchanged:: 2.9.0
-   A resource tag given with ``-t``/``--tag`` outside its range is refused (exit status 2) before
-   anything is written.
+   :pr:`125`: a resource tag given with ``-t``/``--tag`` outside its range is refused (exit status
+   2) before anything is written.
 
 .. include:: ../_include/task_submit_help.rst

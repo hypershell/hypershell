@@ -429,17 +429,16 @@ Understanding these properties matters most for deployments on untrusted network
    verification enabled, and treat every host that holds the key as inside the trust boundary.
 
    .. versionchanged:: 2.9.0
-      The queue's messages are encoded as a closed vocabulary of plain values, no longer pickled.
-      A server or client of 2.9.0a10 or later cannot connect to one of 2.9.0a9 or earlier, in
-      either direction: a newer server logs one warning naming the older peer, which exits at once
-      with a message naming the version mismatch; a newer client, relay or ``hs submit`` exits at
-      once with one error naming the older server's framing. Run matching versions on every host.
+      :pr:`123`: the queue's messages are encoded as a closed vocabulary of plain values, no longer
+      pickled. A server or client of 2.9.0a10 or later cannot connect to one of 2.9.0a9 or earlier,
+      in either direction: a newer server logs one warning naming the older peer, which exits at
+      once with a message naming the version mismatch; a newer client, relay or ``hs submit`` exits
+      at once with one error naming the older server's framing. Run matching versions on every host.
       A client builds its proxies from its own method lists and stops with a version error at a
-      server that offers any other method.
-      :class:`hypershell.core.queue.SecureManager` accepts only its own two serializers. The
-      client-side refusals above belong to HyperShell's own queue client: code that uses
-      ``SecureManager`` directly as a client should register each type with an explicit proxy type
-      and list of methods.
+      server that offers any other method. :class:`hypershell.core.queue.SecureManager` accepts only
+      its own two serializers. The client-side refusals above belong to HyperShell's own queue
+      client: code that uses ``SecureManager`` directly as a client should register each type with
+      an explicit proxy type and list of methods.
 
 3. **Self-signed by default; single-leaf trust.** The auto-generated certificate is
    self-signed (not chained to a public CA), valid for ten years, and has no revocation path;

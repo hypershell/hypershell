@@ -96,9 +96,10 @@
             .. only:: html
 
                 .. versionchanged:: 2.9.0
-                   The range is checked when the configuration loads, for every command: a value
-                   outside it, or not a number of the key's kind, stops the command before it starts
-                   (exit status 3), naming the key, the range and the file or variable it came from.
+                   :pr:`125`: the range is checked when the configuration loads, for every command:
+                   a value outside it, or not a number of the key's kind, stops the command before
+                   it starts (exit status 3), naming the key, the range and the file or variable it
+                   came from.
 
 
 ``[database]``
@@ -147,9 +148,10 @@
         .. only:: html
 
             .. versionchanged:: 2.9.0
-               The range is checked when the configuration loads, for every command: a value outside
-               it, or not a number of the key's kind, stops the command before it starts (exit
-               status 3), naming the key, the range and the file or variable it came from.
+               :pr:`125`: the range is checked when the configuration loads, for every command: a
+               value outside it, or not a number of the key's kind, stops the command before it
+               starts (exit status 3), naming the key, the range and the file or variable it came
+               from.
 
     ``.user``
         Username for databaser server account.
@@ -209,8 +211,8 @@
         .. only:: html
 
             .. versionchanged:: 2.9.0
-               A `client` given neither ``.host`` nor ``.advertise`` dials it only when it is one
-               specific address, else *localhost*; ``submit --queue`` now does too.
+               :pr:`122`: a `client` given neither ``.host`` nor ``.advertise`` dials it only when
+               it is one specific address, else *localhost*; ``submit --queue`` now does too.
 
     ``.host``
         Address that *clients* dial (default: by ``.advertise`` or ``.bind``).
@@ -228,7 +230,7 @@
         .. only:: html
 
             .. versionchanged:: 2.9.0
-               `client` dials it; before, it dialled ``.bind``. Without it, `client` and
+               :pr:`122`: `client` dials it; before, it dialled ``.bind``. Without it, `client` and
                ``submit --queue`` dial ``.advertise`` or a specific ``.bind``.
 
     ``.advertise``
@@ -248,7 +250,7 @@
                :pr:`107`
 
             .. versionchanged:: 2.9.0
-               `client` and ``submit --queue`` dial it when ``.host`` is not given.
+               :pr:`122`: `client` and ``submit --queue`` dial it when ``.host`` is not given.
 
     ``.port``
         Port number (default: `50001`).
@@ -261,9 +263,10 @@
         .. only:: html
 
             .. versionchanged:: 2.9.0
-               The range is checked when the configuration loads, for every command: a value outside
-               it, or not a number of the key's kind, stops the command before it starts (exit
-               status 3), naming the key, the range and the file or variable it came from.
+               :pr:`125`: the range is checked when the configuration loads, for every command: a
+               value outside it, or not a number of the key's kind, stops the command before it
+               starts (exit status 3), naming the key, the range and the file or variable it came
+               from.
 
     ``.auth``
         Cryptographic authentication key to connect with server (default: `<not-secure>`).
@@ -288,9 +291,10 @@
         .. only:: html
 
             .. versionchanged:: 2.9.0
-               The range is checked when the configuration loads, for every command: a value outside
-               it, or not a number of the key's kind, stops the command before it starts (exit
-               status 3), naming the key, the range and the file or variable it came from.
+               :pr:`125`: the range is checked when the configuration loads, for every command: a
+               value outside it, or not a number of the key's kind, stops the command before it
+               starts (exit status 3), naming the key, the range and the file or variable it came
+               from.
 
     ``.bundlesize``
         Size of task bundle (default: `1`).
@@ -315,9 +319,10 @@
                :pr:`78`: the size for a client that advertises none.
 
             .. versionchanged:: 2.9.0
-               The range is checked when the configuration loads, for every command: a value outside
-               it, or not a number of the key's kind, stops the command before it starts (exit
-               status 3), naming the key, the range and the file or variable it came from.
+               :pr:`125`: the range is checked when the configuration loads, for every command: a
+               value outside it, or not a number of the key's kind, stops the command before it
+               starts (exit status 3), naming the key, the range and the file or variable it came
+               from.
 
     ``.bundlemax``
         Most tasks the server hands a client in one reply (default: `1000`).
@@ -334,9 +339,10 @@
                :pr:`78`
 
             .. versionchanged:: 2.9.0
-               The range is checked when the configuration loads, for every command: a value outside
-               it, or not a number of the key's kind, stops the command before it starts (exit
-               status 3), naming the key, the range and the file or variable it came from.
+               :pr:`125`: the range is checked when the configuration loads, for every command: a
+               value outside it, or not a number of the key's kind, stops the command before it
+               starts (exit status 3), naming the key, the range and the file or variable it came
+               from.
 
     ``.attempts``
         Attempts for auto-retry on failed tasks (default: `1`).
@@ -372,10 +378,10 @@
                and the server functions never.
 
             .. versionchanged:: 2.9.0
-               The range is checked when the configuration loads, for every command: a value outside
-               it, or not a number of the key's kind, stops the command before it starts (exit
-               status 3), naming the key, the range and the file or variable it came from. Past the
-               advisory limit the command runs, with one warning.
+               :pr:`125`: the range is checked when the configuration loads, for every command: a
+               value outside it, or not a number of the key's kind, stops the command before it
+               starts (exit status 3), naming the key, the range and the file or variable it came
+               from. Past the advisory limit the command runs, with one warning.
 
     ``.eager``
         Schedule failed tasks before new tasks (default: `false`).
@@ -419,9 +425,10 @@
                :pr:`115`: the result that finishes a run ends the wait.
 
             .. versionchanged:: 2.9.0
-               The range is checked when the configuration loads, for every command: a value outside
-               it, or not a number of the key's kind, stops the command before it starts (exit
-               status 3), naming the key, the range and the file or variable it came from.
+               :pr:`125`: the range is checked when the configuration loads, for every command: a
+               value outside it, or not a number of the key's kind, stops the command before it
+               starts (exit status 3), naming the key, the range and the file or variable it came
+               from.
 
     ``.evict``
         Eviction period in seconds for clients (default: `600`).
@@ -452,9 +459,10 @@
                :pr:`117`: ``hs cluster`` reads it in every mode; before, it always used 600 seconds.
 
             .. versionchanged:: 2.9.0
-               The range is checked when the configuration loads, for every command: a value outside
-               it, or not a number of the key's kind, stops the command before it starts (exit
-               status 3), naming the key, the range and the file or variable it came from.
+               :pr:`125`: the range is checked when the configuration loads, for every command: a
+               value outside it, or not a number of the key's kind, stops the command before it
+               starts (exit status 3), naming the key, the range and the file or variable it came
+               from.
 
     ``[tls]``
         Transport-layer security for queue connections. Enabled by default; every key below
@@ -534,9 +542,10 @@
                    :pr:`108`
 
                 .. versionchanged:: 2.9.0
-                   The range is checked when the configuration loads, for every command: a value
-                   outside it, or not a number of the key's kind, stops the command before it starts
-                   (exit status 3), naming the key, the range and the file or variable it came from.
+                   :pr:`125`: the range is checked when the configuration loads, for every command:
+                   a value outside it, or not a number of the key's kind, stops the command before
+                   it starts (exit status 3), naming the key, the range and the file or variable it
+                   came from.
 
 ``[client]``
     Section for `client` workflow parameters.
@@ -569,9 +578,10 @@
                ``submit.bundlesize``.
 
             .. versionchanged:: 2.9.0
-               The range is checked when the configuration loads, for every command: a value outside
-               it, or not a number of the key's kind, stops the command before it starts (exit
-               status 3), naming the key, the range and the file or variable it came from.
+               :pr:`125`: the range is checked when the configuration loads, for every command: a
+               value outside it, or not a number of the key's kind, stops the command before it
+               starts (exit status 3), naming the key, the range and the file or variable it came
+               from.
 
     ``.bundlewait``
         Seconds to wait before flushing task bundle (default: `5`).
@@ -598,9 +608,10 @@
                waiting. :pr:`119`: ``hs client`` reads it; before, it read ``submit.bundlewait``.
 
             .. versionchanged:: 2.9.0
-               The range is checked when the configuration loads, for every command: a value outside
-               it, or not a number of the key's kind, stops the command before it starts (exit
-               status 3), naming the key, the range and the file or variable it came from.
+               :pr:`125`: the range is checked when the configuration loads, for every command: a
+               value outside it, or not a number of the key's kind, stops the command before it
+               starts (exit status 3), naming the key, the range and the file or variable it came
+               from.
 
     ``.heartrate``
         Interval in seconds between heartbeats sent to server (default `10`).
@@ -618,9 +629,10 @@
                :pr:`113`: a string with units or a Slurm time.
 
             .. versionchanged:: 2.9.0
-               The range is checked when the configuration loads, for every command: a value outside
-               it, or not a number of the key's kind, stops the command before it starts (exit
-               status 3), naming the key, the range and the file or variable it came from.
+               :pr:`125`: the range is checked when the configuration loads, for every command: a
+               value outside it, or not a number of the key's kind, stops the command before it
+               starts (exit status 3), naming the key, the range and the file or variable it came
+               from.
 
     ``.timeout``
         Timeout in seconds for client. Automatically shutdown if no tasks received (default: never).
@@ -634,9 +646,10 @@
         .. only:: html
 
             .. versionchanged:: 2.9.0
-               The range is checked when the configuration loads, for every command: a value outside
-               it, or not a number of the key's kind, stops the command before it starts (exit
-               status 3), naming the key, the range and the file or variable it came from.
+               :pr:`125`: the range is checked when the configuration loads, for every command: a
+               value outside it, or not a number of the key's kind, stops the command before it
+               starts (exit status 3), naming the key, the range and the file or variable it came
+               from.
 
     ``.cores``
         Client-level limit on CPU cores available for running tasks (default: all available).
@@ -651,10 +664,10 @@
         .. only:: html
 
             .. versionchanged:: 2.9.0
-               The range is checked when the configuration loads, for every command: a value outside
-               it, or not a number of the key's kind, stops the command before it starts (exit
-               status 3), naming the key, the range and the file or variable it came from. Past the
-               advisory limit the command runs, with one warning.
+               :pr:`125`: the range is checked when the configuration loads, for every command: a
+               value outside it, or not a number of the key's kind, stops the command before it
+               starts (exit status 3), naming the key, the range and the file or variable it came
+               from. Past the advisory limit the command runs, with one warning.
 
     ``.memory``
         Client-level limit on memory (in bytes) available for running tasks (default: all available).
@@ -670,9 +683,10 @@
         .. only:: html
 
             .. versionchanged:: 2.9.0
-               The range is checked when the configuration loads, for every command: a value outside
-               it, or not a number of the key's kind, stops the command before it starts (exit
-               status 3), naming the key, the range and the file or variable it came from.
+               :pr:`125`: the range is checked when the configuration loads, for every command: a
+               value outside it, or not a number of the key's kind, stops the command before it
+               starts (exit status 3), naming the key, the range and the file or variable it came
+               from.
 
     ``.ratelimit``
         Maximum number of tasks started per second (default: no limit).
@@ -694,10 +708,10 @@
                :pr:`117`: ``hs cluster`` reads it, in place of an undocumented ``task.ratelimit``.
 
             .. versionchanged:: 2.9.0
-               The range is checked when the configuration loads, for every command: a value outside
-               it, or not a number of the key's kind, stops the command before it starts (exit
-               status 3), naming the key, the range and the file or variable it came from. Past the
-               advisory limit the command runs, with one warning.
+               :pr:`125`: the range is checked when the configuration loads, for every command: a
+               value outside it, or not a number of the key's kind, stops the command before it
+               starts (exit status 3), naming the key, the range and the file or variable it came
+               from. Past the advisory limit the command runs, with one warning.
 
 ``[submit]``
     Section for `submit` workflow parameters.
@@ -721,9 +735,10 @@
                :pr:`119`: ``hs client`` no longer reads it; it reads ``client.bundlesize``.
 
             .. versionchanged:: 2.9.0
-               The range is checked when the configuration loads, for every command: a value outside
-               it, or not a number of the key's kind, stops the command before it starts (exit
-               status 3), naming the key, the range and the file or variable it came from.
+               :pr:`125`: the range is checked when the configuration loads, for every command: a
+               value outside it, or not a number of the key's kind, stops the command before it
+               starts (exit status 3), naming the key, the range and the file or variable it came
+               from.
 
     ``.bundlewait``
         Seconds to wait before flushing tasks (default: `5`).
@@ -748,9 +763,10 @@
                reads it.
 
             .. versionchanged:: 2.9.0
-               The range is checked when the configuration loads, for every command: a value outside
-               it, or not a number of the key's kind, stops the command before it starts (exit
-               status 3), naming the key, the range and the file or variable it came from.
+               :pr:`125`: the range is checked when the configuration loads, for every command: a
+               value outside it, or not a number of the key's kind, stops the command before it
+               starts (exit status 3), naming the key, the range and the file or variable it came
+               from.
 
 
 ``[task]``
@@ -772,10 +788,10 @@
         .. only:: html
 
             .. versionchanged:: 2.9.0
-               The range is checked when the configuration loads, for every command: a value outside
-               it, or not a number of the key's kind, stops the command before it starts (exit
-               status 3), naming the key, the range and the file or variable it came from. Past the
-               advisory limit the command runs, with one warning.
+               :pr:`125`: the range is checked when the configuration loads, for every command: a
+               value outside it, or not a number of the key's kind, stops the command before it
+               starts (exit status 3), naming the key, the range and the file or variable it came
+               from. Past the advisory limit the command runs, with one warning.
 
     ``.memory``
         Default memory (in bytes) required per task (default: unconstrained).
@@ -792,9 +808,10 @@
         .. only:: html
 
             .. versionchanged:: 2.9.0
-               The range is checked when the configuration loads, for every command: a value outside
-               it, or not a number of the key's kind, stops the command before it starts (exit
-               status 3), naming the key, the range and the file or variable it came from.
+               :pr:`125`: the range is checked when the configuration loads, for every command: a
+               value outside it, or not a number of the key's kind, stops the command before it
+               starts (exit status 3), naming the key, the range and the file or variable it came
+               from.
 
     ``.timeout``
         Task-level walltime limit in seconds (default: none).
@@ -810,9 +827,10 @@
         .. only:: html
 
             .. versionchanged:: 2.9.0
-               The range is checked when the configuration loads, for every command: a value outside
-               it, or not a number of the key's kind, stops the command before it starts (exit
-               status 3), naming the key, the range and the file or variable it came from.
+               :pr:`125`: the range is checked when the configuration loads, for every command: a
+               value outside it, or not a number of the key's kind, stops the command before it
+               starts (exit status 3), naming the key, the range and the file or variable it came
+               from.
 
     ``.signalwait``
         Wait period in seconds between signal escalation on task cancellation (default: 10).
@@ -831,9 +849,10 @@
                :pr:`106`: a string with units or a Slurm time.
 
             .. versionchanged:: 2.9.0
-               The range is checked when the configuration loads, for every command: a value outside
-               it, or not a number of the key's kind, stops the command before it starts (exit
-               status 3), naming the key, the range and the file or variable it came from.
+               :pr:`125`: the range is checked when the configuration loads, for every command: a
+               value outside it, or not a number of the key's kind, stops the command before it
+               starts (exit status 3), naming the key, the range and the file or variable it came
+               from.
 
 ``[ssh]``
     SSH configuration section.
@@ -898,10 +917,10 @@
         .. only:: html
 
             .. versionchanged:: 2.9.0
-               The range is checked when the configuration loads, for every command: a value outside
-               it, or not a number of the key's kind, stops the command before it starts (exit
-               status 3), naming the key, the range and the file or variable it came from. Past the
-               advisory limit the command runs, with one warning.
+               :pr:`125`: the range is checked when the configuration loads, for every command: a
+               value outside it, or not a number of the key's kind, stops the command before it
+               starts (exit status 3), naming the key, the range and the file or variable it came
+               from. Past the advisory limit the command runs, with one warning.
 
     ``.period``
         Scaling period in seconds, greater than zero (default: 60).
@@ -929,10 +948,10 @@
                second.
 
             .. versionchanged:: 2.9.0
-               The range is checked when the configuration loads, for every command: a value outside
-               it, or not a number of the key's kind, stops the command before it starts (exit
-               status 3), naming the key, the range and the file or variable it came from. Past the
-               advisory limit the command runs, with one warning.
+               :pr:`125`: the range is checked when the configuration loads, for every command: a
+               value outside it, or not a number of the key's kind, stops the command before it
+               starts (exit status 3), naming the key, the range and the file or variable it came
+               from. Past the advisory limit the command runs, with one warning.
 
     ``.launcher``
         Command prefix used to launch each client as a scaling unit (default: none).
@@ -1010,9 +1029,10 @@
                :pr:`107`
 
             .. versionchanged:: 2.9.0
-               The range is checked when the configuration loads, for every command: a value outside
-               it, or not a number of the key's kind, stops the command before it starts (exit
-               status 3), naming the key, the range and the file or variable it came from.
+               :pr:`125`: the range is checked when the configuration loads, for every command: a
+               value outside it, or not a number of the key's kind, stops the command before it
+               starts (exit status 3), naming the key, the range and the file or variable it came
+               from.
 
     ``[size]``
         ``.init``
@@ -1027,9 +1047,10 @@
             .. only:: html
 
                 .. versionchanged:: 2.9.0
-                   The range is checked when the configuration loads, for every command: a value
-                   outside it, or not a number of the key's kind, stops the command before it starts
-                   (exit status 3), naming the key, the range and the file or variable it came from.
+                   :pr:`125`: the range is checked when the configuration loads, for every command:
+                   a value outside it, or not a number of the key's kind, stops the command before
+                   it starts (exit status 3), naming the key, the range and the file or variable it
+                   came from.
 
         ``.min``
             Minimum size of cluster (default: 0).
@@ -1043,9 +1064,10 @@
             .. only:: html
 
                 .. versionchanged:: 2.9.0
-                   The range is checked when the configuration loads, for every command: a value
-                   outside it, or not a number of the key's kind, stops the command before it starts
-                   (exit status 3), naming the key, the range and the file or variable it came from.
+                   :pr:`125`: the range is checked when the configuration loads, for every command:
+                   a value outside it, or not a number of the key's kind, stops the command before
+                   it starts (exit status 3), naming the key, the range and the file or variable it
+                   came from.
 
         ``.max``
             Maximum size of cluster (default: 1).
@@ -1061,9 +1083,10 @@
             .. only:: html
 
                 .. versionchanged:: 2.9.0
-                   The range is checked when the configuration loads, for every command: a value
-                   outside it, or not a number of the key's kind, stops the command before it starts
-                   (exit status 3), naming the key, the range and the file or variable it came from.
+                   :pr:`125`: the range is checked when the configuration loads, for every command:
+                   a value outside it, or not a number of the key's kind, stops the command before
+                   it starts (exit status 3), naming the key, the range and the file or variable it
+                   came from.
 
 ``[relay]``
     Section for the `relay` workflow, which connects a site to an upstream *server*.
@@ -1118,9 +1141,10 @@
         .. only:: html
 
             .. versionchanged:: 2.9.0
-               The range is checked when the configuration loads, for every command: a value outside
-               it, or not a number of the key's kind, stops the command before it starts (exit
-               status 3), naming the key, the range and the file or variable it came from.
+               :pr:`125`: the range is checked when the configuration loads, for every command: a
+               value outside it, or not a number of the key's kind, stops the command before it
+               starts (exit status 3), naming the key, the range and the file or variable it came
+               from.
 
     ``.bundlesize``
         Size of task bundle for the relay-local *server* and the *clients* at its site
@@ -1134,9 +1158,10 @@
         .. only:: html
 
             .. versionchanged:: 2.9.0
-               The range is checked when the configuration loads, for every command: a value outside
-               it, or not a number of the key's kind, stops the command before it starts (exit
-               status 3), naming the key, the range and the file or variable it came from.
+               :pr:`125`: the range is checked when the configuration loads, for every command: a
+               value outside it, or not a number of the key's kind, stops the command before it
+               starts (exit status 3), naming the key, the range and the file or variable it came
+               from.
 
     ``.bundlewait``
         Seconds the relay waits before returning finished tasks upstream regardless of
@@ -1159,9 +1184,10 @@
                waiting.
 
             .. versionchanged:: 2.9.0
-               The range is checked when the configuration loads, for every command: a value outside
-               it, or not a number of the key's kind, stops the command before it starts (exit
-               status 3), naming the key, the range and the file or variable it came from.
+               :pr:`125`: the range is checked when the configuration loads, for every command: a
+               value outside it, or not a number of the key's kind, stops the command before it
+               starts (exit status 3), naming the key, the range and the file or variable it came
+               from.
 
     ``.poll``
         Maximum polling interval of the relay-local scheduler in seconds (default: `0.1`).
@@ -1179,9 +1205,10 @@
                :pr:`113`: a string with units or a Slurm time.
 
             .. versionchanged:: 2.9.0
-               The range is checked when the configuration loads, for every command: a value outside
-               it, or not a number of the key's kind, stops the command before it starts (exit
-               status 3), naming the key, the range and the file or variable it came from.
+               :pr:`125`: the range is checked when the configuration loads, for every command: a
+               value outside it, or not a number of the key's kind, stops the command before it
+               starts (exit status 3), naming the key, the range and the file or variable it came
+               from.
 
     ``.retention``
         Seconds a result is kept in the relay database after it has been returned upstream
@@ -1198,9 +1225,10 @@
                :pr:`113`: a string with units or a Slurm time.
 
             .. versionchanged:: 2.9.0
-               The range is checked when the configuration loads, for every command: a value outside
-               it, or not a number of the key's kind, stops the command before it starts (exit
-               status 3), naming the key, the range and the file or variable it came from.
+               :pr:`125`: the range is checked when the configuration loads, for every command: a
+               value outside it, or not a number of the key's kind, stops the command before it
+               starts (exit status 3), naming the key, the range and the file or variable it came
+               from.
 
     ``.zone``
         Zone or zones the relay serves (default: none, the default zone).
@@ -1233,8 +1261,8 @@
         .. only:: html
 
             .. versionchanged:: 2.9.0
-               A zone table's ``size``, ``min``, ``max`` and ``init`` are checked when the
-               configuration loads, for every command, as the relay's own keys are.
+               :pr:`125`: a zone table's ``size``, ``min``, ``max`` and ``init`` are checked when
+               the configuration loads, for every command, as the relay's own keys are.
 
     ``.site``
         Name of the relay's site (default: none, the relay's host name).
@@ -1252,9 +1280,10 @@
         .. only:: html
 
             .. versionchanged:: 2.9.0
-               The range is checked when the configuration loads, for every command: a value outside
-               it, or not a number of the key's kind, stops the command before it starts (exit
-               status 3), naming the key, the range and the file or variable it came from.
+               :pr:`125`: the range is checked when the configuration loads, for every command: a
+               value outside it, or not a number of the key's kind, stops the command before it
+               starts (exit status 3), naming the key, the range and the file or variable it came
+               from.
 
     ``.min``
         Fewest *clients* of each zone an upstream topology assigns this site (default: `0`).
@@ -1272,9 +1301,10 @@
         advertises its bounds upstream; see :ref:`Topology <cli_relay_topology>`.
 
             .. versionchanged:: 2.9.0
-               The range is checked when the configuration loads, for every command: a value outside
-               it, or not a number of the key's kind, stops the command before it starts (exit
-               status 3), naming the key, the range and the file or variable it came from.
+               :pr:`125`: the range is checked when the configuration loads, for every command: a
+               value outside it, or not a number of the key's kind, stops the command before it
+               starts (exit status 3), naming the key, the range and the file or variable it came
+               from.
 
     ``.max``
         Most *clients* of each zone an upstream topology assigns this site (default: the size).
@@ -1290,9 +1320,10 @@
         exit when idle. A zone's own ``[relay.zone.NAME]`` table may set its own.
 
             .. versionchanged:: 2.9.0
-               The range is checked when the configuration loads, for every command: a value outside
-               it, or not a number of the key's kind, stops the command before it starts (exit
-               status 3), naming the key, the range and the file or variable it came from.
+               :pr:`125`: the range is checked when the configuration loads, for every command: a
+               value outside it, or not a number of the key's kind, stops the command before it
+               starts (exit status 3), naming the key, the range and the file or variable it came
+               from.
 
     ``.init``
         *Clients* of each zone an upstream topology assigns this site when the relay starts
@@ -1309,9 +1340,10 @@
         Bounds must satisfy ``min <= init <= max``, with ``max`` at least `1`.
 
             .. versionchanged:: 2.9.0
-               The range is checked when the configuration loads, for every command: a value outside
-               it, or not a number of the key's kind, stops the command before it starts (exit
-               status 3), naming the key, the range and the file or variable it came from.
+               :pr:`125`: the range is checked when the configuration loads, for every command: a
+               value outside it, or not a number of the key's kind, stops the command before it
+               starts (exit status 3), naming the key, the range and the file or variable it came
+               from.
 
     ``.launcher``
         Command prefix used to launch each *client* at the site (default: none).
@@ -1331,6 +1363,7 @@
         .. only:: html
 
             .. versionadded:: 2.9.0
+               :pr:`121`
 
         By default it is the ``hs`` that runs the relay, by its full path and as the user ran it,
         kept when the relay starts again to bind its database. The path assumes the site's nodes
@@ -1350,10 +1383,10 @@
         .. only:: html
 
             .. versionchanged:: 2.9.0
-               The range is checked when the configuration loads, for every command: a value outside
-               it, or not a number of the key's kind, stops the command before it starts (exit
-               status 3), naming the key, the range and the file or variable it came from. Past the
-               advisory limit the command runs, with one warning.
+               :pr:`125`: the range is checked when the configuration loads, for every command: a
+               value outside it, or not a number of the key's kind, stops the command before it
+               starts (exit status 3), naming the key, the range and the file or variable it came
+               from. Past the advisory limit the command runs, with one warning.
 
     ``.template``
         Command template for the *clients* at the site (default: `{}`).
@@ -1373,9 +1406,10 @@
                :pr:`113`: a string with units or a Slurm time.
 
             .. versionchanged:: 2.9.0
-               The range is checked when the configuration loads, for every command: a value outside
-               it, or not a number of the key's kind, stops the command before it starts (exit
-               status 3), naming the key, the range and the file or variable it came from.
+               :pr:`125`: the range is checked when the configuration loads, for every command: a
+               value outside it, or not a number of the key's kind, stops the command before it
+               starts (exit status 3), naming the key, the range and the file or variable it came
+               from.
 
     ``[upstream]``
         Connection to the upstream *server*. These settings are never read from ``[server]``,
@@ -1396,9 +1430,10 @@
             .. only:: html
 
                 .. versionchanged:: 2.9.0
-                   The range is checked when the configuration loads, for every command: a value
-                   outside it, or not a number of the key's kind, stops the command before it starts
-                   (exit status 3), naming the key, the range and the file or variable it came from.
+                   :pr:`125`: the range is checked when the configuration loads, for every command:
+                   a value outside it, or not a number of the key's kind, stops the command before
+                   it starts (exit status 3), naming the key, the range and the file or variable it
+                   came from.
 
         ``.auth``
             Cryptographic key for the upstream *server*.
@@ -1421,9 +1456,10 @@
             .. only:: html
 
                 .. versionchanged:: 2.9.0
-                   The range is checked when the configuration loads, for every command: a value
-                   outside it, or not a number of the key's kind, stops the command before it starts
-                   (exit status 3), naming the key, the range and the file or variable it came from.
+                   :pr:`125`: the range is checked when the configuration loads, for every command:
+                   a value outside it, or not a number of the key's kind, stops the command before
+                   it starts (exit status 3), naming the key, the range and the file or variable it
+                   came from.
 
         ``.heartrate``
             Seconds between heartbeats to the upstream *server* (default: `10`).
@@ -1439,9 +1475,10 @@
                    :pr:`113`: a string with units or a Slurm time.
 
                 .. versionchanged:: 2.9.0
-                   The range is checked when the configuration loads, for every command: a value
-                   outside it, or not a number of the key's kind, stops the command before it starts
-                   (exit status 3), naming the key, the range and the file or variable it came from.
+                   :pr:`125`: the range is checked when the configuration loads, for every command:
+                   a value outside it, or not a number of the key's kind, stops the command before
+                   it starts (exit status 3), naming the key, the range and the file or variable it
+                   came from.
 
         ``.deadline``
             Seconds a call to the upstream *server* may take before the relay takes the connection
@@ -1462,9 +1499,10 @@
                    :pr:`113`: a string with units or a Slurm time.
 
                 .. versionchanged:: 2.9.0
-                   The range is checked when the configuration loads, for every command: a value
-                   outside it, or not a number of the key's kind, stops the command before it starts
-                   (exit status 3), naming the key, the range and the file or variable it came from.
+                   :pr:`125`: the range is checked when the configuration loads, for every command:
+                   a value outside it, or not a number of the key's kind, stops the command before
+                   it starts (exit status 3), naming the key, the range and the file or variable it
+                   came from.
 
         ``.backoff``
             Longest wait in seconds between attempts to reach the upstream *server* again
@@ -1484,9 +1522,10 @@
                    :pr:`113`: a string with units or a Slurm time.
 
                 .. versionchanged:: 2.9.0
-                   The range is checked when the configuration loads, for every command: a value
-                   outside it, or not a number of the key's kind, stops the command before it starts
-                   (exit status 3), naming the key, the range and the file or variable it came from.
+                   :pr:`125`: the range is checked when the configuration loads, for every command:
+                   a value outside it, or not a number of the key's kind, stops the command before
+                   it starts (exit status 3), naming the key, the range and the file or variable it
+                   came from.
 
         ``.evict_hint``
             Seconds of lost contact after which the relay takes the upstream *server* to have
@@ -1508,9 +1547,10 @@
                    :pr:`113`: a string with units or a Slurm time.
 
                 .. versionchanged:: 2.9.0
-                   The range is checked when the configuration loads, for every command: a value
-                   outside it, or not a number of the key's kind, stops the command before it starts
-                   (exit status 3), naming the key, the range and the file or variable it came from.
+                   :pr:`125`: the range is checked when the configuration loads, for every command:
+                   a value outside it, or not a number of the key's kind, stops the command before
+                   it starts (exit status 3), naming the key, the range and the file or variable it
+                   came from.
 
         ``[tls]``
             ``.enabled``

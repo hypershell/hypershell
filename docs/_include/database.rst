@@ -107,7 +107,8 @@ Initialization
    :pr:`69`: a database from an earlier release is upgraded in place on first use.
 
 .. versionchanged:: 2.9.0
-   On Postgres the upgrade widens ``task.memory``, so a task can declare more than 2 GiB of memory.
+   :pr:`120`: on Postgres the upgrade widens ``task.memory``, so a task can declare more than 2 GiB
+   of memory.
 
 SQLite is automatically initialized upon opening the connection but
 Postgres must be explicitly initialized via ``hs initdb``, or by launching ``hs server``,
@@ -269,8 +270,8 @@ for PostgreSQL, and stops on a database that was never initialized. Run ``hs ini
 upgrading *HyperShell* or TimescaleDB.
 
 .. versionchanged:: 2.9.0
-   The schema step widens ``task.memory`` on a hypertable where TimescaleDB allows it, and
-   otherwise refuses with the schema unchanged.
+   :pr:`120`: the schema step widens ``task.memory`` on a hypertable where TimescaleDB allows it,
+   and otherwise refuses with the schema unchanged.
 
 A database created by a 2.9.0 pre-release has a 32-bit ``task.memory`` column, which the schema
 step widens on first use (see :ref:`database_initialization`). On a hypertable it does so only

@@ -28,9 +28,9 @@ Description
    one of them, as on PostgreSQL; before, only the last name was checked.
 
 .. versionchanged:: 2.9.0
-   Each numeric option has a range, given with the option below. A value outside it, or one that is
-   not a number of the option's kind, stops the command before it starts, with one line naming the
-   option, the range and the value (exit status 2). ``-l``/``--limit`` below 1 is refused, and so
-   are a ``-g``/``--group`` or ``--part`` outside 32 bits.
+   :pr:`125`: each numeric option has a range, given with the option below. A value outside it, or
+   one that is not a number of the option's kind, stops the command before it starts, with one line
+   naming the option, the range and the value (exit status 2). ``-l``/``--limit`` below 1 is
+   refused, and so are a ``-g``/``--group`` or ``--part`` outside 32 bits.
 
 .. include:: ../_include/task_search_help.rst

@@ -31,8 +31,8 @@ form that cannot resolve (a variable that is not set, a command that fails) stop
 .. only:: html
 
     .. versionchanged:: 2.9.0
-       Numeric values from files and variables are held to their keys' ranges as the configuration
-       loads, and a numeric key's ``_env`` or ``_eval`` form is resolved there.
+       :pr:`125`: numeric values from files and variables are held to their keys' ranges as the
+       configuration loads, and a numeric key's ``_env`` or ``_eval`` form is resolved there.
 
 For example, set the logging level at the user level with a command:
 

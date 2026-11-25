@@ -15,7 +15,7 @@ All of the parameters used below are largely the same in each instance. Configur
 no impact when using the library; i.e., default values are not overridden by configuration.
 
 .. versionchanged:: 2.9.0
-   The ranges the configuration and each command's options are held to (see the
+   :pr:`125`: the ranges the configuration and each command's options are held to (see the
    :ref:`parameter reference <config_params>`) do not apply here: a value passed as an explicit
    argument is used as given.
 

@@ -47,13 +47,14 @@ Description
    ``submit.bundlewait`` no longer reach it (move them to ``[client]``).
 
 .. versionchanged:: 2.9.0
-   With no ``-H``/``--host``, the client dials ``server.host``, else ``server.advertise``, else a
-   specific ``server.bind``, else *localhost*; before, it dialled ``server.bind``.
+   :pr:`122`: with no ``-H``/``--host``, the client dials ``server.host``, else
+   ``server.advertise``, else a specific ``server.bind``, else *localhost*; before, it dialled
+   ``server.bind``.
 
 .. versionchanged:: 2.9.0
-   Each numeric option has a range, given with the option below. A value outside it, or one that is
-   not a number of the option's kind, stops the command before it starts, with one line naming the
-   option, the range and the value (exit status 2). An option with an advisory limit takes a value
-   past it and runs, with one warning. A negative ``-R``/``--ratelimit`` is refused.
+   :pr:`125`: each numeric option has a range, given with the option below. A value outside it, or
+   one that is not a number of the option's kind, stops the command before it starts, with one line
+   naming the option, the range and the value (exit status 2). An option with an advisory limit
+   takes a value past it and runs, with one warning. A negative ``-R``/``--ratelimit`` is refused.
 
 .. include:: ../_include/client_help.rst
