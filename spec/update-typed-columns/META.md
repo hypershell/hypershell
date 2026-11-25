@@ -56,3 +56,13 @@
 - **Recommended fix:** a dependency-merge verify checks the merged commit by SHA (recorded in the
   phase, as `red.txt` records `# base:`), not the moving `origin/develop`.
 - **Confidence:** high · **Effort:** small
+
+## Build notes
+
+- **P6 attempt 2 runs the verify from `red_check` on (foreman's ruling, 2026-11-25).** Steps 1-3 of
+  P6's chain (the whole suite without PostgreSQL, the PostgreSQL-aware files, every red node green)
+  carry over from attempt 1 at b030445a: 5,736 passed and 400 skipped; 443 passed; 263 passed.
+  The commits since (30961de7, the red list to 261 nodes with the PLAN note; 4e91d5b0, the CI
+  postgres job's timeout) touch only `spec/` and `.github/workflows/tests.yml`, so they change no
+  code or test those steps ran. Attempt 2 ran the rest of the chain as written: `red_check` with
+  261 nodes, every drive mode on both backends, and the docs build.

@@ -3,10 +3,10 @@ slug: update-typed-columns
 title: hs update reads every column it writes by the column's kind
 kind: fix
 appetite: big
-status: in_progress
+status: in_review
 branch: fix/update-typed-columns
 base: develop
-current_phase: P6
+current_phase: done
 last_updated: '2026-11-25'
 phases:
 - id: P0
@@ -189,7 +189,7 @@ phases:
     sphinx-build -W --keep-going -q -E -b html docs "${TMPDIR:-/tmp}/docs-html-utc"
 - id: P6
   name: 'Gate: the whole suite, PostgreSQL, the red list, every drive mode, the docs'
-  status: in_progress
+  status: done
   satisfies:
   - R1
   - R2
@@ -212,7 +212,7 @@ phases:
   - P5
   parallel: false
   hammerable: false
-  hill: uphill
+  hill: downhill
   attempts: 1
   verify: 'test -n "$HS_TEST_POSTGRES" && env -u HS_TEST_POSTGRES sh spec/update-client-retry/drive/bound.sh
     5400 uv run pytest -q -p no:cacheprovider && sh spec/update-client-retry/drive/bound.sh
@@ -505,13 +505,13 @@ lists column and tag changes.
 **Goal:** nothing else broke; every red test is green; the red list is still red on the base; every
 drive mode passes on both backends; the docs build with `-W`.
 
-- [ ] Run the frontmatter verify (sandbox off, `HS_TEST_POSTGRES` exported): the whole suite with
+- [x] Run the frontmatter verify (sandbox off, `HS_TEST_POSTGRES` exported): the whole suite with
       `HS_TEST_POSTGRES` unset, then the PostgreSQL-aware files with it set, the red nodes green, the
       red list red on its base, the four drive modes on both backends, the docs. Record counts and
       times in the commit body.
-- [ ] Release note: nothing to write here; `hs-publish` drafts the squash body from GOAL.md's eleven
+- [x] Release note: nothing to write here; `hs-publish` drafts the squash body from GOAL.md's eleven
       user-visible changes, plus Q2's tag-check change if ruled so.
-- [ ] Seed for publish: `Task.ensure_valid_tag` stops at the first empty value (`model.py`), which
+- [x] Seed for publish: `Task.ensure_valid_tag` stops at the first empty value (`model.py`), which
       also affects `hs submit` (PLAN §5).
 - **Attempt 1 (2026-11-25), red at `red_check`:** the whole suite without PostgreSQL, 5,736 passed
   and 400 skipped (42 min 49 s); the PostgreSQL-aware files, 443 passed (21 min 58 s); the 263 red
@@ -519,8 +519,14 @@ drive mode passes on both backends; the docs build with `-W`.
   tests (`test_bash_completion_offers_no_whole_tag`, `test_zsh_completion_offers_no_whole_tag`) pass
   on the base, as `red_check` swaps in the base's `src` only and they read `share/` from this tree.
   Both were red at P1, before `share/` changed. The chain stopped there; run apart, every drive mode
-  passes on both backends (68 checks) and the docs build with `-W`. Open question for the foreman:
-  drop the two nodes from `red.txt` with a PLAN note (they stay as guards), or another ruling.
+  passes on both backends (68 checks) and the docs build with `-W`.
+- **Ruling (foreman, 2026-11-25):** the two nodes leave `red.txt` (261), with the PLAN build note
+  (30961de7); the CI postgres job's timeout rises from 20 to 45 minutes (4e91d5b0).
+- **Attempt 2 (2026-11-25), green:** steps 1-3 carry over from attempt 1 at b030445a (META build
+  note: the commits since touch only `spec/` and the CI file). From `red_check` on, as written:
+  `red_check` 261 of 261 red; every drive mode on both backends (68 checks); `sphinx-build -W`
+  passes (696 s). The release note draft is `RELEASE-NOTE.md`; the `ensure_valid_tag` seed is the
+  foreman's, filed on develop.
 - **Touches:** `spec/update-typed-columns/TECH.md` only.
 
 ---
