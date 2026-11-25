@@ -3,7 +3,7 @@ slug: bounded-inputs
 title: Every numeric setting has one declared range, one parser and one error
 kind: fix
 appetite: big
-status: in_review
+status: done
 branch: fix/bounded-inputs
 base: develop
 current_phase: done
