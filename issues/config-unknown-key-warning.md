@@ -45,7 +45,7 @@ list.
 
 - A strict mode that refuses unknown keys. That changes behaviour for existing files, so it is a
   minor-release interface change (2.10.0 at the earliest), not a patch.
-- Validating values. Value ranges are `issues/bounded-inputs.md`.
+- Validating values. Value ranges are `bounded-inputs`' table (#125, `spec/bounded-inputs/`).
 
 ## Notes
 
