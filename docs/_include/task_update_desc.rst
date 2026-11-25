@@ -1,6 +1,19 @@
 Update tasks in the database.
 
 Include any number of `FIELD=VALUE` or tag `KEY:VALUE` positional arguments.
+Each argument is split at its first ``=`` or ``:`` (so ``note:a=b`` is the tag ``note``).
+
+Any key that is not a column is a tag: ``color=blue`` sets the tag ``color``, as ``color:blue`` does,
+and so does ``hs update ID color blue``. A misspelled column therefore becomes a tag; without
+``-f`` the prompt lists each change as a column, a tag or a removal before anything is written, so
+it shows there. A key one edit from a column (a letter added, dropped, changed or two swapped,
+letter case aside, as in ``exit_stauts``, ``Exit_Status``, ``Cores``, ``tags`` or ``ip``) is refused
+with exit status 2, naming the column it is near, and nothing is written. ``KEY:VALUE`` always sets a
+tag, even when the key is close to or equal to a column's name: it is the way to set a tag named
+like a column (``hs update ID tag KEY:VALUE`` in the single-task form). ``tag=VALUE``, which would
+replace every tag at once, is refused: change one tag with ``KEY=VALUE`` or ``KEY:VALUE``, and remove
+one with ``--remove-tag``. Every tag is checked by the tag rules (as ``hs submit -t`` checks it), and
+one that breaks them exits with status 2 before anything is counted, asked or written.
 
 Every column is read by its kind, in both forms and on every database, within the range listed
 below. Any other value exits with status 2, naming the column, the range or form and the value,

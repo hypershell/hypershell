@@ -6,7 +6,7 @@ appetite: big
 status: in_progress
 branch: fix/update-typed-columns
 base: develop
-current_phase: P5
+current_phase: P6
 last_updated: '2026-11-25'
 phases:
 - id: P0
@@ -160,7 +160,7 @@ phases:
 - id: P5
   name: 'Tags: tag= refused, any other key a tag, near-misses refused, the prompt
     (R11, R16, R17)'
-  status: pending
+  status: done
   satisfies:
   - R1
   - R9
@@ -174,7 +174,7 @@ phases:
   - P4
   parallel: false
   hammerable: false
-  hill: uphill
+  hill: downhill
   verify: test -n "$HS_TEST_POSTGRES" && sh spec/update-client-retry/drive/bound.sh
     3600 uv run pytest -q -p no:cacheprovider tests/test_update_tags.py tests/test_update_numbers.py
     tests/test_update_kinds.py tests/test_update_datetime.py tests/test_update_group.py
@@ -481,16 +481,16 @@ instant on both backends, on Python 3.11 and 3.14 alike; every column has its ki
 column is refused with the `:` way out; every tag is checked by the tag rules with exit 2; the prompt
 lists column and tag changes.
 
-- [ ] `task.py`: the first-separator split; `tag=` refusal (PLAN §2.8); R16 tags in both forms; R17
+- [x] `task.py`: the first-separator split; `tag=` refusal (PLAN §2.8); R16 tags in both forms; R17
       (`edit_distance`, `near_columns`, the two messages, PLAN §2.7); every tag checked alone with
       `Task.ensure_valid_tag`, wrapped as exit 2 (as Q2 is ruled); the prompt's change lines.
-- [ ] `share/bash_completion.d/hs`, `share/zsh/site-functions/_hs`: `tag` excluded from the offered
+- [x] `share/bash_completion.d/hs`, `share/zsh/site-functions/_hs`: `tag` excluded from the offered
       `FIELD=` as `id` is.
-- [ ] Help and docs: `tag=` refused; any key that `is not a column is a tag`; a key `one edit` from a
+- [x] Help and docs: `tag=` refused; any key that `is not a column is a tag`; a key `one edit` from a
       column is refused, `KEY:VALUE` always sets a tag (the way to a tag named like a column); the
       first separator splits; the prompt lists the changes; the `versionchanged` entry extended,
       including what R16 replaced (`Unrecognized task field`, `Invalid field name`).
-- [ ] `utc_drive.sh`: `tags` mode.
+- [x] `utc_drive.sh`: `tags` mode.
 - **Verify:** see frontmatter: the tag tests, every other new file and neighbours (with
   `tests/test_completions.py`) on both backends; the `tags` drive on both; the phrases; no
   `hs task `; the docs build with `-W`.

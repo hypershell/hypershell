@@ -969,6 +969,16 @@ UPDATE_HELP = f"""\
   Include any number of FIELD=VALUE or tag KEY:VALUE positional arguments.
   The -w/--where and -t/--with-tag operate just as in the search command.
 
+  Any key that is not a column is a tag: KEY=VALUE with such a key is a tag
+  change, as KEY:VALUE is, so a misspelled column becomes a tag; the prompt
+  lists each change as a column, a tag or a removal before anything is
+  written. A key one edit from a column (exit_stauts, Cores, tags) exits with
+  status 2, naming the column; KEY:VALUE always sets a tag, the way to a tag
+  named like a column. tag=VALUE is refused: change tags with KEY=VALUE or
+  KEY:VALUE, remove them with --remove-tag. An argument is split at its first
+  = or :. Every tag is checked by the tag rules, exit status 2 for one that
+  breaks them.
+
   Every column is read by its kind, in both forms, within the range the
   documentation lists for it. cores, exit_status, attempt and part take a
   whole number; memory a size, as hs submit -m reads it (4G, 512MB, 1.5GiB,
@@ -1178,9 +1188,10 @@ def read_datetime(column: str, text: str) -> datetime:
     return local
 
 
-def read_whole_tag(column: str, text: str) -> Any:
-    """The whole tag as given, read as before (replaced by its refusal)."""
-    return smart_coerce(text)
+def read_whole_tag(column: str, text: str) -> None:
+    """A task's tags are never assigned whole."""
+    raise ArgumentError(f'tag: tags are not assigned whole; change one with KEY=VALUE or KEY:VALUE, '
+                        f'remove one with --remove-tag (given: tag={text})')
 
 
 def read_id(column: str, text: str) -> None:
@@ -1254,42 +1265,86 @@ class Changes(NamedTuple):
     shown: List[Tuple[str, str]]
 
 
-def read_changes(arguments: List[str], single: bool = False) -> Changes:
-    """The changes `hs update` was given as `arguments`, each read by its column's kind; nothing is opened.
+def edit_distance(a: str, b: str) -> int:
+    """The optimal string alignment distance of `a` and `b`: insertions, deletions, substitutions and adjacent swaps."""
+    before, previous = None, list(range(len(b) + 1))
+    for i in range(1, len(a) + 1):
+        row = [i] + [0] * len(b)
+        for j in range(1, len(b) + 1):
+            row[j] = min(previous[j] + 1, row[j - 1] + 1, previous[j - 1] + (a[i - 1] != b[j - 1]))
+            if i > 1 and j > 1 and a[i - 1] == b[j - 2] and a[i - 2] == b[j - 1]:
+                row[j] = min(row[j], before[j - 2] + 1)
+        before, previous = previous, row
+    return previous[-1]
 
-    In the `single` form the arguments are `ID FIELD VALUE`. The first argument refused raises
-    :class:`ArgumentError` (exit 2), so nothing is counted, asked or written.
+
+def near_columns(key: str) -> List[str]:
+    """The task columns within one edit of `key`, ignoring letter case, in the order `hs info` shows them."""
+    return [name for name in Task.columns if edit_distance(key.lower(), name) <= 1]
+
+
+def check_tag(key: str, value: Any) -> None:
+    """Refuse a tag that is not one by the tag rules (exit 2); each is checked alone, so none is skipped."""
+    try:
+        Task.ensure_valid_tag({key: value})
+    except (ValueError, TypeError) as error:
+        raise ArgumentError(str(error)) from error
+
+
+def read_changes(arguments: List[str], single: bool = False) -> Changes:
+    """The changes `hs update` was given as `arguments`, each read by its kind; nothing is opened.
+
+    In the `single` form the arguments are `ID FIELD VALUE`; otherwise each is `KEY=VALUE` or
+    `KEY:VALUE`, split at the first of the two. A key that is a column is read by the column's kind; a
+    key one edit from a column (case aside) is refused; any other key, and every `KEY:VALUE`, is a tag.
+    The first argument refused raises :class:`ArgumentError` (exit 2), so nothing is counted, asked or
+    written.
     """
     changes = Changes(columns={}, tags={}, zones=[], advice=[], shown=[])
     if single:
-        _, field, value = arguments
+        ident, field, value = arguments
         if field == 'tag':
-            changes.tags.update(Tag.parse_cmdline_list([value, ]))
-            changes.shown.append(('tag', value))
-            return changes
-        if field not in Task.columns:
-            raise ArgumentError(f'Invalid field name "{field}"')
-        read_column(changes, field, value)
+            for key, tag_value in Tag.parse_cmdline_list([value, ]).items():
+                add_tag(changes, key, tag_value)
+        else:
+            read_assignment(changes, field, value, f'write {ident} tag {field}:VALUE',
+                            lambda: Tag.parse_cmdline_list([f'{field}:{value}']))
         return changes
     for arg in arguments:
         if WhereClause.pattern.match(arg):
             raise ArgumentError(f'Positional argument matches conditional ({arg}), '
                                 f'maybe you intended to use -w/--where?')
-        if '=' in arg:
-            field, value = arg.split('=', 1)
-            if field == 'id':
-                raise ArgumentError(f'Cannot alter task "id" (given: {field}={value})')
-            if field not in Task.columns:
-                raise ArgumentError(f'Unrecognized task field "{field}"')
-            read_column(changes, field, value)
-        elif ':' in arg:
-            key, value = arg.split(':', 1)
-            changes.tags[key] = smart_coerce(value)
-            changes.shown.append(('tag', arg))
-        else:
+        equals, colon = arg.find('='), arg.find(':')
+        if equals < 0 and colon < 0:
             raise ArgumentError(f'Argument not recognized ({arg}): missing "=" or ":"')
-    Task.ensure_valid_tag(changes.tags)
+        if colon >= 0 and (equals < 0 or colon < equals):
+            key, value = arg.split(':', 1)
+            add_tag(changes, key, smart_coerce(value), value)
+        else:
+            key, value = arg.split('=', 1)
+            read_assignment(changes, key, value, f'write {key}:VALUE', lambda: {key: smart_coerce(value)})
     return changes
+
+
+def read_assignment(changes: Changes, key: str, text: str, way_out: str,
+                    as_tags: Callable[[], Dict[str, Any]]) -> None:
+    """Read `key` given `text` into `changes`: a column by its kind, else a tag (`as_tags`), unless one edit from a column."""
+    if key in Task.columns:
+        read_column(changes, key, text)
+        return
+    near = near_columns(key)
+    if near:
+        raise ArgumentError(f'{key}: not a task column; did you mean {" or ".join(near)}? '
+                            f'To set a tag by that name, {way_out}')
+    for tag, value in as_tags().items():
+        add_tag(changes, tag, value, text)
+
+
+def add_tag(changes: Changes, key: str, value: Any, text: Optional[str] = None) -> None:
+    """Add the tag `key` with `value` (given as `text`) to `changes`, refused if not one by the tag rules."""
+    check_tag(key, value)
+    changes.tags[key] = value
+    changes.shown.append(('tag', f'{key}:{value if text is None else text}'))
 
 
 def read_column(changes: Changes, column: str, text: str) -> None:
@@ -1435,6 +1490,7 @@ class TaskUpdateApp(ReadingMixin, Application, SearchableMixin):
             return
 
         if not self.no_confirm:
+            self.show_changes()
             response = input(f'Update affects {count} tasks, continue? yes/[no]: ').strip().lower()
             if response in ['n', 'no', '']:
                 print('Stopping')
@@ -1487,6 +1543,14 @@ class TaskUpdateApp(ReadingMixin, Application, SearchableMixin):
         # missed under contention are found and written by id (see `Task.update_matching`).
         written = Task.update_matching(self.filter_criteria(), field_updates, tag_updates, self.remove_tag or [])
         self.report_written(count, written)
+
+    def show_changes(self: TaskUpdateApp) -> None:
+        """Print each change before the prompt, as a column, a tag or a removal, so a misspelled column shows as a tag."""
+        lines = [*self.changes.shown, *(('remove', f'tag {name}') for name in self.remove_tag or [])]
+        if lines:
+            print('Changes:')
+            for kind, text in lines:
+                print(f'  {kind:<7} {text}')
 
     def record_zones(self: TaskUpdateApp) -> None:
         """Record each zone a change names, as `hs submit --zone` does, so its tasks show the name."""

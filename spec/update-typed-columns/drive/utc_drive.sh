@@ -44,9 +44,6 @@ pass() { echo "ok   [$backend $mode] $*"; }
 hs() { uv run --quiet --project "$root" hs "$@"; }
 field() { hs list "$1" -t "$2" 2>/dev/null; }
 
-built='numbers kinds datetime'  # The modes built so far
-case " $built " in *" $mode "*) ;; *) fail "mode $mode not built" ;; esac
-
 admin() {  # Run one statement on the server's maintenance database with AUTOCOMMIT.
     uv run --quiet --project "$root" python -c 'import os, sys
 from sqlalchemy import create_engine, text
@@ -100,6 +97,8 @@ stored() {  # stored COLUMN EXPECTED: the column of the task tagged n:1
     value=$(field "$1" n:1)
     [ "$value" = "$2" ] || fail "$1 is '$value', not '$2'"
 }
+
+case $mode in numbers|kinds|datetime|tags) ;; *) fail "unknown mode (numbers, kinds, datetime or tags)" ;; esac
 
 case $mode in
 numbers)

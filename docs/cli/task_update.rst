@@ -112,4 +112,16 @@ Description
    ``today`` and ``epoch``, which PostgreSQL stored, exit with status 2: use ``$(date -Iseconds)``.
    ``none`` for ``submit_time`` exits with status 2.
 
+.. versionchanged:: 2.9.0
+   ``KEY=VALUE`` with a key that is not a task column is a tag change, as ``KEY:VALUE`` is, in both
+   forms (``hs update ID KEY VALUE`` too). Before, it exited with status 2 (``Unrecognized task
+   field``, ``Invalid field name``). Without ``-f``, the prompt lists each change as a column, a tag
+   or a removal before asking. A key one edit from a column, letter case aside (``exit_stauts=0``,
+   ``Exit_Status=0``, ``tags=x``), exits with status 2, naming the key and the nearest column, and
+   writes nothing; ``KEY:VALUE`` always sets a tag. ``tag=VALUE`` exits with status 2, pointing to
+   ``KEY=VALUE``, ``KEY:VALUE`` and ``--remove-tag``; before, it replaced the task's every tag with
+   the value as JSON text. An argument is split at its first ``=`` or ``:``. Every tag is checked by
+   the tag rules: a filtered ``KEY:VALUE`` that breaks them exits with status 2 instead of 5 with a
+   traceback, and ``hs update ID tag KEY:VALUE``, which stored any tag before, is checked too.
+
 .. include:: ../_include/task_update_help.rst

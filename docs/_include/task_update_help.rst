@@ -4,6 +4,12 @@ Arguments
 *ARGS*...
     Assignment pairs for update.
 
+    Any key that is not a column is a tag (``color=blue`` is ``color:blue``), so a misspelled column
+    becomes a tag; the prompt lists each change as a column, a tag or a removal. A key one edit from
+    a column (``exit_stauts``, ``Cores``, ``tags``) exits with status 2, naming the column;
+    ``KEY:VALUE`` always sets a tag. ``tag=VALUE`` is refused. An argument is split at its first
+    ``=`` or ``:``.
+
     Every column is read by its kind, in both forms, within the range the description lists:
     ``cores``, ``exit_status``, ``attempt`` and ``part`` take a whole number; ``memory`` a size, as
     ``hs submit -m`` reads it (``4G``, ``512MB``, ``1.5GiB``, or bytes); ``timeout``, ``waited`` and
