@@ -323,6 +323,29 @@ strict mode that refuses unknown keys would be a 2.10.0 interface change.
 `src/hypershell/core/config_schema.py` (`KEYS`, `TABLES`); `spec/bounded-inputs/` (#125) for values*
 **Seed:** [`issues/config-unknown-key-warning.md`](issues/config-unknown-key-warning.md) · *status: unshaped*
 
+## The tag check stops at the first tag with an empty value
+
+`Task.ensure_valid_tag` returns at the first naked tag, so no tag after it is checked, key or value.
+`hs submit -t naked other:a/b` stores a value that `hs submit -t other:a/b` refuses, and an inline
+`# HYPERSHELL:` list or `hs update` behaves the same. Every tag should be checked whatever its
+position. Pre-existing; found by `update-typed-columns`' research, which works around it in
+`hs update` only.
+
+*Target: 2.9.x · Horizon: near-term, small · Depends on: — · Refs: `data/model.py`
+(`ensure_valid_tag`), `spec/update-typed-columns/PLAN.md` (D11)*
+**Seed:** [`issues/tag-check-stops-at-empty-value.md`](issues/tag-check-stops-at-empty-value.md) · *status: unshaped*
+
+## `hs info` and `hs list` show a timestamp's offset differently on each backend
+
+PostgreSQL prints a stored time with an offset, in the server session's time zone; SQLite prints
+none. The instant and the local wall time agree. One display rule for every timestamp on both
+backends would end the split, without touching the wire format. Deferred from `update-typed-columns`'
+plan gate (Q1).
+
+*Target: 2.9.x · Horizon: near-term, small · Depends on: — · Refs:
+`spec/update-typed-columns/research/03-datetime.md` (§4)*
+**Seed:** [`issues/timestamp-display-offsets.md`](issues/timestamp-display-offsets.md) · *status: unshaped*
+
 ## The Python API does not hold explicit arguments to the numeric ranges
 
 `bounded-inputs` holds every option, configuration key and variable to one table of ranges, and the
