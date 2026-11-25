@@ -69,8 +69,8 @@ jobs:
   postgres:
     name: PostgreSQL (${{ matrix.name }})
     runs-on: ubuntu-latest
-    # The PostgreSQL-aware files take about 22 minutes locally since update-typed-columns; 45 leaves room.
-    timeout-minutes: 45
+    # The PostgreSQL-aware files take 30-50 minutes on CI since update-typed-columns; 75 leaves room.
+    timeout-minutes: 75
     strategy:
       fail-fast: false
       matrix:
