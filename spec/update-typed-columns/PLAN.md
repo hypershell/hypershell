@@ -422,3 +422,24 @@ join the PostgreSQL job's list (`.github/workflows/tests.yml:121`) and its comme
 ---
 
 *Backing research: [`research/00-digest.md`](research/00-digest.md).*
+
+## Plan gate (2026-11-24)
+
+**Approved** by the foreman, gate judge under the maintainer's mandate. The build starts only after
+`bounded-inputs` has landed on develop; P0 merges it.
+
+- **R17 short names (maintainer, 2026-11-24):** kept as approved. Every column name is fuzz-checked,
+  short ones included, so `pid=`, `ip=`, `in=`, `port=`, `core=` and `done=` are refused with the
+  `:` way out. The release note names the consequence.
+- **Q1:** leave timestamp display alone; seed a separate cycle for how PostgreSQL prints offsets.
+- **Q2:** check the tag key rules on every `hs update` tag path alike. The filtered `KEY:VALUE` with a
+  bad key becomes exit 2 instead of a traceback, and `ID tag KEY:VALUE` gains the check. Both go in
+  the release note as behaviour changes; this is in the spirit of bounded-inputs ("bail on bad
+  input"), and the maintainer may overrule.
+- **Q3:** in the single-task form, R17's message says `write ID tag KEY:VALUE`.
+- **Q4:** `column.*` rows, with the `setting_for` exclusion.
+- **Q5:** peaks stored as `float(v) + 0.0`.
+- **Q6:** a local time in a DST gap is refused; an ambiguous hour takes the first occurrence.
+- **Risks accepted as planned:** the per-process advisory, SQLite wall time, `source=<direct>`
+  refused, the CI timeout raise. File the `ensure_valid_tag` early-return seed (target 2.9.x) on
+  develop.
