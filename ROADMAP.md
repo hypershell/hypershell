@@ -232,13 +232,6 @@ reads every form, through the same lookup the client-side host rule uses.
 share its lookup) · Refs: `cluster/__init__.py` and `relay/__init__.py` (`advertise_host`)*
 **Seed:** [`issues/advertise-env-forms-ignored.md`](issues/advertise-env-forms-ignored.md) · *status: unshaped*
 
-## `hs update group=…` stores a non-integer group
-
-`hs update` accepts any value for `group` and stores it, so a text group reaches the scheduler even after submit-time validation (`submit-input-checks`) refuses one. Apply the submit-time integer rule to `hs update group=…`, refusing with exit 2 before anything is written.
-
-*Target: 2.9.0 · Horizon: near-term, small · Depends on: — · Refs: `spec/submit-input-checks/GOAL.md` (Non-goals)*
-**Seed:** [`issues/update-group-stores-text.md`](issues/update-group-stores-text.md) · *status: adopted:update-group-and-legacy-filters*
-
 ## An empty `logging.style` makes every command exit 3 until the file is hand-edited
 
 `hs config set logging.style ''` writes an empty style, after which every command, `hs config` included, exits 3, so the only way out is to edit the file by hand. Either refuse an empty or unknown style in `hs config set` (it takes a fixed word), or let `hs config` itself start with a bad logging style so the user can fix it.
@@ -252,20 +245,6 @@ Under a local `hs cluster`, the in-process client uses the built-in heartrate ra
 
 *Target: 2.9.x · Horizon: near-term, small · Depends on: — · Refs: `spec/config-set-and-unread/GOAL.md` (Non-goals)*
 **Seed:** [`issues/cluster-local-client-heartrate.md`](issues/cluster-local-client-heartrate.md) · *status: unshaped*
-
-## A text `attempts = "3"` in a file crashes every command at import
-
-A configuration file holding `server.attempts` as a string makes every command fail at import with a traceback instead of a configuration error. Read typed keys from a file by the key's declared kind, as the environment layer does since #113, and refuse a value that does not convert with exit 3 naming the key and file.
-
-*Target: 2.9.x · Horizon: near-term, small · Depends on: — · Refs: `spec/env-config-keys/` (the typed reader); `spec/config-set-and-unread/research/`*
-**Seed:** [`issues/config-text-attempts-crashes.md`](issues/config-text-attempts-crashes.md) · *status: adopted:bounded-inputs*
-
-## `hs config set` writes integers wider than 64 bits to TOML
-
-An integer value wider than 64 bits is written to the configuration file, which TOML readers then refuse or misread. Refuse an integer outside TOML's 64-bit range in `hs config set` with exit 2 naming the key.
-
-*Target: 2.9.x · Horizon: near-term, small · Depends on: — · Refs: `spec/config-set-and-unread/research/`*
-**Seed:** [`issues/config-set-wide-integers.md`](issues/config-set-wide-integers.md) · *status: adopted:bounded-inputs*
 
 ## The `--eager` help says "greater than one" where it means zero
 
@@ -320,40 +299,16 @@ statement. Pre-existing; out of scope for `hs-update-contended-writes` (#111).
 `spec/hs-update-contended-writes/` (Non-goals)*
 **Seed:** [`issues/update-legacy-tag-lost-write.md`](issues/update-legacy-tag-lost-write.md) · *status: unshaped*
 
-## The single-task `hs update ID FIELD VALUE` form ignores filter options
-
-The three-argument form writes the named task and never reads `-w`, `-t`, `-g`, `--limit` or the
-filter aliases given with it, so `hs update ID args … -F` writes whether or not the task failed. The
-filtered form honours the same options. The fix applies the filters or refuses the combination;
-refusing would be an interface change, which shaping weighs against the Target. Pre-existing; named
-by `update-client-retry`'s shaping, which takes the same form's action options.
-
-*Target: 2.9.0 · Horizon: near-term, small · Depends on: — (sequence after `update-client-retry`,
-same routing) · Refs: `issues/update-legacy-tag-lost-write.md`*
-**Seed:** [`issues/update-legacy-form-ignores-filters.md`](issues/update-legacy-form-ignores-filters.md) · *status: adopted:update-group-and-legacy-filters*
-
 ## `hs update` stores text in the task's integer columns
 
 `hs update exit_status=x`, `attempt=x`, `cores=x`, `memory=x` and `timeout=x` each store the text
 and exit 0. `cores`, `memory` and `timeout` drive dispatch. The fix reads each column by its kind,
 through `hs submit`'s parsers and `bounded-inputs`' ranges, refusing with exit 2 before any write.
 
-*Target: 2.9.0 · Horizon: near-term, small · Depends on: `bounded-inputs`,
+*Target: 2.9.0 · Horizon: near-term, small · Depends on: — (both landed, #125 and #124) · Builds on:
+`bounded-inputs`,
 `update-group-and-legacy-filters` · Refs: `spec/submit-input-checks/` (#118)*
 **Seed:** [`issues/update-typed-columns.md`](issues/update-typed-columns.md) · *status: unshaped*
-
-## Every numeric setting has one declared range, one parser and one error
-
-Bounds on numeric input were added one cycle at a time (a period above zero, an evict cap, a rate
-floor, 32-bit groups), and each review finds the next absurd value that slips through. One table of
-ranges beside each key's kind, one parser per kind for options, files and the environment, one
-error, and a start-up backstop that turns any stray numeric error into a clean refusal would end
-that. It absorbs the absurd-input seeds filed during the 2.9.0 cycles.
-
-*Target: 2.9.0 · Horizon: near-term · Depends on: `config-set-and-unread` (landed, #117),
-`submit-input-checks` (landed, #118), `update-client-retry` · Refs: `core/config_schema.py`;
-review rubric (Scope)*
-**Seed:** [`issues/bounded-inputs.md`](issues/bounded-inputs.md) · *status: adopted:bounded-inputs*
 
 ## An unrecognized configuration key is silently ignored
 
@@ -365,7 +320,7 @@ tables, `[export]`, zone tables and the `_env`/`_eval` forms are exempt. A warni
 strict mode that refuses unknown keys would be a 2.10.0 interface change.
 
 *Target: 2.9.x · Horizon: near-term, small · Depends on: — · Refs:
-`src/hypershell/core/config_schema.py` (`KEYS`, `TABLES`); `issues/bounded-inputs.md` for values*
+`src/hypershell/core/config_schema.py` (`KEYS`, `TABLES`); `spec/bounded-inputs/` (#125) for values*
 **Seed:** [`issues/config-unknown-key-warning.md`](issues/config-unknown-key-warning.md) · *status: unshaped*
 
 ## The Python API does not hold explicit arguments to the numeric ranges
@@ -376,8 +331,8 @@ is used as given, by the maintainer's ruling (2026-11-24), and the ranges are on
 each parameter that mirrors a setting through the same parsers and raise `ValueError` before work
 starts.
 
-*Target: 2.10.0 · Horizon: mid-term, small · Depends on: `bounded-inputs` · Refs:
-`spec/bounded-inputs/GOAL.md` (C3)*
+*Target: 2.10.0 · Horizon: mid-term, small · Depends on: — (`bounded-inputs` landed, #125)
+· Refs: `spec/bounded-inputs/GOAL.md` (C3)*
 **Seed:** [`issues/api-argument-ranges.md`](issues/api-argument-ranges.md) · *status: unshaped*
 
 ## Docs and runtime surfacing

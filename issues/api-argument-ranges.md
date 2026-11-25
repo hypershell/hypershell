@@ -13,7 +13,7 @@ lane: public
 
 ## Problem
 
-`bounded-inputs` (2.9.0) gives every numeric setting one range and one parser, and holds every
+`bounded-inputs` (#125) gives every numeric setting one range and one parser, and holds every
 option, configuration key and `HYPERSHELL_*` variable to it. Its GOAL gate (C3, maintainer,
 2026-11-24) kept the Python API's explicit arguments as they are: a default the API takes from
 configuration goes through the range check, but a value a caller passes (`bundlesize=0` to

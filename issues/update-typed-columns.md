@@ -32,8 +32,8 @@ is refused with exit 2 before anything is written, in both the filtered and the 
 
 ## Notes
 
-- Sequence after `bounded-inputs` (the parsers and ranges) and
-  `update-group-and-legacy-filters` (the refusal style for `hs update`).
+- Builds on `bounded-inputs` (the parsers and ranges, landed in #125) and
+  `update-group-and-legacy-filters` (the refusal style for `hs update`, landed in #124).
 - Decide at shaping whether `exit_status` and `attempt` should be writable at all, or are
   bookkeeping that `hs update` should refuse to touch (`--revert` and `--cancel` already cover the
   common cases).
