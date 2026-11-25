@@ -104,4 +104,12 @@ Description
    was stored where its tasks are matched by none, and ``none`` for these columns failed with exit
    status 5 and a traceback.
 
+.. versionchanged:: 2.9.0
+   ``submit_time``, ``schedule_time``, ``start_time`` and ``completion_time`` take ISO 8601 on both
+   databases, a value without an offset being local time, and hold the same instant on SQLite and
+   PostgreSQL. Before, SQLite refused every value with exit status 5 and a traceback, and PostgreSQL
+   stored whatever its server read, a time without an offset in the server session's zone. ``now``,
+   ``today`` and ``epoch``, which PostgreSQL stored, exit with status 2: use ``$(date -Iseconds)``.
+   ``none`` for ``submit_time`` exits with status 2.
+
 .. include:: ../_include/task_update_help.rst

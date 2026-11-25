@@ -6,7 +6,8 @@ Every column is read by its kind, in both forms and on every database, within th
 below. Any other value exits with status 2, naming the column, the range or form and the value,
 before anything is counted, asked or written, and no other change given with it is written.
 ``none`` or ``null``, in any case, clears a column that may be empty; for ``attempt``, ``part``,
-``retried``, ``submit_id`` and ``args`` it is refused. A change to ``id`` is refused in both forms.
+``retried``, ``submit_id``, ``submit_time`` and ``args`` it is refused. A change to ``id`` is
+refused in both forms.
 
 - ``cores``: a whole number, as ``hs submit -c`` reads it. Range: 0 (unconstrained) to 32,767.
   Above 1,024 it is written with a warning.
@@ -28,6 +29,14 @@ before anything is counted, asked or written, and no other change given with it 
 - ``zone``: a zone name, read as ``hs submit --zone`` reads it; ``default`` or ``none`` puts the task in
   the default zone, so a zone named ``none`` or ``null`` cannot be set by ``hs update``. A new name
   is recorded once the change is written, as ``hs submit --zone`` records it.
+- ``submit_time``, ``schedule_time``, ``start_time`` and ``completion_time``: ISO 8601 only, a date
+  (``2026-01-01``, midnight) or a date and a time joined by ``T`` or a space, with optional seconds
+  and fraction (up to six digits) and an optional offset or ``Z`` (e.g., ``2026-01-01T09:00``,
+  ``2026-01-01 09:00:00.5``, ``2026-01-01T09:00:00-05:00``); ``submit_time`` not ``none``. A value
+  without an offset is local time, the zone ``hs info`` and ``hs list`` show times in; a local time
+  that does not exist, in the hour skipped by a change to daylight-saving time, is refused, and one
+  that occurs twice is the first. A value is the same instant on SQLite and PostgreSQL. ``now``,
+  ``today``, ``epoch`` and other words are refused; for the time now, use ``$(date -Iseconds)``.
 - ``args``: any text, as given; not ``none``. The other text columns (``command``, ``outpath``,
   ``errpath``, ``csvpath``, ``submit_host``, ``server_host``, ``client_host``, ``fingerprint``) take
   any text, and ``none`` clears them.

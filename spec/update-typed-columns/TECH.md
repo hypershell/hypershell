@@ -6,7 +6,7 @@ appetite: big
 status: in_progress
 branch: fix/update-typed-columns
 base: develop
-current_phase: P4
+current_phase: P5
 last_updated: '2026-11-25'
 phases:
 - id: P0
@@ -134,7 +134,7 @@ phases:
 - id: P4
   name: 'Datetimes: ISO 8601, local time, the same instant on both backends (R6);
     the map is complete'
-  status: pending
+  status: done
   satisfies:
   - R1
   - R6
@@ -146,7 +146,7 @@ phases:
   - P3
   parallel: false
   hammerable: false
-  hill: uphill
+  hill: downhill
   verify: test -n "$HS_TEST_POSTGRES" && sh spec/update-client-retry/drive/bound.sh
     2400 uv run pytest -q -p no:cacheprovider tests/test_update_datetime.py tests/test_update_kinds.py
     tests/test_update_numbers.py tests/test_update_refusals.py tests/test_update.py
@@ -457,14 +457,17 @@ forms; a zone name is recorded only after the prompt.
 **Goal:** the four datetime columns take ISO 8601 only, a naive value as local time, and hold the same
 instant on both backends, on Python 3.11 and 3.14 alike; every column has its kind.
 
-- [ ] `task.py`: `datetime_value` (PLAN §2.5: the regex gate, `fromisoformat`, `.astimezone()`, the
+- [x] `task.py`: `datetime_value` (PLAN §2.5: the regex gate, `fromisoformat`, `.astimezone()`, the
       DST-gap refusal); the fallback to today's reading removed, so `COLUMN_KINDS` covers
       `Task.columns`.
-- [ ] Help and docs: `ISO 8601`, a value without an offset is local time, `now`/`today`/`epoch`
+- [x] Help and docs: `ISO 8601`, a value without an offset is local time, `now`/`today`/`epoch`
       refused (use `$(date -Iseconds)`); the `versionchanged` entry extended.
-- [ ] `AGENTS.md` and `.agents/factory/invariants.md` §3, in lockstep: `hs update` reads every column
+- [x] `AGENTS.md` and `.agents/factory/invariants.md` §3, in lockstep: `hs update` reads every column
       by its kind through `COLUMN_KINDS`; a new `Task` column gets its kind there in the same commit.
-- [ ] `utc_drive.sh`: `datetime` mode (with `TZ` set to a non-UTC zone).
+- [x] `utc_drive.sh`: `datetime` mode (with `TZ` set to a non-UTC zone).
+- **Built (P4, 2026-11-25):** `tag` joins `COLUMN_KINDS` with today's reading (`smart_coerce`) so
+  the map is complete here; P5 replaces it with the R11 refusal. The verify ran with
+  `TMPDIR=/tmp/claude-501`, where the foreman built `venv311-utc` (META F2).
 - **Verify:** see frontmatter: the datetime tests and neighbours on both backends; the datetime tests
   on Python 3.11 (SQLite and in-process); the `datetime` drive on both; the phrase; the constitution
   clause.

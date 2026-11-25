@@ -277,7 +277,10 @@ must be an integer: `ensure_group` accepts an `int` (not a `bool`) in PostgreSQL
 from an inline or tag-only `group:` tag, `-t group:…` (exit 2, before any input is read) or a
 `--from-json` `group` key, and anything else raises `TaskGroupError` (exit 5) naming the value and
 its line or record; `hs update group=VALUE` and `hs update ID group VALUE` take it by `parse_group`
-(exit 2, before counting or writing); `Task.new(group=…)` is the caller's and stays unchecked, and a retry
+(exit 2, before counting or writing), and every other column `hs update` writes is read by its kind
+through `COLUMN_KINDS` (`task.py`; the ranged ones by `SETTINGS` entries) before counting or writing,
+so a new `Task` column gets its kind there in the same commit (pinned by
+`set(COLUMN_KINDS) == set(Task.columns)`); `Task.new(group=…)` is the caller's and stays unchecked, and a retry
 (`Task.new_retry`) copies its task's stored group, a legacy text group too. Read-in-full input (a named file to `hs submit`, `hs cluster` or `hs server`,
 `--from-json`, arguments, and `hs submit` stdin with a database, read by `read_in_full`) is scanned
 whole by `scan_task_lines` before any write, with or without a database; on a stream the `Loader`

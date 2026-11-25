@@ -979,9 +979,14 @@ UPDATE_HELP = f"""\
   8-4-4-4-12 hexadecimal form in any case, stored in lower case. zone takes
   a zone name as hs submit --zone reads it; default or none is the default
   zone (so a zone named none or null cannot be set here). args takes any text
-  but none or null; the other text columns take any text.
+  but none or null; the other text columns take any text. submit_time,
+  schedule_time, start_time and completion_time take ISO 8601 only: a date
+  (2026-01-01), or a date and time joined by T or a space, with optional
+  seconds, fraction and offset (2026-01-01T09:00:00-05:00, or Z); a value
+  without an offset is local time. now, today and epoch are refused: use
+  $(date -Iseconds).
   none or null clears a column that may be empty (not attempt, part,
-  retried, submit_id or args).
+  retried, submit_id, submit_time or args).
   Any other value exits with status 2 before anything is counted, asked or
   written, and no other change given with it is written. A change to id is
   refused in both forms.
@@ -1145,6 +1150,39 @@ def read_args(column: str, text: str) -> str:
     return text
 
 
+DATETIME_PATTERN: Final[re.Pattern] = re.compile(
+    r'\d{4}-\d{2}-\d{2}(?:[T ](?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d{1,6})?)?(?:Z|[+-]\d{2}:\d{2})?)?', re.ASCII)
+"""ISO 8601 as the datetime columns take it: a date, or a date and a time (`T` or a space), with optional
+seconds and fraction (up to six digits) and an optional `Z` or `±HH:MM` offset."""
+
+DATETIME_FORM: Final[str] = 'an ISO 8601 date, or date and time (e.g., 2026-01-01T09:00:00-05:00)'
+"""What a datetime column expects, for its refusal."""
+
+
+def read_datetime(column: str, text: str) -> datetime:
+    """An ISO 8601 date or date and time, as an aware local time; a value without an offset is local time.
+
+    The form is checked before Python reads it, as Python's reader takes more forms than these, and
+    more on some versions than others. A local time that does not exist (in a daylight-saving gap) is
+    refused, since where it would land differs by version; an ambiguous one is its first occurrence.
+    """
+    try:
+        value = datetime.fromisoformat(text) if DATETIME_PATTERN.fullmatch(text) else None
+    except ValueError:  # Not a day of the calendar
+        value = None
+    if value is None:
+        raise ArgumentError(refusal(column, DATETIME_FORM, text))
+    local = value.astimezone()
+    if value.tzinfo is None and local.replace(tzinfo=None) != value:
+        raise ArgumentError(refusal(column, DATETIME_FORM, text) + ', which does not exist in local time')
+    return local
+
+
+def read_whole_tag(column: str, text: str) -> Any:
+    """The whole tag as given, read as before (replaced by its refusal)."""
+    return smart_coerce(text)
+
+
 def read_id(column: str, text: str) -> None:
     """A task's id is never written."""
     raise ArgumentError(f'Cannot alter task "id" (given: id={text})')
@@ -1164,6 +1202,9 @@ ADVISED_COLUMNS: Final[Tuple[str, ...]] = ('cores', 'attempt')
 UUID_COLUMNS: Final[Tuple[str, ...]] = ('server_id', 'client_id', 'previous_id', 'next_id', 'source')
 """The uuid columns that may be empty (`submit_id` may not)."""
 
+DATETIME_COLUMNS: Final[Tuple[str, ...]] = ('schedule_time', 'start_time', 'completion_time')
+"""The datetime columns that may be empty (`submit_time` may not)."""
+
 TEXT_COLUMNS: Final[Tuple[str, ...]] = ('command', 'outpath', 'errpath', 'csvpath', 'submit_host', 'server_host',
                                         'client_host', 'fingerprint')
 """The text columns that may be empty."""
@@ -1177,21 +1218,19 @@ COLUMN_KINDS: Final[Dict[str, ColumnKind]] = {
     'submit_id': ColumnKind(read_uuid, clears=False, form=UUID_FORM),
     **{column: ColumnKind(read_uuid) for column in UUID_COLUMNS},
     'zone': ColumnKind(read_zone),
+    'submit_time': ColumnKind(read_datetime, clears=False, form=DATETIME_FORM),
+    **{column: ColumnKind(read_datetime) for column in DATETIME_COLUMNS},
     'args': ColumnKind(read_args, clears=False),
     **{column: ColumnKind(read_text, clears=False) for column in TEXT_COLUMNS},
     'id': ColumnKind(read_id, clears=False),
+    'tag': ColumnKind(read_whole_tag, clears=False),
 }
 """How `hs update` reads each task column, by name."""
 
 
 def change_value(field: str, text: str) -> Any:
     """The value a change writes to task column `field`, given as `text`; :class:`ArgumentError` (exit 2) if refused."""
-    kind = COLUMN_KINDS.get(field)
-    if kind is None:
-        # Not yet read by kind: a text column takes the text as given; `none` and `null` clear it.
-        if Task.columns.get(field) is str:
-            return None if text.lower() in NULL_WORDS else text
-        return smart_coerce(text)
+    kind = COLUMN_KINDS[field]
     word = text.strip().lower()
     if word in NULL_WORDS and kind.clears:
         return None

@@ -32,3 +32,27 @@
   once the dependency lands and whose verify imports the dependency API the PLAN names; allow
   `satisfies: []` for it; have red lists carry their base in a `# base:` header read by the verify.
 - **Confidence:** med · **Effort:** small
+
+## F2 — Verify lines name venvs under `${TMPDIR:-/tmp}`, which differs with the sandbox
+`origin=hs-build:P4 severity=low category=tooling status=open target=.claude/skills/hs-plan/SKILL.md`
+- **What happened:** P4-P6's verify lines name `${TMPDIR:-/tmp}/venv311-utc` and
+  `${TMPDIR:-/tmp}/docs-venv-utc`. Every verify that reaches PostgreSQL runs with the sandbox off,
+  where macOS's `TMPDIR` is `/var/folders/…/T/`, not the sandbox's `/tmp/claude-501`, so the venvs
+  the foreman names were not where the verify looked. The builder ran the verify with
+  `TMPDIR=/tmp/claude-501` exported (the line unchanged).
+- **Skill cause:** the plan template lets a verify depend on `TMPDIR` for a path the foreman fixes
+  elsewhere; nothing says which `TMPDIR` a verify runs under.
+- **Recommended fix:** verify lines take such paths from a named variable the foreman sets (e.g.,
+  `UTC_VENV311`), or the skill says to export `TMPDIR` to the cycle's scratch root for every verify.
+- **Confidence:** high · **Effort:** small
+
+## F3 — P0's verify stops holding once develop moves on
+`origin=hs-build:P0 severity=low category=template status=open target=.agents/factory/templates/TECH.md`
+- **What happened:** P0's `git merge-base --is-ancestor origin/develop HEAD` passed at the merge,
+  but develop gained roadmap commits (seeds filed by the foreman) during the build, so the same
+  verify, re-run later, fails though nothing in the branch changed.
+- **Skill cause:** a dependency-merge phase (F1) pins "origin/develop" by name, not the commit it
+  merged; the red list already pins its base by SHA.
+- **Recommended fix:** a dependency-merge verify checks the merged commit by SHA (recorded in the
+  phase, as `red.txt` records `# base:`), not the moving `origin/develop`.
+- **Confidence:** high · **Effort:** small

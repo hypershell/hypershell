@@ -44,7 +44,7 @@ pass() { echo "ok   [$backend $mode] $*"; }
 hs() { uv run --quiet --project "$root" hs "$@"; }
 field() { hs list "$1" -t "$2" 2>/dev/null; }
 
-built='numbers kinds'  # The modes built so far
+built='numbers kinds datetime'  # The modes built so far
 case " $built " in *" $mode "*) ;; *) fail "mode $mode not built" ;; esac
 
 admin() {  # Run one statement on the server's maintenance database with AUTOCOMMIT.
