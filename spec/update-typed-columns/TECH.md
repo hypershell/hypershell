@@ -189,7 +189,7 @@ phases:
     sphinx-build -W --keep-going -q -E -b html docs "${TMPDIR:-/tmp}/docs-html-utc"
 - id: P6
   name: 'Gate: the whole suite, PostgreSQL, the red list, every drive mode, the docs'
-  status: pending
+  status: in_progress
   satisfies:
   - R1
   - R2
@@ -213,6 +213,7 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
+  attempts: 1
   verify: 'test -n "$HS_TEST_POSTGRES" && env -u HS_TEST_POSTGRES sh spec/update-client-retry/drive/bound.sh
     5400 uv run pytest -q -p no:cacheprovider && sh spec/update-client-retry/drive/bound.sh
     3600 uv run pytest -q -p no:cacheprovider tests/test_update_numbers.py tests/test_update_kinds.py
@@ -512,6 +513,14 @@ drive mode passes on both backends; the docs build with `-W`.
       user-visible changes, plus Q2's tag-check change if ruled so.
 - [ ] Seed for publish: `Task.ensure_valid_tag` stops at the first empty value (`model.py`), which
       also affects `hs submit` (PLAN §5).
+- **Attempt 1 (2026-11-25), red at `red_check`:** the whole suite without PostgreSQL, 5,736 passed
+  and 400 skipped (42 min 49 s); the PostgreSQL-aware files, 443 passed (21 min 58 s); the 263 red
+  nodes, 263 passed (17 min 55 s); `red_check` on 674f6d85, **261 of 263 red**: the two completion
+  tests (`test_bash_completion_offers_no_whole_tag`, `test_zsh_completion_offers_no_whole_tag`) pass
+  on the base, as `red_check` swaps in the base's `src` only and they read `share/` from this tree.
+  Both were red at P1, before `share/` changed. The chain stopped there; run apart, every drive mode
+  passes on both backends (68 checks) and the docs build with `-W`. Open question for the foreman:
+  drop the two nodes from `red.txt` with a PLAN note (they stay as guards), or another ruling.
 - **Touches:** `spec/update-typed-columns/TECH.md` only.
 
 ---
