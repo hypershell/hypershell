@@ -6,169 +6,234 @@ appetite: big
 status: in_progress
 branch: fix/update-typed-columns
 base: develop
-current_phase: P0
-last_updated: '2026-11-24'
+current_phase: P1
+last_updated: '2026-11-25'
 phases:
 - id: P0
-  name: 'Merge origin/develop once bounded-inputs has landed; pin its API'
-  status: pending
+  name: Merge origin/develop once bounded-inputs has landed; pin its API
+  status: done
   satisfies: []
   depends_on: []
   parallel: false
   hammerable: false
-  hill: uphill
-  verify: >-
-    git merge-base --is-ancestor origin/develop HEAD &&
-    git show origin/develop:src/hypershell/core/config_schema.py | grep -q '^def parse_setting' &&
-    uv run python -c "from hypershell.core.config_schema import SETTINGS, Range, Kind, parse_setting, SettingError, advise, setting_for, read_value, FORMS, shown, INT16_MAX, INT64_MAX;
-    from hypershell.core.exceptions import ReadingMixin;
-    from hypershell.data.model import parse_group, TaskGroupError, zone_name, zone_id, DEFAULT_ZONE_ID, Zone;
-    from hypershell.task import TaskUpdateApp, change_value;
-    assert issubclass(TaskUpdateApp, ReadingMixin);
-    assert {'task.cores', 'task.memory', 'task.timeout', 'server.attempts', 'option.part', 'option.group'} <= set(SETTINGS);
-    assert setting_for('option.part') is None and issubclass(SettingError, ValueError);
-    assert parse_setting('task.memory', '4G', name='memory') == 4294967296;
-    assert read_value(Kind.BOOL, 'Yes') is True and Kind.NUMBER and Kind.INT" &&
-    test -n "$HS_TEST_POSTGRES" &&
-    sh spec/update-client-retry/drive/bound.sh 2400 uv run pytest -q -p no:cacheprovider
-    tests/test_bounded_table.py tests/test_bounded_parsers.py tests/test_bounded_advisory.py
-    tests/test_update_group.py tests/test_update_refusals.py tests/test_update.py
+  hill: downhill
+  verify: git merge-base --is-ancestor origin/develop HEAD && git show origin/develop:src/hypershell/core/config_schema.py
+    | grep -q '^def parse_setting' && uv run python -c "from hypershell.core.config_schema
+    import SETTINGS, Range, Kind, parse_setting, SettingError, advise, setting_for,
+    read_value, FORMS, shown, INT16_MAX, INT64_MAX; from hypershell.core.exceptions
+    import ReadingMixin; from hypershell.data.model import parse_group, TaskGroupError,
+    zone_name, zone_id, DEFAULT_ZONE_ID, Zone; from hypershell.task import TaskUpdateApp,
+    change_value; assert issubclass(TaskUpdateApp, ReadingMixin); assert {'task.cores',
+    'task.memory', 'task.timeout', 'server.attempts', 'option.part', 'option.group'}
+    <= set(SETTINGS); assert setting_for('option.part') is None and issubclass(SettingError,
+    ValueError); assert parse_setting('task.memory', '4G', name='memory') == 4294967296;
+    assert read_value(Kind.BOOL, 'Yes') is True and Kind.NUMBER and Kind.INT" && test
+    -n "$HS_TEST_POSTGRES" && sh spec/update-client-retry/drive/bound.sh 2400 uv run
+    pytest -q -p no:cacheprovider tests/test_bounded_table.py tests/test_bounded_parsers.py
+    tests/test_bounded_advisory.py tests/test_update_group.py tests/test_update_refusals.py
+    tests/test_update.py
 - id: P1
   name: 'Tests first: the red list on the merged develop (tests only)'
   status: pending
-  satisfies: [R1, R2, R3, R4, R5, R6, R7, R8, R9, R10, R11, R12, R13, R14, R15, R16, R17]
-  depends_on: [P0]
+  satisfies:
+  - R1
+  - R2
+  - R3
+  - R4
+  - R5
+  - R6
+  - R7
+  - R8
+  - R9
+  - R10
+  - R11
+  - R12
+  - R13
+  - R14
+  - R15
+  - R16
+  - R17
+  depends_on:
+  - P0
   parallel: false
   hammerable: false
   hill: uphill
-  verify: >-
-    base="$(sed -n 's/^# base: //p' spec/update-typed-columns/red.txt)" && test -n "$base" &&
-    git merge-base --is-ancestor "$base" HEAD &&
-    git show "$base:src/hypershell/core/config_schema.py" | grep -q '^def parse_setting' &&
-    test -z "$(git diff --name-only "$base" -- src docs share AGENTS.md .agents .github)" &&
-    test -n "$HS_TEST_POSTGRES" &&
-    for f in numbers kinds datetime tags; do grep -q "^tests/test_update_$f.py::" spec/update-typed-columns/red.txt &&
-    grep -q "^pg:tests/test_update_$f.py::" spec/update-typed-columns/red.txt || exit 1; done &&
-    grep -q '^tests/test_bounded_table.py::' spec/update-typed-columns/red.txt &&
-    RED_BASE_REV="$base" RED_LIST="$PWD/spec/update-typed-columns/red.txt"
-    sh spec/update-client-retry/drive/bound.sh 5400 sh spec/relay-hardening/drive/red_check.sh &&
-    RED_LIST="$PWD/spec/update-typed-columns/red.txt" sh spec/update-client-retry/drive/bound.sh 2400
-    sh spec/contended-writes/drive/rest_green.sh tests/test_update_numbers.py tests/test_update_kinds.py
-    tests/test_update_datetime.py tests/test_update_tags.py tests/test_bounded_table.py
-    tests/test_update_group.py tests/test_update_refusals.py tests/test_update.py
+  verify: 'base="$(sed -n ''s/^# base: //p'' spec/update-typed-columns/red.txt)" &&
+    test -n "$base" && git merge-base --is-ancestor "$base" HEAD && git show "$base:src/hypershell/core/config_schema.py"
+    | grep -q ''^def parse_setting'' && test -z "$(git diff --name-only "$base" --
+    src docs share AGENTS.md .agents .github)" && test -n "$HS_TEST_POSTGRES" && for
+    f in numbers kinds datetime tags; do grep -q "^tests/test_update_$f.py::" spec/update-typed-columns/red.txt
+    && grep -q "^pg:tests/test_update_$f.py::" spec/update-typed-columns/red.txt ||
+    exit 1; done && grep -q ''^tests/test_bounded_table.py::'' spec/update-typed-columns/red.txt
+    && RED_BASE_REV="$base" RED_LIST="$PWD/spec/update-typed-columns/red.txt" sh spec/update-client-retry/drive/bound.sh
+    5400 sh spec/relay-hardening/drive/red_check.sh && RED_LIST="$PWD/spec/update-typed-columns/red.txt"
+    sh spec/update-client-retry/drive/bound.sh 2400 sh spec/contended-writes/drive/rest_green.sh
+    tests/test_update_numbers.py tests/test_update_kinds.py tests/test_update_datetime.py
+    tests/test_update_tags.py tests/test_bounded_table.py tests/test_update_group.py
+    tests/test_update_refusals.py tests/test_update.py'
 - id: P2
-  name: 'Numbers, sizes and durations: the reader, the new rows, refusal before the database (R2-R4, R8-R10, R12)'
+  name: 'Numbers, sizes and durations: the reader, the new rows, refusal before the
+    database (R2-R4, R8-R10, R12)'
   status: pending
-  satisfies: [R1, R2, R3, R4, R8, R9, R10, R12, R13, R14, R15]
-  depends_on: [P1]
+  satisfies:
+  - R1
+  - R2
+  - R3
+  - R4
+  - R8
+  - R9
+  - R10
+  - R12
+  - R13
+  - R14
+  - R15
+  depends_on:
+  - P1
   parallel: false
   hammerable: false
   hill: uphill
-  verify: >-
-    test -n "$HS_TEST_POSTGRES" &&
-    sh spec/update-client-retry/drive/bound.sh 2400 uv run pytest -q -p no:cacheprovider
-    tests/test_update_numbers.py tests/test_bounded_table.py tests/test_bounded_parsers.py
-    tests/test_bounded_config_set.py tests/test_update_group.py tests/test_update_refusals.py tests/test_update.py &&
-    for b in sqlite postgres; do sh spec/update-client-retry/drive/bound.sh 600
-    sh spec/update-typed-columns/drive/utc_drive.sh $b numbers || exit 1; done &&
-    for f in src/hypershell/task.py docs/_include/task_update_desc.rst docs/_include/task_update_help.rst;
-    do grep -q 'is read by its kind' $f || exit 1; done &&
-    grep -A6 'versionchanged:: 2.9.0' docs/cli/task_update.rst | grep -q 'by its kind' &&
-    grep -q "'column.exit_status'" src/hypershell/core/config_schema.py &&
-    uv run python -c "from hypershell.core.config_schema import setting_for; assert setting_for('column.exit_status') is None" &&
-    for f in numbers kinds datetime tags; do grep -q "tests/test_update_$f.py" .github/workflows/tests.yml || exit 1; done &&
-    grep -q 'timeout-minutes: 60' .github/workflows/tests.yml
+  verify: 'test -n "$HS_TEST_POSTGRES" && sh spec/update-client-retry/drive/bound.sh
+    2400 uv run pytest -q -p no:cacheprovider tests/test_update_numbers.py tests/test_bounded_table.py
+    tests/test_bounded_parsers.py tests/test_bounded_config_set.py tests/test_update_group.py
+    tests/test_update_refusals.py tests/test_update.py && for b in sqlite postgres;
+    do sh spec/update-client-retry/drive/bound.sh 600 sh spec/update-typed-columns/drive/utc_drive.sh
+    $b numbers || exit 1; done && for f in src/hypershell/task.py docs/_include/task_update_desc.rst
+    docs/_include/task_update_help.rst; do grep -q ''is read by its kind'' $f || exit
+    1; done && grep -A6 ''versionchanged:: 2.9.0'' docs/cli/task_update.rst | grep
+    -q ''by its kind'' && grep -q "''column.exit_status''" src/hypershell/core/config_schema.py
+    && uv run python -c "from hypershell.core.config_schema import setting_for; assert
+    setting_for(''column.exit_status'') is None" && for f in numbers kinds datetime
+    tags; do grep -q "tests/test_update_$f.py" .github/workflows/tests.yml || exit
+    1; done && grep -q ''timeout-minutes: 60'' .github/workflows/tests.yml'
 - id: P3
-  name: 'Booleans, uuids, the zone and the text columns (R5, R7, R8)'
+  name: Booleans, uuids, the zone and the text columns (R5, R7, R8)
   status: pending
-  satisfies: [R1, R5, R7, R8, R9, R13, R14, R15]
-  depends_on: [P2]
+  satisfies:
+  - R1
+  - R5
+  - R7
+  - R8
+  - R9
+  - R13
+  - R14
+  - R15
+  depends_on:
+  - P2
   parallel: false
   hammerable: false
   hill: uphill
-  verify: >-
-    test -n "$HS_TEST_POSTGRES" &&
-    sh spec/update-client-retry/drive/bound.sh 2400 uv run pytest -q -p no:cacheprovider
-    tests/test_update_kinds.py tests/test_update_numbers.py tests/test_update_group.py
-    tests/test_update_refusals.py tests/test_update.py tests/test_zone_postgres.py &&
-    for b in sqlite postgres; do sh spec/update-client-retry/drive/bound.sh 600
-    sh spec/update-typed-columns/drive/utc_drive.sh $b kinds || exit 1; done &&
+  verify: test -n "$HS_TEST_POSTGRES" && sh spec/update-client-retry/drive/bound.sh
+    2400 uv run pytest -q -p no:cacheprovider tests/test_update_kinds.py tests/test_update_numbers.py
+    tests/test_update_group.py tests/test_update_refusals.py tests/test_update.py
+    tests/test_zone_postgres.py && for b in sqlite postgres; do sh spec/update-client-retry/drive/bound.sh
+    600 sh spec/update-typed-columns/drive/utc_drive.sh $b kinds || exit 1; done &&
     for f in src/hypershell/task.py docs/_include/task_update_desc.rst docs/_include/task_update_help.rst;
-    do grep -q '8-4-4-4-12' $f && grep -q 'hs submit --zone' $f && grep -q 'yes/no' $f || exit 1; done &&
-    ! grep -n 'hs task ' docs/_include/task_update_desc.rst docs/_include/task_update_help.rst docs/cli/task_update.rst
+    do grep -q '8-4-4-4-12' $f && grep -q 'hs submit --zone' $f && grep -q 'yes/no'
+    $f || exit 1; done && ! grep -n 'hs task ' docs/_include/task_update_desc.rst
+    docs/_include/task_update_help.rst docs/cli/task_update.rst
 - id: P4
-  name: 'Datetimes: ISO 8601, local time, the same instant on both backends (R6); the map is complete'
+  name: 'Datetimes: ISO 8601, local time, the same instant on both backends (R6);
+    the map is complete'
   status: pending
-  satisfies: [R1, R6, R8, R9, R14, R15]
-  depends_on: [P3]
+  satisfies:
+  - R1
+  - R6
+  - R8
+  - R9
+  - R14
+  - R15
+  depends_on:
+  - P3
   parallel: false
   hammerable: false
   hill: uphill
-  verify: >-
-    test -n "$HS_TEST_POSTGRES" &&
-    sh spec/update-client-retry/drive/bound.sh 2400 uv run pytest -q -p no:cacheprovider
-    tests/test_update_datetime.py tests/test_update_kinds.py tests/test_update_numbers.py
-    tests/test_update_refusals.py tests/test_update.py &&
-    env -u HS_TEST_POSTGRES UV_PROJECT_ENVIRONMENT="${TMPDIR:-/tmp}/venv311-utc"
-    sh spec/update-client-retry/drive/bound.sh 1200 uv run --python 3.11 pytest -q -p no:cacheprovider
-    tests/test_update_datetime.py &&
-    for b in sqlite postgres; do sh spec/update-client-retry/drive/bound.sh 600
-    sh spec/update-typed-columns/drive/utc_drive.sh $b datetime || exit 1; done &&
-    for f in src/hypershell/task.py docs/_include/task_update_desc.rst docs/_include/task_update_help.rst;
-    do grep -q 'ISO 8601' $f || exit 1; done &&
+  verify: test -n "$HS_TEST_POSTGRES" && sh spec/update-client-retry/drive/bound.sh
+    2400 uv run pytest -q -p no:cacheprovider tests/test_update_datetime.py tests/test_update_kinds.py
+    tests/test_update_numbers.py tests/test_update_refusals.py tests/test_update.py
+    && env -u HS_TEST_POSTGRES UV_PROJECT_ENVIRONMENT="${TMPDIR:-/tmp}/venv311-utc"
+    sh spec/update-client-retry/drive/bound.sh 1200 uv run --python 3.11 pytest -q
+    -p no:cacheprovider tests/test_update_datetime.py && for b in sqlite postgres;
+    do sh spec/update-client-retry/drive/bound.sh 600 sh spec/update-typed-columns/drive/utc_drive.sh
+    $b datetime || exit 1; done && for f in src/hypershell/task.py docs/_include/task_update_desc.rst
+    docs/_include/task_update_help.rst; do grep -q 'ISO 8601' $f || exit 1; done &&
     grep -q 'COLUMN_KINDS' AGENTS.md && grep -q 'COLUMN_KINDS' .agents/factory/invariants.md
 - id: P5
-  name: 'Tags: tag= refused, any other key a tag, near-misses refused, the prompt (R11, R16, R17)'
+  name: 'Tags: tag= refused, any other key a tag, near-misses refused, the prompt
+    (R11, R16, R17)'
   status: pending
-  satisfies: [R1, R9, R11, R13, R14, R15, R16, R17]
-  depends_on: [P4]
+  satisfies:
+  - R1
+  - R9
+  - R11
+  - R13
+  - R14
+  - R15
+  - R16
+  - R17
+  depends_on:
+  - P4
   parallel: false
   hammerable: false
   hill: uphill
-  verify: >-
-    test -n "$HS_TEST_POSTGRES" &&
-    sh spec/update-client-retry/drive/bound.sh 3600 uv run pytest -q -p no:cacheprovider
-    tests/test_update_tags.py tests/test_update_numbers.py tests/test_update_kinds.py
-    tests/test_update_datetime.py tests/test_update_group.py tests/test_update_refusals.py
-    tests/test_update.py tests/test_completions.py &&
-    for b in sqlite postgres; do sh spec/update-client-retry/drive/bound.sh 600
-    sh spec/update-typed-columns/drive/utc_drive.sh $b tags || exit 1; done &&
-    for f in src/hypershell/task.py docs/_include/task_update_desc.rst docs/_include/task_update_help.rst;
-    do grep -q 'not a column is a tag' $f && grep -q 'one edit' $f || exit 1; done &&
-    ! grep -n 'hs task ' docs/_include/task_update_desc.rst docs/_include/task_update_help.rst docs/cli/task_update.rst &&
-    UV_PROJECT_ENVIRONMENT="${TMPDIR:-/tmp}/docs-venv-utc" sh spec/update-client-retry/drive/bound.sh 900
-    uv run --python 3.12 --group docs sphinx-build -W --keep-going -q -E -b html docs "${TMPDIR:-/tmp}/docs-html-utc"
+  verify: test -n "$HS_TEST_POSTGRES" && sh spec/update-client-retry/drive/bound.sh
+    3600 uv run pytest -q -p no:cacheprovider tests/test_update_tags.py tests/test_update_numbers.py
+    tests/test_update_kinds.py tests/test_update_datetime.py tests/test_update_group.py
+    tests/test_update_refusals.py tests/test_update.py tests/test_completions.py &&
+    for b in sqlite postgres; do sh spec/update-client-retry/drive/bound.sh 600 sh
+    spec/update-typed-columns/drive/utc_drive.sh $b tags || exit 1; done && for f
+    in src/hypershell/task.py docs/_include/task_update_desc.rst docs/_include/task_update_help.rst;
+    do grep -q 'not a column is a tag' $f && grep -q 'one edit' $f || exit 1; done
+    && ! grep -n 'hs task ' docs/_include/task_update_desc.rst docs/_include/task_update_help.rst
+    docs/cli/task_update.rst && UV_PROJECT_ENVIRONMENT="${TMPDIR:-/tmp}/docs-venv-utc"
+    sh spec/update-client-retry/drive/bound.sh 900 uv run --python 3.12 --group docs
+    sphinx-build -W --keep-going -q -E -b html docs "${TMPDIR:-/tmp}/docs-html-utc"
 - id: P6
   name: 'Gate: the whole suite, PostgreSQL, the red list, every drive mode, the docs'
   status: pending
-  satisfies: [R1, R2, R3, R4, R5, R6, R7, R8, R9, R10, R11, R12, R13, R14, R15, R16, R17]
-  depends_on: [P5]
+  satisfies:
+  - R1
+  - R2
+  - R3
+  - R4
+  - R5
+  - R6
+  - R7
+  - R8
+  - R9
+  - R10
+  - R11
+  - R12
+  - R13
+  - R14
+  - R15
+  - R16
+  - R17
+  depends_on:
+  - P5
   parallel: false
   hammerable: false
   hill: uphill
-  verify: >-
-    test -n "$HS_TEST_POSTGRES" &&
-    env -u HS_TEST_POSTGRES sh spec/update-client-retry/drive/bound.sh 5400 uv run pytest -q -p no:cacheprovider &&
-    sh spec/update-client-retry/drive/bound.sh 3600 uv run pytest -q -p no:cacheprovider
-    tests/test_update_numbers.py tests/test_update_kinds.py tests/test_update_datetime.py tests/test_update_tags.py
-    tests/test_update_group.py tests/test_bounded_table.py tests/test_zone_postgres.py &&
-    sh spec/update-client-retry/drive/bound.sh 1800 uv run pytest -q -p no:cacheprovider
-    $(sed -e '/^#/d' -e '/^$/d' -e 's/^pg://' -e 's/ raises=.*$//' spec/update-typed-columns/red.txt) &&
-    base="$(sed -n 's/^# base: //p' spec/update-typed-columns/red.txt)" && test -n "$base" &&
-    RED_BASE_REV="$base" RED_LIST="$PWD/spec/update-typed-columns/red.txt"
-    sh spec/update-client-retry/drive/bound.sh 5400 sh spec/relay-hardening/drive/red_check.sh &&
-    for m in numbers kinds datetime tags; do for b in sqlite postgres; do
-    sh spec/update-client-retry/drive/bound.sh 600 sh spec/update-typed-columns/drive/utc_drive.sh $b $m || exit 1;
-    done; done &&
-    UV_PROJECT_ENVIRONMENT="${TMPDIR:-/tmp}/docs-venv-utc" sh spec/update-client-retry/drive/bound.sh 900
-    uv run --python 3.12 --group docs sphinx-build -W --keep-going -q -E -b html docs "${TMPDIR:-/tmp}/docs-html-utc"
+  verify: 'test -n "$HS_TEST_POSTGRES" && env -u HS_TEST_POSTGRES sh spec/update-client-retry/drive/bound.sh
+    5400 uv run pytest -q -p no:cacheprovider && sh spec/update-client-retry/drive/bound.sh
+    3600 uv run pytest -q -p no:cacheprovider tests/test_update_numbers.py tests/test_update_kinds.py
+    tests/test_update_datetime.py tests/test_update_tags.py tests/test_update_group.py
+    tests/test_bounded_table.py tests/test_zone_postgres.py && sh spec/update-client-retry/drive/bound.sh
+    1800 uv run pytest -q -p no:cacheprovider $(sed -e ''/^#/d'' -e ''/^$/d'' -e ''s/^pg://''
+    -e ''s/ raises=.*$//'' spec/update-typed-columns/red.txt) && base="$(sed -n ''s/^#
+    base: //p'' spec/update-typed-columns/red.txt)" && test -n "$base" && RED_BASE_REV="$base"
+    RED_LIST="$PWD/spec/update-typed-columns/red.txt" sh spec/update-client-retry/drive/bound.sh
+    5400 sh spec/relay-hardening/drive/red_check.sh && for m in numbers kinds datetime
+    tags; do for b in sqlite postgres; do sh spec/update-client-retry/drive/bound.sh
+    600 sh spec/update-typed-columns/drive/utc_drive.sh $b $m || exit 1; done; done
+    && UV_PROJECT_ENVIRONMENT="${TMPDIR:-/tmp}/docs-venv-utc" sh spec/update-client-retry/drive/bound.sh
+    900 uv run --python 3.12 --group docs sphinx-build -W --keep-going -q -E -b html
+    docs "${TMPDIR:-/tmp}/docs-html-utc"'
 review:
   last_reviewed_commit: ''
   verdict: none
   blocked_reason: ''
   cycle: 0
 ---
-
 # TECH.md — `hs update` reads every column it writes by the column's kind
 
 The **context engine and finite-state machine** for building this fix. The YAML frontmatter above is
@@ -248,15 +313,22 @@ moved name, stop and return to `/hs-plan`; do not adapt the design in P0.
 **Goal:** the branch carries `bounded-inputs` as it landed, and every name PLAN §2.9 relies on is
 there and behaves as the plan assumes.
 
-- [ ] Only on the foreman's word that `bounded-inputs` is on `develop`: `git fetch origin`, then
+- [x] Only on the foreman's word that `bounded-inputs` is on `develop`: `git fetch origin`, then
       `git merge --no-ff origin/develop` (signed), resolving nothing in `spec/update-typed-columns/`.
-- [ ] Read what landed against PLAN §2.9: `parse_setting`, `SettingError`, `advise`, `setting_for`,
+- [x] Read what landed against PLAN §2.9: `parse_setting`, `SettingError`, `advise`, `setting_for`,
       `read_value`/`FORMS`, `shown`, the six entries, `ReadingMixin` on `TaskUpdateApp`,
       `parse_group`. Note in the commit body, from `spec/bounded-inputs/REVIEW.md` and the landed
       code: how F8 settled whole decimals (`Range._read` or the tag path only), where F2 put the `-t`
       tag reading, and whether `hs config` exemptions (F4) touched `setting_for`.
-- [ ] If a relied-on name moved or changed meaning, stop: set the phase `blocked` with the reason and
+- [x] If a relied-on name moved or changed meaning, stop: set the phase `blocked` with the reason and
       return to `/hs-plan`.
+- **Landed (P0, 2026-11-25):** `bounded-inputs` merged as #125 (`674f6d85`). Every name §2.9
+  relies on is there with the meaning assumed. F8 settled whole decimals in the tag path only
+  (`_read_resource` in `data/model.py`); `Range._read` is unchanged, so `-c 4.0` is refused and
+  `cores=4.0` through `parse_setting` is refused alike. F2 put `-t` reading in `read_tag_options`
+  (`submit.py`); F4 changed only `core/config.py`'s `hs config` exemption, not `setting_for`;
+  N1/N2 made `read_resources` (`data/model.py`) read `--from-json` resources to whole numbers.
+  The CI `tests` job's timeout is already 60 minutes on develop (#125), so P2's raise is done.
 - **Verify:** see frontmatter: `origin/develop` merged and carries `parse_setting`; the API import and
   behaviour checks; the bounded and update suites on both backends.
 - **Touches:** the merge; `spec/update-typed-columns/TECH.md`.
@@ -340,7 +412,7 @@ are in the table.
       `task_update_help.rst`: every column `is read by its kind`, the size and duration forms, refusal
       exit 2 before anything is counted, asked or written; `task_update.rst` `versionchanged:: 2.9.0`.
 - [ ] `.github/workflows/tests.yml`: the four new files appended to the PostgreSQL job's list (line
-      121) and its comment; the `tests` job's `timeout-minutes` 45 → 60.
+      121) and its comment; the `tests` job's `timeout-minutes` is already 60 on develop (#125), not edited again.
 - [ ] `spec/update-typed-columns/drive/utc_drive.sh` (new, SPDX header, `BACKEND MODE`, modes
       `numbers`, `kinds`, `datetime`, `tags`; later modes fail "not built"): PLAN §6; `numbers` here.
 - **Verify:** see frontmatter: the numbers tests and neighbours on both backends; the `numbers` drive
