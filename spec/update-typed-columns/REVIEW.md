@@ -98,3 +98,76 @@ The blind reviewer ran these commands. The orchestrator re-ran the F1 reproducti
 ### Human-gate triggers
 
 - **Not triggered.** F1 is in `task.py`, which is not a high-blast-radius core file, and it touches no security or DB-lifecycle invariant.
+
+## Review cycle 2 — approved (2026-11-25)
+
+- **Reviewed commit:** 50210bd9  ·  **Base:** develop (ce74094c, merged in)  ·  **Date:** 2026-11-25
+- **Verdict:** approved
+- **Cycle:** 2 of ≤3 — mirrors `review.cycle` in `TECH.md`
+- **Mode:** a fresh blind pass over the full diff with `spec/` excluded, by a new reviewer (not cycle 1's), plus a check that F1 is fixed. The reviewer was given the same inputs as in cycle 1. F1 was named by its symptom only, without the rationale for the fix. `GOAL.md` is unchanged since cycle 1.
+- **Hand-back:** the reviewer's report reached the foreman instead of the orchestrator, and the foreman passed it on as given. The orchestrator re-ran the old F1 reproduction itself (*Verification run*).
+
+### F1 — closed
+
+The fix in `50210bd9` changes `read_datetime` (`src/hypershell/task.py`). A date at either end of the calendar is now refused with exit 2 instead of a traceback.
+
+- **Calendar matrix:** 2,640 `completion_time` updates, every combination of:
+  - both forms;
+  - the zones UTC, America/Indiana/Indianapolis, Pacific/Honolulu, Asia/Tokyo and Pacific/Kiritimati;
+  - SQLite and PostgreSQL 18;
+  - Python 3.14 and 3.11;
+  - 33 values per cell, at the calendar's edges, with and without offsets.
+
+  Every update exited 0 or 2. None exited 5 or wrote a traceback.
+- **Read-back:** every accepted value read back cleanly through `hs info`, `hs info --json`, `hs list` and `hs list --json`. This held in the writer's zone and in a distant one, with `TZ` and `PGTZ` switched between the write and the read.
+- **Orchestrator re-run** (Python 3.11, SQLite, TZ=America/Indiana/Indianapolis):
+  - `hs update ID completion_time 9999-12-31` exited 2, with the column's datetime refusal;
+  - `hs update start_time=0001-01-01 -w "id == ID" -f` exited 2;
+  - `hs update ID completion_time 2026-01-01T09:00` exited 0.
+
+### Verification run
+
+- **Python 3.11 with PostgreSQL:** the update, bounded-table, completions and config-schema test files gave **842 passed**.
+- **Python 3.14 full suite with PostgreSQL:** **6089 passed, 31 skipped, 32 failed**. All 32 failures are expected in this environment: 30 `test_upgrade_postgres` (the upgrade templates need Docker) and 2 `test_timescale` (the TimescaleDB version).
+- **Docs:** the `sphinx-build -W --keep-going -E -b html` build was clean.
+- **CLI drives:**
+  - The calendar matrix above.
+  - 222 column-kind cases in both forms, on SQLite with 3.14, PostgreSQL with 3.14 and PostgreSQL with 3.11. The exit codes were identical in every setup.
+  - 80 cases covering tags, R17 near-misses, R10, R11 and R13, identical across both backends and both Pythons.
+- **Cleanup:** the tree is clean. The reviewer dropped all 16 `rv2c_*` PostgreSQL databases it created and confirmed none remain.
+
+### Requirement → evidence matrix
+
+R1–R17 are all **met** by executed evidence, the same rows as cycle 1. Since cycle 1:
+
+- R6 and R9 are now met, because F1 is fixed. R6 carries F2's caveat at the edges of the calendar.
+- R14 gained calendar-edge tests in `tests/test_update_datetime.py`.
+
+Invariants §1, §3 (`set(COLUMN_KINDS) == set(Task.columns)`), §10 and §12 hold.
+
+**Unmapped changes:** the same as cycle 1, none blocking.
+
+- The CI PostgreSQL job's timeout is raised to 45 minutes, and the job runs the new test files.
+- The seed and its ROADMAP entry are marked `adopted`.
+- The single-task `ID tag KEY:VALUE` is now checked against the tag rules. This is documented.
+
+### Findings
+
+#### [LOW/CONFIRMED → WAIVED] F2 — the datetime refusal near the ends of the calendar is wider than the docs say, and varies by Python version
+- **Where:** `src/hypershell/task.py:1177-1198` (`read_datetime`, `DATETIME_SPAN`) and `docs/_include/task_update_desc.rst:51-52`.
+- **Behaviour:** for a value without an offset, the refused band at each end of the calendar is wider than the docs' "within a day". It is also wider than for the same instant written with an offset, and it differs between Python versions. Examples:
+  - Under TZ=Asia/Tokyo, `hs update ID completion_time 9999-12-31` exits 2 on Python 3.14 and 0 on 3.11.
+  - Under Pacific/Honolulu, `0001-01-01T19:00` is refused, but the same instant written with `Z` is accepted.
+
+  The refusal message does not name the range. In every case the refusal is graceful: exit 2, nothing written. It is confined to the first and last days of years 1 and 9999.
+- **Ruling (foreman, 2026-11-25):** **waived** under the rubric's rule that absurd input is not a finding. The values are placeholder instants on the first or last day of years 1 and 9999, and they are refused cleanly. The foreman will change the docs' "within a day" to "on or near the first or last day" as a docs-only change after approval, and record it in the PR body. A waived finding does not loop the cycle.
+
+### Notes (not findings)
+
+- **(a)** `hs update <missing-uuid> zone ghost` exits 5 (`NotFound`), as on develop. It still records a zone row for `ghost`, because `record_zones` runs before `Task.update`. This predates the diff; the foreman will consider a seed for it.
+- **(b)** PostgreSQL shows times in the session's zone with an offset, while SQLite shows local wall time. This predates the diff, and the seed `timestamp-display-offsets` already covers it.
+- **(c)** The refusals of `part=none` and `attempt=none` lack the "(may not be empty)" suffix that other columns' refusals carry.
+
+### Human-gate triggers
+
+- **Not triggered.** No CONFIRMED finding stands: F1 is closed and F2 is waived. Neither was in a high-blast-radius core file or touched a security or DB-lifecycle invariant.

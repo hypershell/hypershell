@@ -231,10 +231,10 @@ phases:
     900 uv run --python 3.12 --group docs sphinx-build -W --keep-going -q -E -b html
     docs "${TMPDIR:-/tmp}/docs-html-utc"'
 review:
-  last_reviewed_commit: 2abf860d
-  verdict: changes-requested
-  blocked_reason: 'review cycle 1: F1, a calendar-edge ISO date exits 5 (R9/R6)'
-  cycle: 1
+  last_reviewed_commit: 50210bd9
+  verdict: approved
+  blocked_reason: ''
+  cycle: 2
 ---
 # TECH.md — `hs update` reads every column it writes by the column's kind
 
