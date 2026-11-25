@@ -3,7 +3,7 @@ slug: update-typed-columns
 title: hs update reads every column it writes by the column's kind
 kind: fix
 appetite: big
-status: in_review
+status: done
 branch: fix/update-typed-columns
 base: develop
 current_phase: done
