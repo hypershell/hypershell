@@ -34,7 +34,16 @@ growing. Every test still runs on every Python version, on every push and pull r
 - The suite runs serially by design: tests start servers, bind ports and share site state.
   Running tests in parallel inside one job (`pytest-xdist`) would need that isolation checked
   first. Splitting the tests into shards, each its own CI job, avoids that.
-- Possible approaches, for shaping to choose from:
+- **Direction approved by the maintainer (2026-11-25):**
+  - The matrix becomes Python version × shard, every shard on every version, on every push and
+    pull request.
+  - Shards are named chunks of the suite by area, so a job's name says what failed, for example
+    `tests (3.13, update)`.
+  - A catch-all shard runs every test file not named in another shard, so a new file is never
+    skipped by accident.
+  - Shaping takes a timing pass to cut areas of roughly equal length, about 15 to 20 minutes each.
+  - Shaping also weighs the cost of setup in each job and the account's limit on concurrent jobs.
+- Approaches considered:
   - a fixed split of test files into groups in the matrix;
   - a split by recorded duration (for example `pytest-split`, with its timings file committed);
   - finding and slimming the slowest tests, such as the range and update matrices.
