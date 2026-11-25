@@ -47,5 +47,10 @@ growing. Every test still runs on every Python version, on every push and pull r
   - a fixed split of test files into groups in the matrix;
   - a split by recorded duration (for example `pytest-split`, with its timings file committed);
   - finding and slimming the slowest tests, such as the range and update matrices.
-- The `postgres` job (45 minutes since #126) runs a list of files and may need the same split.
+- The `postgres` job runs a list of files and may need the same split. Its limit went from 20 to
+  45 minutes on #126 and then to 75, after the `timescale` and `timescale-floor` entries were
+  stopped at 45 while still passing. A quick win: that job runs the SQLite cases of the
+  `test_update_*.py` files too (for example `test_near_miss_refused[sqlite-…]`), and the `tests`
+  job already runs those. Selecting only the PostgreSQL cases there would cut its time without
+  losing coverage.
 - CI only: no change to the package or its interface.
