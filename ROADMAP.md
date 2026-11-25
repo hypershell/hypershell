@@ -299,17 +299,6 @@ statement. Pre-existing; out of scope for `hs-update-contended-writes` (#111).
 `spec/hs-update-contended-writes/` (Non-goals)*
 **Seed:** [`issues/update-legacy-tag-lost-write.md`](issues/update-legacy-tag-lost-write.md) · *status: unshaped*
 
-## `hs update` stores text in the task's integer columns
-
-`hs update exit_status=x`, `attempt=x`, `cores=x`, `memory=x` and `timeout=x` each store the text
-and exit 0. `cores`, `memory` and `timeout` drive dispatch. The fix reads each column by its kind,
-through `hs submit`'s parsers and `bounded-inputs`' ranges, refusing with exit 2 before any write.
-
-*Target: 2.9.0 · Horizon: near-term, small · Depends on: — (both landed, #125 and #124) · Builds on:
-`bounded-inputs`,
-`update-group-and-legacy-filters` · Refs: `spec/submit-input-checks/` (#118)*
-**Seed:** [`issues/update-typed-columns.md`](issues/update-typed-columns.md) · *status: adopted:update-typed-columns*
-
 ## An unrecognized configuration key is silently ignored
 
 A misspelled key in a configuration file (`[server] attempt = 3`) or a `HYPERSHELL_*` variable that
