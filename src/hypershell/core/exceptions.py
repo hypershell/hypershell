@@ -6,7 +6,7 @@
 
 # Type annotations
 from __future__ import annotations
-from typing import Dict, Union, Callable, Type
+from typing import Dict, Iterator, List, Union, Callable, Type, TypeVar
 
 # standard libraries
 import os
@@ -14,22 +14,25 @@ import sys
 import logging
 import functools
 import traceback
+from contextlib import contextmanager
 from datetime import datetime
 
 # External libs
 from cmdkit.app import exit_status
 from cmdkit.config import Namespace
 from cmdkit.config import ConfigurationError
+from cmdkit.cli import ArgumentError
 from cmdkit.ansi import faint, bold, magenta, yellow, red, COLOR_STDERR
 
 # Internal libs
 from hypershell.core.platform import default_path
+from hypershell.core.config_schema import SettingError, shown
 
 # Public interface
 __all__ = ['display_warning', 'display_error', 'display_critical', 'traceback_filepath', 'write_traceback',
            'handle_exception', 'handle_exception_silently', 'handle_disconnect', 'handle_address_unknown',
            'handle_broken_pipe', 'HostAddressInfo', 'DatabaseUninitialized', 'SchemaUpgradeError',
-           'get_shared_exception_mapping', ]
+           'get_shared_exception_mapping', 'SettingRefused', 'handle_refusal', 'reading', 'ReadingMixin', ]
 
 
 def _display_message(levelname: str, error: Union[Exception, str],
@@ -49,6 +52,53 @@ def _display_message(levelname: str, error: Union[Exception, str],
 display_warning = functools.partial(_display_message, 'WARNING', colorized=yellow)
 display_error = functools.partial(_display_message, 'ERROR', colorized=red)
 display_critical = functools.partial(_display_message, 'CRITICAL', colorized=magenta)
+
+
+class SettingRefused(ConfigurationError):
+    """A configuration value refused before work starts; its message is the whole line, printed as written."""
+
+
+def handle_refusal(exc: Exception, logger: logging.Logger) -> int:
+    """Log the refusal as written (no class name) and exit with the configuration status."""
+    logger.critical(str(exc).replace('\n', ' - '))
+    return exit_status.bad_config
+
+
+@contextmanager
+def reading(stage: str) -> Iterator[None]:
+    """Turn a `ValueError` or `OverflowError` escaping a command's reading of its input into a clean refusal.
+
+    Within `stage` ``'arguments'`` (the command line) it becomes cmdkit's `ArgumentError` (exit 2);
+    otherwise (the configuration and the start checks) a :class:`SettingRefused` (exit 3). The line
+    names the error's type and its message, cut short. Only what runs before work starts is wrapped,
+    so an error during work keeps its own path.
+    """
+    try:
+        yield
+    except (ArgumentError, ConfigurationError):
+        raise
+    except (ValueError, OverflowError) as error:
+        if isinstance(error, SettingError):
+            message = str(error)
+        else:
+            text = str(error).replace('\n', ' - ')
+            message = f'{type(error).__name__}: {text if len(text) <= 200 else shown(text)}'
+        if stage == 'arguments':
+            raise ArgumentError(message) from None
+        raise SettingRefused(message) from None
+
+
+App = TypeVar('App')
+
+
+class ReadingMixin:
+    """Reads a command's arguments within :func:`reading`, so a stray `ValueError` or `OverflowError` exits 2."""
+
+    @classmethod
+    def from_cmdline(cls: Type[App], cmdline: List[str] = None) -> App:
+        """Initialize via command-line arguments, as the application does."""
+        with reading('arguments'):
+            return super().from_cmdline(cmdline)  # noqa: the application's own
 
 
 class HostAddressInfo(Exception):
@@ -136,6 +186,7 @@ def get_shared_exception_mapping(modname: str = 'hypershell') -> Dict[Type[Excep
     return {
         RuntimeError: functools.partial(handle_exception, logger=logger, status=exit_status.runtime_error),
         FileNotFoundError: functools.partial(handle_exception, logger=logger, status=exit_status.runtime_error),
+        SettingRefused: functools.partial(handle_refusal, logger=logger),
         ConfigurationError: functools.partial(handle_exception, logger=logger, status=exit_status.bad_config),
         DatabaseUninitialized: functools.partial(handle_exception, logger=logger, status=exit_status.runtime_error),
         SchemaUpgradeError: functools.partial(handle_exception, logger=logger, status=exit_status.runtime_error),

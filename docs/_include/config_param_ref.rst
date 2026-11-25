@@ -91,6 +91,15 @@
             Number of *uncompressed* rotated files to retain (default: ``0``). Only applies
             when compression is enabled; without compression, rotated files are never deleted.
 
+            Range: 0 to 2,147,483,647.
+
+            .. only:: html
+
+                .. versionchanged:: 2.9.0
+                   The range is checked when the configuration loads, for every command: a value
+                   outside it, or not a number of the key's kind, stops the command before it starts
+                   (exit status 3), naming the key, the range and the file or variable it came from.
+
 
 ``[database]``
     Database configuration and connection details.
@@ -132,6 +141,15 @@
     ``.port``
         Port number to connect with database server.
         The default value depends on the provider, e.g., 5432 for Postgres.
+
+        Range: 1 to 65,535.
+
+        .. only:: html
+
+            .. versionchanged:: 2.9.0
+               The range is checked when the configuration loads, for every command: a value outside
+               it, or not a number of the key's kind, stops the command before it starts (exit
+               status 3), naming the key, the range and the file or variable it came from.
 
     ``.user``
         Username for databaser server account.
@@ -238,6 +256,15 @@
         This is an arbitrary choice and simply must be an available port. The default option chosen
         here is typically available on most platforms and is not expected by any known major software.
 
+        Range: 1 to 65,535.
+
+        .. only:: html
+
+            .. versionchanged:: 2.9.0
+               The range is checked when the configuration loads, for every command: a value outside
+               it, or not a number of the key's kind, stops the command before it starts (exit
+               status 3), naming the key, the range and the file or variable it came from.
+
     ``.auth``
         Cryptographic authentication key to connect with server (default: `<not-secure>`).
 
@@ -256,6 +283,15 @@
         On large scale workflows with many clients (e.g., 100) it may be advantageous to allow
         the scheduler to work ahead in selecting new tasks.
 
+        Range: 1 to 2,147,483,647.
+
+        .. only:: html
+
+            .. versionchanged:: 2.9.0
+               The range is checked when the configuration loads, for every command: a value outside
+               it, or not a number of the key's kind, stops the command before it starts (exit
+               status 3), naming the key, the range and the file or variable it came from.
+
     ``.bundlesize``
         Size of task bundle (default: `1`).
 
@@ -271,10 +307,17 @@
 
         See also ``-b``/``--bundlesize`` command-line option.
 
+        Range: 1 to 2,147,483,647.
+
         .. only:: html
 
             .. versionchanged:: 2.9.0
                :pr:`78`: the size for a client that advertises none.
+
+            .. versionchanged:: 2.9.0
+               The range is checked when the configuration loads, for every command: a value outside
+               it, or not a number of the key's kind, stops the command before it starts (exit
+               status 3), naming the key, the range and the file or variable it came from.
 
     ``.bundlemax``
         Most tasks the server hands a client in one reply (default: `1000`).
@@ -283,10 +326,17 @@
         than this many tasks, whatever a client asks for. The effective cap is never smaller than
         the server's own ``.bundlesize``. There is no command-line option.
 
+        Range: 1 to 2,147,483,647.
+
         .. only:: html
 
             .. versionadded:: 2.9.0
                :pr:`78`
+
+            .. versionchanged:: 2.9.0
+               The range is checked when the configuration loads, for every command: a value outside
+               it, or not a number of the key's kind, stops the command before it starts (exit
+               status 3), naming the key, the range and the file or variable it came from.
 
     ``.attempts``
         Attempts for auto-retry on failed tasks (default: `1`).
@@ -308,6 +358,8 @@
 
         See also ``.eager``.
 
+        Range: 1 to 32,767. Above 100 it runs with a warning.
+
         .. only:: html
 
             .. versionchanged:: 2.9.0
@@ -318,6 +370,12 @@
                retry keeps its task's cores, memory and walltime. The Python API reads it for a
                ``max_retries`` not given; before, the cluster classes retried each failed task once
                and the server functions never.
+
+            .. versionchanged:: 2.9.0
+               The range is checked when the configuration loads, for every command: a value outside
+               it, or not a number of the key's kind, stops the command before it starts (exit
+               status 3), naming the key, the range and the file or variable it came from. Past the
+               advisory limit the command runs, with one warning.
 
     ``.eager``
         Schedule failed tasks before new tasks (default: `false`).
@@ -350,6 +408,8 @@
 
         See also ``-Q``/``--poll`` command-line option.
 
+        Range: 0 s to 2,147,483,647 s.
+
         .. only:: html
 
             .. versionchanged:: 2.9.0
@@ -357,6 +417,11 @@
 
             .. versionchanged:: 2.9.0
                :pr:`115`: the result that finishes a run ends the wait.
+
+            .. versionchanged:: 2.9.0
+               The range is checked when the configuration loads, for every command: a value outside
+               it, or not a number of the key's kind, stops the command before it starts (exit
+               status 3), naming the key, the range and the file or variable it came from.
 
     ``.evict``
         Eviction period in seconds for clients (default: `600`).
@@ -369,9 +434,10 @@
         returned for each. If a client is defunct, this will hang the shutdown process.
         Takes a number of seconds or a string in the duration forms: units ``d``, ``h``, ``m``
         and ``s`` (e.g., ``"30s"``, ``"5m"``, ``"1h30m"``) or a Slurm time (e.g., ``"1:30"``);
-        fractions are kept. ``hs server``, ``hs cluster`` and ``hs relay`` stop before they start if
-        the value is not a duration; ``hs server`` and ``hs cluster`` also if it is under 10 seconds,
-        not finite, or over 999,999,999 days.
+        fractions are kept. Every command stops before it starts if the value is not a duration or
+        is under 10 seconds or over the longest duration (about 68 years).
+
+        Range: 10 s to 2,147,483,647 s.
 
         .. only:: html
 
@@ -384,6 +450,11 @@
 
             .. versionchanged:: 2.9.0
                :pr:`117`: ``hs cluster`` reads it in every mode; before, it always used 600 seconds.
+
+            .. versionchanged:: 2.9.0
+               The range is checked when the configuration loads, for every command: a value outside
+               it, or not a number of the key's kind, stops the command before it starts (exit
+               status 3), naming the key, the range and the file or variable it came from.
 
     ``[tls]``
         Transport-layer security for queue connections. Enabled by default; every key below
@@ -451,14 +522,21 @@
             does not extend it. A connection that misses it is closed, and the server keeps
             accepting other clients while handshakes are pending. Takes a number of seconds or
             any duration form (e.g., ``30``, ``"30s"``, ``"1m"``), rounded up to whole seconds;
-            it must be greater than 0 and at most one day (``1d``), or a TLS server refuses to
-            start. Also set with ``HYPERSHELL_SERVER_TLS_HANDSHAKE``. A server without TLS, by
+            it must be greater than 0 and at most one day (``1d``), or every command stops before
+            it starts. Also set with ``HYPERSHELL_SERVER_TLS_HANDSHAKE``. A server without TLS, by
             ``--no-tls`` or ``.enabled`` set to `false`, ignores it; clients never read it.
+
+            Range: 1 s to 86,400 s.
 
             .. only:: html
 
                 .. versionadded:: 2.9.0
                    :pr:`108`
+
+                .. versionchanged:: 2.9.0
+                   The range is checked when the configuration loads, for every command: a value
+                   outside it, or not a number of the key's kind, stops the command before it starts
+                   (exit status 3), naming the key, the range and the file or variable it came from.
 
 ``[client]``
     Section for `client` workflow parameters.
@@ -482,11 +560,18 @@
 
         See also ``-b``/``--bundlesize`` command-line option.
 
+        Range: 1 to 2,147,483,647.
+
         .. only:: html
 
             .. versionchanged:: 2.9.0
                :pr:`119`: ``hs client`` reads it and advertises it when set; before, it read
                ``submit.bundlesize``.
+
+            .. versionchanged:: 2.9.0
+               The range is checked when the configuration loads, for every command: a value outside
+               it, or not a number of the key's kind, stops the command before it starts (exit
+               status 3), naming the key, the range and the file or variable it came from.
 
     ``.bundlewait``
         Seconds to wait before flushing task bundle (default: `5`).
@@ -504,11 +589,18 @@
 
         See also ``-w``/``--bundlewait`` command-line option.
 
+        Range: 0 s to 2,147,483,647 s.
+
         .. only:: html
 
             .. versionchanged:: 2.9.0
                :pr:`115`: a client with nothing left to run returns what it holds without
                waiting. :pr:`119`: ``hs client`` reads it; before, it read ``submit.bundlewait``.
+
+            .. versionchanged:: 2.9.0
+               The range is checked when the configuration loads, for every command: a value outside
+               it, or not a number of the key's kind, stops the command before it starts (exit
+               status 3), naming the key, the range and the file or variable it came from.
 
     ``.heartrate``
         Interval in seconds between heartbeats sent to server (default `10`).
@@ -518,10 +610,17 @@
         and ``s`` (e.g., ``"30s"``, ``"5m"``, ``"1h30m"``) or a Slurm time (e.g., ``"1:30"``);
         fractions are kept. ``hs client`` stops before it starts if the value is not a duration.
 
+        Range: 0 s to 2,147,483,647 s.
+
         .. only:: html
 
             .. versionchanged:: 2.9.0
                :pr:`113`: a string with units or a Slurm time.
+
+            .. versionchanged:: 2.9.0
+               The range is checked when the configuration loads, for every command: a value outside
+               it, or not a number of the key's kind, stops the command before it starts (exit
+               status 3), naming the key, the range and the file or variable it came from.
 
     ``.timeout``
         Timeout in seconds for client. Automatically shutdown if no tasks received (default: never).
@@ -530,6 +629,15 @@
         A string takes the same forms as ``-T``/``--timeout``: units ``d``, ``h``, ``m`` and
         ``s`` (e.g., ``"1h30m"``, ``"1.5h"``) or a Slurm time (e.g., ``"1:30:00"``, ``"1-12"``).
 
+        Range: 0 s to 2,147,483,647 s.
+
+        .. only:: html
+
+            .. versionchanged:: 2.9.0
+               The range is checked when the configuration loads, for every command: a value outside
+               it, or not a number of the key's kind, stops the command before it starts (exit
+               status 3), naming the key, the range and the file or variable it came from.
+
     ``.cores``
         Client-level limit on CPU cores available for running tasks (default: all available).
 
@@ -537,6 +645,16 @@
         partition a node between multiple clients.
 
         See also ``-C``/``--client-cores`` command-line option.
+
+        Range: 0 (unconstrained) to 32,767. Above 1,024 it runs with a warning.
+
+        .. only:: html
+
+            .. versionchanged:: 2.9.0
+               The range is checked when the configuration loads, for every command: a value outside
+               it, or not a number of the key's kind, stops the command before it starts (exit
+               status 3), naming the key, the range and the file or variable it came from. Past the
+               advisory limit the command runs, with one warning.
 
     ``.memory``
         Client-level limit on memory (in bytes) available for running tasks (default: all available).
@@ -547,22 +665,39 @@
 
         See also ``-M``/``--client-memory`` command-line option.
 
+        Range: 0 bytes (unconstrained) to 9,223,372,036,854,775,807 bytes.
+
+        .. only:: html
+
+            .. versionchanged:: 2.9.0
+               The range is checked when the configuration loads, for every command: a value outside
+               it, or not a number of the key's kind, stops the command before it starts (exit
+               status 3), naming the key, the range and the file or variable it came from.
+
     ``.ratelimit``
         Maximum number of tasks started per second (default: no limit).
 
         A number (e.g., ``0.5``, one task every two seconds), read by ``hs client`` and by
         ``hs cluster`` for each of its clients. A value of ``0`` disables rate limiting. Useful to
         throttle very short tasks so that task launch does not overwhelm a shared resource.
-        ``-R`` refuses a rate other than ``0`` under ``0.000001`` (one task in about 11.6 days), and
-        ``hs cluster`` stops before it launches a client if the value is not a finite number or is
-        such a rate.
+        A rate other than ``0`` under ``0.000001`` (one task in about 11.6 days) is refused, from
+        ``-R`` and from the configuration alike.
 
         See also ``-R``/``--ratelimit`` command-line option.
+
+        Range: 0.000001 to 1,000,000,000 tasks per second, or 0 (no limit). Below 0.001 tasks per
+        second, other than 0, it runs with a warning.
 
         .. only:: html
 
             .. versionchanged:: 2.9.0
                :pr:`117`: ``hs cluster`` reads it, in place of an undocumented ``task.ratelimit``.
+
+            .. versionchanged:: 2.9.0
+               The range is checked when the configuration loads, for every command: a value outside
+               it, or not a number of the key's kind, stops the command before it starts (exit
+               status 3), naming the key, the range and the file or variable it came from. Past the
+               advisory limit the command runs, with one warning.
 
 ``[submit]``
     Section for `submit` workflow parameters.
@@ -578,10 +713,17 @@
 
         See also ``-b``/``--bundlesize`` command-line option.
 
+        Range: 1 to 2,147,483,647.
+
         .. only:: html
 
             .. versionchanged:: 2.9.0
                :pr:`119`: ``hs client`` no longer reads it; it reads ``client.bundlesize``.
+
+            .. versionchanged:: 2.9.0
+               The range is checked when the configuration loads, for every command: a value outside
+               it, or not a number of the key's kind, stops the command before it starts (exit
+               status 3), naming the key, the range and the file or variable it came from.
 
     ``.bundlewait``
         Seconds to wait before flushing tasks (default: `5`).
@@ -597,11 +739,18 @@
 
         See also ``-w``/``--bundlewait`` command-line option.
 
+        Range: 0 s to 2,147,483,647 s.
+
         .. only:: html
 
             .. versionchanged:: 2.9.0
                :pr:`106`: a string with units or a Slurm time. :pr:`119`: ``hs client`` no longer
                reads it.
+
+            .. versionchanged:: 2.9.0
+               The range is checked when the configuration loads, for every command: a value outside
+               it, or not a number of the key's kind, stops the command before it starts (exit
+               status 3), naming the key, the range and the file or variable it came from.
 
 
 ``[task]``
@@ -618,6 +767,16 @@
 
         See also ``-c``/``--cores`` command-line option.
 
+        Range: 0 (unconstrained) to 32,767. Above 1,024 it runs with a warning.
+
+        .. only:: html
+
+            .. versionchanged:: 2.9.0
+               The range is checked when the configuration loads, for every command: a value outside
+               it, or not a number of the key's kind, stops the command before it starts (exit
+               status 3), naming the key, the range and the file or variable it came from. Past the
+               advisory limit the command runs, with one warning.
+
     ``.memory``
         Default memory (in bytes) required per task (default: unconstrained).
 
@@ -628,6 +787,15 @@
 
         See also ``-m``/``--memory`` command-line option.
 
+        Range: 0 bytes (unconstrained) to 9,223,372,036,854,775,807 bytes.
+
+        .. only:: html
+
+            .. versionchanged:: 2.9.0
+               The range is checked when the configuration loads, for every command: a value outside
+               it, or not a number of the key's kind, stops the command before it starts (exit
+               status 3), naming the key, the range and the file or variable it came from.
+
     ``.timeout``
         Task-level walltime limit in seconds (default: none).
 
@@ -636,6 +804,15 @@
         A string takes the same forms as ``-W``: units ``d``, ``h``, ``m`` and ``s`` (e.g.,
         ``"1h30m"``, ``"1.5h"``) or a Slurm time (e.g., ``"1:30:00"``, ``"1-12"``); individual
         tasks may override this inline in the same forms (e.g., ``# HYPERSHELL: timeout:1h30m``).
+
+        Range: 0 s to 2,147,483,647 s.
+
+        .. only:: html
+
+            .. versionchanged:: 2.9.0
+               The range is checked when the configuration loads, for every command: a value outside
+               it, or not a number of the key's kind, stops the command before it starts (exit
+               status 3), naming the key, the range and the file or variable it came from.
 
     ``.signalwait``
         Wait period in seconds between signal escalation on task cancellation (default: 10).
@@ -646,10 +823,17 @@
 
         See also ``-S``, ``--signalwait`` command-line option.
 
+        Range: 0 s to 2,147,483,647 s.
+
         .. only:: html
 
             .. versionchanged:: 2.9.0
                :pr:`106`: a string with units or a Slurm time.
+
+            .. versionchanged:: 2.9.0
+               The range is checked when the configuration loads, for every command: a value outside
+               it, or not a number of the key's kind, stops the command before it starts (exit
+               status 3), naming the key, the range and the file or variable it came from.
 
 ``[ssh]``
     SSH configuration section.
@@ -709,6 +893,16 @@
 
         See also ``.period``.
 
+        Range: 0.000001 to 1,000,000,000. Above 100 it runs with a warning.
+
+        .. only:: html
+
+            .. versionchanged:: 2.9.0
+               The range is checked when the configuration loads, for every command: a value outside
+               it, or not a number of the key's kind, stops the command before it starts (exit
+               status 3), naming the key, the range and the file or variable it came from. Past the
+               advisory limit the command runs, with one warning.
+
     ``.period``
         Scaling period in seconds, greater than zero (default: 60).
 
@@ -723,6 +917,8 @@
         refuse zero or a negative value at start-up. A period below one second, in any form, is one
         second.
 
+        Range: 0 s (exclusive) to 2,147,483,647 s. Above 3,600 s it runs with a warning.
+
         .. only:: html
 
             .. versionchanged:: 2.9.0
@@ -731,6 +927,12 @@
             .. versionchanged:: 2.9.0
                :pr:`112`: a period of zero or less is refused; a number below one second is one
                second.
+
+            .. versionchanged:: 2.9.0
+               The range is checked when the configuration loads, for every command: a value outside
+               it, or not a number of the key's kind, stops the command before it starts (exit
+               status 3), naming the key, the range and the file or variable it came from. Past the
+               advisory limit the command runs, with one warning.
 
     ``.launcher``
         Command prefix used to launch each client as a scaling unit (default: none).
@@ -800,10 +1002,17 @@
 
         Its environment form is ``HYPERSHELL_AUTOSCALE_FAILED_LAUNCHES``.
 
+        Range: 0 to 2,147,483,647.
+
         .. only:: html
 
             .. versionadded:: 2.9.0
                :pr:`107`
+
+            .. versionchanged:: 2.9.0
+               The range is checked when the configuration loads, for every command: a value outside
+               it, or not a number of the key's kind, stops the command before it starts (exit
+               status 3), naming the key, the range and the file or variable it came from.
 
     ``[size]``
         ``.init``
@@ -813,12 +1022,30 @@
             For a *fixed* policy cluster, this should be given with a ``.min`` size, and likely
             the same value.
 
+            Range: 0 to 2,147,483,647.
+
+            .. only:: html
+
+                .. versionchanged:: 2.9.0
+                   The range is checked when the configuration loads, for every command: a value
+                   outside it, or not a number of the key's kind, stops the command before it starts
+                   (exit status 3), naming the key, the range and the file or variable it came from.
+
         ``.min``
             Minimum size of cluster (default: 0).
 
             Regardless of autoscaling policy, if the number of launched clients drops below this
             value we will scale up by one. Allowing ``min = 0`` is an important feature for
             efficient use of computing resources in the absence of tasks.
+
+            Range: 0 to 2,147,483,647.
+
+            .. only:: html
+
+                .. versionchanged:: 2.9.0
+                   The range is checked when the configuration loads, for every command: a value
+                   outside it, or not a number of the key's kind, stops the command before it starts
+                   (exit status 3), naming the key, the range and the file or variable it came from.
 
         ``.max``
             Maximum size of cluster (default: 1).
@@ -828,6 +1055,15 @@
 
         A server autoscaling with relay sites ignores ``[size]``: each relay advertises the
         ``min``, ``max`` and ``init`` of each zone it serves, and the server plans within those.
+
+            Range: 0 to 2,147,483,647.
+
+            .. only:: html
+
+                .. versionchanged:: 2.9.0
+                   The range is checked when the configuration loads, for every command: a value
+                   outside it, or not a number of the key's kind, stops the command before it starts
+                   (exit status 3), naming the key, the range and the file or variable it came from.
 
 ``[relay]``
     Section for the `relay` workflow, which connects a site to an upstream *server*.
@@ -877,12 +1113,30 @@
 
         See also ``--port`` command-line option.
 
+        Range: 1 to 65,535.
+
+        .. only:: html
+
+            .. versionchanged:: 2.9.0
+               The range is checked when the configuration loads, for every command: a value outside
+               it, or not a number of the key's kind, stops the command before it starts (exit
+               status 3), naming the key, the range and the file or variable it came from.
+
     ``.bundlesize``
         Size of task bundle for the relay-local *server* and the *clients* at its site
         (default: `1`).
 
         It is never smaller than ``relay.num_threads``: a *client* asks for one bundle at a time,
         so a smaller bundle would leave its executors idle between requests.
+
+        Range: 1 to 2,147,483,647.
+
+        .. only:: html
+
+            .. versionchanged:: 2.9.0
+               The range is checked when the configuration loads, for every command: a value outside
+               it, or not a number of the key's kind, stops the command before it starts (exit
+               status 3), naming the key, the range and the file or variable it came from.
 
     ``.bundlewait``
         Seconds the relay waits before returning finished tasks upstream regardless of
@@ -893,6 +1147,8 @@
         and ``s`` (e.g., ``"30s"``, ``"5m"``, ``"1h30m"``) or a Slurm time (e.g., ``"1:30"``);
         fractions are kept. ``hs relay`` stops before it starts if the value is not a duration.
 
+        Range: 0 s to 2,147,483,647 s.
+
         .. only:: html
 
             .. versionchanged:: 2.9.0
@@ -902,6 +1158,11 @@
                :pr:`115`: a site client with nothing left to run returns what it holds without
                waiting.
 
+            .. versionchanged:: 2.9.0
+               The range is checked when the configuration loads, for every command: a value outside
+               it, or not a number of the key's kind, stops the command before it starts (exit
+               status 3), naming the key, the range and the file or variable it came from.
+
     ``.poll``
         Maximum polling interval of the relay-local scheduler in seconds (default: `0.1`).
 
@@ -910,10 +1171,17 @@
         and ``s`` (e.g., ``"30s"``, ``"5m"``, ``"1h30m"``) or a Slurm time (e.g., ``"1:30"``);
         fractions are kept. ``hs relay`` stops before it starts if the value is not a duration.
 
+        Range: 0 s to 2,147,483,647 s.
+
         .. only:: html
 
             .. versionchanged:: 2.9.0
                :pr:`113`: a string with units or a Slurm time.
+
+            .. versionchanged:: 2.9.0
+               The range is checked when the configuration loads, for every command: a value outside
+               it, or not a number of the key's kind, stops the command before it starts (exit
+               status 3), naming the key, the range and the file or variable it came from.
 
     ``.retention``
         Seconds a result is kept in the relay database after it has been returned upstream
@@ -922,10 +1190,17 @@
         and ``s`` (e.g., ``"30s"``, ``"5m"``, ``"1h30m"``) or a Slurm time (e.g., ``"1:30"``);
         fractions are kept. ``hs relay`` stops before it starts if the value is not a duration.
 
+        Range: 0 s to 2,147,483,647 s.
+
         .. only:: html
 
             .. versionchanged:: 2.9.0
                :pr:`113`: a string with units or a Slurm time.
+
+            .. versionchanged:: 2.9.0
+               The range is checked when the configuration loads, for every command: a value outside
+               it, or not a number of the key's kind, stops the command before it starts (exit
+               status 3), naming the key, the range and the file or variable it came from.
 
     ``.zone``
         Zone or zones the relay serves (default: none, the default zone).
@@ -950,6 +1225,17 @@
 
         See also ``--zone`` command-line option, which names the zones in place of this one.
 
+        The numeric keys of a zone table:
+
+        - ``size``. Range: 1 to 2,147,483,647.
+        - ``min``, ``max`` and ``init``. Range: 0 to 2,147,483,647.
+
+        .. only:: html
+
+            .. versionchanged:: 2.9.0
+               A zone table's ``size``, ``min``, ``max`` and ``init`` are checked when the
+               configuration loads, for every command, as the relay's own keys are.
+
     ``.site``
         Name of the relay's site (default: none, the relay's host name).
 
@@ -961,8 +1247,19 @@
         Against an upstream *server* autoscaling with relay sites it is the default ``.max``.
         See also ``-N``, ``--size`` command-line option.
 
+        Range: 1 to 2,147,483,647.
+
+        .. only:: html
+
+            .. versionchanged:: 2.9.0
+               The range is checked when the configuration loads, for every command: a value outside
+               it, or not a number of the key's kind, stops the command before it starts (exit
+               status 3), naming the key, the range and the file or variable it came from.
+
     ``.min``
         Fewest *clients* of each zone an upstream topology assigns this site (default: `0`).
+
+        Range: 0 to 2,147,483,647, or <none>.
 
         .. only:: html
 
@@ -974,8 +1271,15 @@
         least this many *clients* launched (at least `1`, by default the size). Each zone
         advertises its bounds upstream; see :ref:`Topology <cli_relay_topology>`.
 
+            .. versionchanged:: 2.9.0
+               The range is checked when the configuration loads, for every command: a value outside
+               it, or not a number of the key's kind, stops the command before it starts (exit
+               status 3), naming the key, the range and the file or variable it came from.
+
     ``.max``
         Most *clients* of each zone an upstream topology assigns this site (default: the size).
+
+        Range: 0 to 2,147,483,647, or <none>.
 
         .. only:: html
 
@@ -985,9 +1289,16 @@
         Lowering it never ends a running *client*: the zone launches no more, and its *clients*
         exit when idle. A zone's own ``[relay.zone.NAME]`` table may set its own.
 
+            .. versionchanged:: 2.9.0
+               The range is checked when the configuration loads, for every command: a value outside
+               it, or not a number of the key's kind, stops the command before it starts (exit
+               status 3), naming the key, the range and the file or variable it came from.
+
     ``.init``
         *Clients* of each zone an upstream topology assigns this site when the relay starts
         (default: ``.min``).
+
+        Range: 0 to 2,147,483,647, or <none>.
 
         .. only:: html
 
@@ -996,6 +1307,11 @@
 
         Without a topology, the *clients* each zone's fleet starts with (by default the size).
         Bounds must satisfy ``min <= init <= max``, with ``max`` at least `1`.
+
+            .. versionchanged:: 2.9.0
+               The range is checked when the configuration loads, for every command: a value outside
+               it, or not a number of the key's kind, stops the command before it starts (exit
+               status 3), naming the key, the range and the file or variable it came from.
 
     ``.launcher``
         Command prefix used to launch each *client* at the site (default: none).
@@ -1029,6 +1345,16 @@
     ``.num_threads``
         Executor threads for each *client* at the site (default: `1`).
 
+        Range: 0 (all cores) to 4,194,304. Above 1,024 it runs with a warning.
+
+        .. only:: html
+
+            .. versionchanged:: 2.9.0
+               The range is checked when the configuration loads, for every command: a value outside
+               it, or not a number of the key's kind, stops the command before it starts (exit
+               status 3), naming the key, the range and the file or variable it came from. Past the
+               advisory limit the command runs, with one warning.
+
     ``.template``
         Command template for the *clients* at the site (default: `{}`).
 
@@ -1039,10 +1365,17 @@
         rounded up to whole seconds, since each *client* is given it as ``-T``. ``hs relay`` stops
         before it starts if the value is not a duration.
 
+        Range: 0 s to 2,147,483,647 s.
+
         .. only:: html
 
             .. versionchanged:: 2.9.0
                :pr:`113`: a string with units or a Slurm time.
+
+            .. versionchanged:: 2.9.0
+               The range is checked when the configuration loads, for every command: a value outside
+               it, or not a number of the key's kind, stops the command before it starts (exit
+               status 3), naming the key, the range and the file or variable it came from.
 
     ``[upstream]``
         Connection to the upstream *server*. These settings are never read from ``[server]``,
@@ -1057,6 +1390,15 @@
             Port of the upstream *server* (default: `50001`).
 
             See also ``--upstream-port`` command-line option.
+
+            Range: 1 to 65,535.
+
+            .. only:: html
+
+                .. versionchanged:: 2.9.0
+                   The range is checked when the configuration loads, for every command: a value
+                   outside it, or not a number of the key's kind, stops the command before it starts
+                   (exit status 3), naming the key, the range and the file or variable it came from.
 
         ``.auth``
             Cryptographic key for the upstream *server*.
@@ -1074,16 +1416,32 @@
             whole difference (never more than this size at once), so the site has a second round
             of work ready while the first runs.
 
+            Range: 1 to 2,147,483,647.
+
+            .. only:: html
+
+                .. versionchanged:: 2.9.0
+                   The range is checked when the configuration loads, for every command: a value
+                   outside it, or not a number of the key's kind, stops the command before it starts
+                   (exit status 3), naming the key, the range and the file or variable it came from.
+
         ``.heartrate``
             Seconds between heartbeats to the upstream *server* (default: `10`).
             Takes a number of seconds or a string in the duration forms: units ``d``, ``h``, ``m``
             and ``s`` (e.g., ``"30s"``, ``"5m"``, ``"1h30m"``) or a Slurm time (e.g., ``"1:30"``);
             fractions are kept. ``hs relay`` stops before it starts if the value is not a duration.
 
+            Range: 0 s to 2,147,483,647 s.
+
             .. only:: html
 
                 .. versionchanged:: 2.9.0
                    :pr:`113`: a string with units or a Slurm time.
+
+                .. versionchanged:: 2.9.0
+                   The range is checked when the configuration loads, for every command: a value
+                   outside it, or not a number of the key's kind, stops the command before it starts
+                   (exit status 3), naming the key, the range and the file or variable it came from.
 
         ``.deadline``
             Seconds a call to the upstream *server* may take before the relay takes the connection
@@ -1096,10 +1454,17 @@
             and ``s`` (e.g., ``"30s"``, ``"5m"``, ``"1h30m"``) or a Slurm time (e.g., ``"1:30"``);
             fractions are kept. ``hs relay`` stops before it starts if the value is not a duration.
 
+            Range: 0 s to 2,147,483,647 s.
+
             .. only:: html
 
                 .. versionchanged:: 2.9.0
                    :pr:`113`: a string with units or a Slurm time.
+
+                .. versionchanged:: 2.9.0
+                   The range is checked when the configuration loads, for every command: a value
+                   outside it, or not a number of the key's kind, stops the command before it starts
+                   (exit status 3), naming the key, the range and the file or variable it came from.
 
         ``.backoff``
             Longest wait in seconds between attempts to reach the upstream *server* again
@@ -1111,10 +1476,17 @@
             and ``s`` (e.g., ``"30s"``, ``"5m"``, ``"1h30m"``) or a Slurm time (e.g., ``"1:30"``);
             fractions are kept. ``hs relay`` stops before it starts if the value is not a duration.
 
+            Range: 0 s to 2,147,483,647 s.
+
             .. only:: html
 
                 .. versionchanged:: 2.9.0
                    :pr:`113`: a string with units or a Slurm time.
+
+                .. versionchanged:: 2.9.0
+                   The range is checked when the configuration loads, for every command: a value
+                   outside it, or not a number of the key's kind, stops the command before it starts
+                   (exit status 3), naming the key, the range and the file or variable it came from.
 
         ``.evict_hint``
             Seconds of lost contact after which the relay takes the upstream *server* to have
@@ -1128,10 +1500,17 @@
             and ``s`` (e.g., ``"30s"``, ``"5m"``, ``"1h30m"``) or a Slurm time (e.g., ``"1:30"``);
             fractions are kept. ``hs relay`` stops before it starts if the value is not a duration.
 
+            Range: 0 s to 2,147,483,647 s.
+
             .. only:: html
 
                 .. versionchanged:: 2.9.0
                    :pr:`113`: a string with units or a Slurm time.
+
+                .. versionchanged:: 2.9.0
+                   The range is checked when the configuration loads, for every command: a value
+                   outside it, or not a number of the key's kind, stops the command before it starts
+                   (exit status 3), naming the key, the range and the file or variable it came from.
 
         ``[tls]``
             ``.enabled``

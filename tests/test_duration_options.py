@@ -18,6 +18,7 @@ from types import SimpleNamespace
 from pytest import mark, raises
 from cmdkit.app import exit_status
 from cmdkit.cli import ArgumentError
+from cmdkit.config import ConfigurationError
 
 # Internal libs
 from tests import main
@@ -197,6 +198,10 @@ def test_launched_delay_is_plain_decimal(delay_start: float, word: str) -> None:
     assert launched_delay(delay_start) == word
     assert 'e' not in word.lower()
     assert float(word) == delay_start
+    if abs(delay_start) > 2_147_483_647:  # Past the longest delay the client option refuses it (2.9.0)
+        with raises(ArgumentError):
+            ClientApp.interface.parse_args(['-d', word])
+        return
     assert ClientApp.interface.parse_args(['-d', word]).delay_start == delay_start
 
 
@@ -226,7 +231,8 @@ SECONDS_OPTIONS: Final[List[tuple[type, List[str], str, str]]] = [
 ]
 
 
-# Each whole-second value and its seconds; a zero period is refused instead (tests/test_period_floor.py).
+# Each whole-second value and its seconds; a zero period is refused instead (tests/test_period_floor.py), and so
+# is a zero interval, which polls without rest (tests/test_bounded_options.py).
 SECONDS_PARSED: Final[List[tuple[str, int]]] = [('30s', 30), ('5m', 300), ('1h30m', 5400), ('1.5h', 5400), ('1:30', 90),
                                                 ('1:30:00', 5400), ('1-12', 129600), ('90', 90), ('0.5', 1), ('0', 0)]
 
@@ -234,7 +240,7 @@ SECONDS_PARSED: Final[List[tuple[str, int]]] = [('30s', 30), ('5m', 300), ('1h30
 @mark.unit
 @mark.parametrize('app, args, option, dest, value, expected', [
     (*option, *case) for option in SECONDS_OPTIONS for case in SECONDS_PARSED
-    if not (option[3] == 'autoscaling_period' and case[1] == 0)
+    if not (option[3] in ('autoscaling_period', 'interval') and case[1] == 0)
 ])
 def test_seconds_option_parsed(app: type, args: List[str], option: str, dest: str, value: str, expected: int) -> None:
     """Every whole-second duration option reads seconds, units and Slurm times, rounded up."""
@@ -337,11 +343,12 @@ def test_seconds_key_number_unchanged(temp_site: Path, monkeypatch, section: str
 @mark.parametrize('section, key, value, reads', SECONDS_KEYS)
 def test_seconds_key_refused(temp_site: Path, monkeypatch, section: str, key: str, value: str,
                              reads: List[tuple[str, List[str], str]]) -> None:
-    """A bad duration string in the environment stops the command with the value and the forms."""
+    """A bad duration string in the environment stops the command as the configuration loads (exit 3), naming the
+    key, its range, the value and the variable."""
     monkeypatch.setenv(f'HYPERSHELL_{section.upper()}_{key.upper()}', '5MB')
     rc, _, stderr = main(['hs', 'cluster', str(Path(temp_site) / 'missing.in'), '--no-db'])
-    assert rc == exit_status.bad_argument
-    assert "'5MB'" in stderr and '1h30m' in stderr
+    assert rc == exit_status.bad_config
+    assert f"{section}.{key}: expected a duration" in stderr and "'5MB'" in stderr
 
 
 @mark.unit
@@ -371,9 +378,10 @@ def test_relay_site_period(monkeypatch, period: Any, expected: Any) -> None:
 @mark.unit
 @mark.parametrize('period', ['5MB', '1hr', '-5m', ''])
 def test_relay_site_period_refused(monkeypatch, period: str) -> None:
-    """A bad period stops the relay's argument check, naming the key, the value and the forms."""
+    """A bad period set after load stops the relay's argument check as a configuration refusal, naming the key, the
+    value and the forms."""
     monkeypatch.setitem(config['autoscale'], 'period', period)
-    with raises(ArgumentError) as exc_info:
+    with raises(ConfigurationError) as exc_info:
         RelayApp.from_cmdline([]).check_args()
     message = str(exc_info.value)
     assert message.startswith('autoscale.period: ') and repr(period) in message and '1h30m' in message
@@ -415,11 +423,12 @@ def test_relay_site_default_period_is_built_in() -> None:
 
 @mark.integration
 def test_relay_refuses_bad_period(temp_site: Path, monkeypatch) -> None:
-    """A bad period stops `hs relay` with the key and the value; other commands do not read it."""
+    """A bad period stops `hs relay` with the key and the value, as the configuration loads (exit 3); every other
+    command too, since the whole configuration is checked."""
     monkeypatch.setenv('HYPERSHELL_AUTOSCALE_PERIOD', '5MB')
     rc, _, stderr = main(['hs', 'relay'])
-    assert rc == exit_status.bad_argument
-    assert 'autoscale.period' in stderr and "'5MB'" in stderr and '1h30m' in stderr
+    assert rc == exit_status.bad_config
+    assert 'autoscale.period: expected a duration' in stderr and "'5MB'" in stderr
     assert 'Traceback' not in stderr
     rc, stdout, stderr = main(['hs', 'list', '--count'])
-    assert rc == exit_status.success and stdout == '0', stderr
+    assert rc == exit_status.bad_config and 'autoscale.period' in stderr, stderr

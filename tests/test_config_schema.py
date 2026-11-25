@@ -283,7 +283,7 @@ def test_read_environment() -> None:
 
 @mark.unit
 def test_read_environment_refusal_names_variable() -> None:
-    with pytest.raises(VariableError, match=r"server.port: expected a whole number, given 'abc' "
+    with pytest.raises(VariableError, match=r"server.port: expected a whole number from 1 to 65,535, given 'abc' "
                                             r"\(from: HYPERSHELL_SERVER_PORT\)"):
         read_environment({'HYPERSHELL_SERVER_PORT': 'abc'})
 

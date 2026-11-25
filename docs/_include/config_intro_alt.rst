@@ -21,6 +21,19 @@ Every configurable option can be set in one of these files. Further, every optio
 also be set by an environment variable: ``HYPERSHELL_`` followed by the option's path, with each
 ``.`` written as ``_`` (see *Environment Variables* below).
 
+Every numeric option has a range, given in the parameter reference. A value from a file, or from
+an environment variable, is held to its key's range when the configuration loads, for every
+command: a value outside it stops the command before it starts, naming the key, the range, the
+value and the file or variable it came from (exit status 3). A numeric key's ``_env`` or ``_eval``
+form that cannot resolve (a variable that is not set, a command that fails) stops it the same way.
+``hs config`` still runs on a file holding either, so it can be shown and set right.
+
+.. only:: html
+
+    .. versionchanged:: 2.9.0
+       Numeric values from files and variables are held to their keys' ranges as the configuration
+       loads, and a numeric key's ``_env`` or ``_eval`` form is resolved there.
+
 For example, set the logging level at the user level with a command:
 
 .. code-block:: shell

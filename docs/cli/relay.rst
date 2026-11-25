@@ -28,6 +28,11 @@ Description
 
 |
 
+.. versionchanged:: 2.9.0
+   Each numeric option has a range, given with the option below. A value outside it, or one that is
+   not a number of the option's kind, stops the command before it starts, with one line naming the
+   option, the range and the value (exit status 2).
+
 .. include:: ../_include/relay_help.rst
 
 .. versionadded:: 2.9.0

@@ -563,8 +563,21 @@ preload > defaults**. `hs config set` writes to disk but **does not mutate the l
   `_ENV`/`_EVAL`, then the longest table; `HYPERSHELL_SITE`, `_CONFIG_FILE`, `_PYTHONPATH` and
   `_ZONE` are process variables, not keys. Text is kept as written; whole numbers, numbers and
   booleans convert or stop every command at import with exit 3 naming the variable; durations and
-  sizes stay as given for the command that reads them (`config_seconds` at the start check for
-  duration keys no option reads, exit 3). `ENV_VARIABLES` records the variable that set each key, so
+  sizes stay as given for the command that reads them.
+- **Every numeric setting has one range, in one table**: `SETTINGS` in `core/config_schema.py`, beside
+  `KEYS`, holds each numeric key, zone key and option-only setting with its range, reason and any
+  advisory limit. One parser per kind reads a value against its entry (`parse_setting`,
+  `Range.parse`) and refuses it with one `SettingError` in one form; an option declares it with
+  `ranged(...)` (`RangedOption`, exit 2). A value past an advisory limit runs, with one WARNING per
+  setting per process (`advise`). Never type a numeric option `int`/`float` or read a numeric key
+  around the table; a new numeric key or option needs its entry (`tests/test_bounded_table.py`).
+- **Every numeric key is checked when the configuration loads**, for every command
+  (`check_settings` in `core/config.py`): a file's or variable's value, `_env`/`_eval` resolved
+  once there, is read by its range entry and pinned in the layer that gave it, so later reads need
+  no check of their own. A value outside its range exits 3 with one line naming the key, the range,
+  the value and its source. `hs config` still runs on a bad file value, or a file's `_env`/`_eval`
+  that cannot resolve (it gives way to the default), so the file can be repaired; a bad variable
+  still stops it. `ENV_VARIABLES` records the variable that set each key, so
   `blame`, `hs config which` and completion name it. **A new documented key gets its kind in `KEYS`
   and its entry in `docs/_include/config_param_ref.rst` in the same commit** —
   `tests/test_config_schema.py` fails otherwise. An empty variable for a key of `EMPTY_UNSET` is
@@ -572,7 +585,8 @@ preload > defaults**. `hs config set` writes to disk but **does not mutate the l
   as it holds a file's `""`.
 - `hs config set` writes a value by the same rule: `match_path` finds the kind of the dotted path as
   written (no letter-case folding; a path with no type of its own takes TOML's own scalars) and
-  `read_value` converts the value. A value that does not convert is refused with exit 2
+  `read_value` converts the value; a numeric key's value also goes through its range, and any other
+  key's integer must fit TOML's 64 bits. A value that does not convert is refused with exit 2
   (`ArgumentError`) before `update()`, so the file and its backups are left as they were.
   `update()` reads and writes the file as UTF-8 whatever the locale, as every reader decodes it.
 - Sentinels: `'<auto>'` (materialize), `'<none>'` (unset). The `X or None` idiom means

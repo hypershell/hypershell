@@ -179,7 +179,7 @@ def test_cluster_does_not_retry_never_ran(temp_site: Path, case: str) -> None:
         options = ['-t', 'echo {nope}']
         expected = -1001
     else:
-        lines = ['echo 1  # HYPERSHELL: n:1 group:1 cores:100000', 'echo 2  # HYPERSHELL: n:2 group:2']
+        lines = ['echo 1  # HYPERSHELL: n:1 group:1 cores:32767', 'echo 2  # HYPERSHELL: n:2 group:2']
         options = []
         expected = -1002
     taskfile = create_taskfile(temp_site, lines)

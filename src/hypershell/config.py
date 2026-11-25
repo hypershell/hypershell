@@ -28,10 +28,11 @@ from rich.syntax import Syntax
 # Internal libs
 from hypershell.core.platform import path
 from hypershell.core.logging import Logger
-from hypershell.core.config_schema import match_path, read_value
-from hypershell.core.exceptions import get_shared_exception_mapping
+from hypershell.core.config_schema import (match_path, read_value, setting_for, advise, shown, SETTINGS,
+                                           SettingError, Kind, INT_FORM, INT64_MAX)
+from hypershell.core.exceptions import get_shared_exception_mapping, ReadingMixin
 from hypershell.core.config import (load_file, update, ACTIVE_CONFIG_VARS, AUTH_SECTIONS, resolve_auth, env_variable,
-                                    is_key_variable, default as default_config, config as full_config)
+                                    is_key_variable, default as default_config, unchecked_config as full_config)
 
 # Public interface
 __all__ = ['ConfigApp', ]
@@ -61,7 +62,7 @@ Options:
 """
 
 
-class ConfigEditApp(Application):
+class ConfigEditApp(ReadingMixin, Application):
     """Edit configuration with default editor."""
 
     interface = Interface(EDIT_PROGRAM, EDIT_USAGE, EDIT_HELP)
@@ -122,7 +123,7 @@ Options:
 """
 
 
-class ConfigGetApp(Application):
+class ConfigGetApp(ReadingMixin, Application):
     """Get configuration option."""
 
     interface = Interface(GET_PROGRAM, GET_USAGE, GET_HELP)
@@ -281,7 +282,7 @@ def is_utf8(text: str) -> bool:
     return True
 
 
-class ConfigSetApp(Application):
+class ConfigSetApp(ReadingMixin, Application):
     """Set configuration option."""
 
     interface = Interface(SET_PROGRAM, SET_USAGE, SET_HELP)
@@ -317,11 +318,8 @@ class ConfigSetApp(Application):
         if not is_utf8(self.value):
             raise ArgumentError(f'{self.varpath}: expected text that can be written as UTF-8{given}')
 
-        # The value is read by the key's kind, and refused before anything is written.
-        try:
-            value = read_value(match_path(self.varpath), self.value)
-        except ValueError as error:
-            raise ArgumentError(f'{self.varpath}: expected {error}{given}') from None
+        # The value is read by the key's kind (a numeric key by its range), and refused before anything is written.
+        value = self.checked_value(given)
 
         section, *subsections, variable = self.varpath.split('.')
 
@@ -334,6 +332,34 @@ class ConfigSetApp(Application):
 
         config_section[variable] = value
         update(self.site_name, config)
+
+    def checked_value(self: ConfigSetApp, given: str) -> Any:
+        """The value to write, read by the key's kind; refused (exit 2, naming the key) if the key cannot hold it.
+
+        A numeric key's value goes through its entry in the table, range and kind, and is written as a
+        number, or a duration or size as given. Any other key's integer must fit TOML's 64 bits.
+        """
+        kind = match_path(self.varpath)
+        setting = setting_for(self.varpath)
+        if setting is not None:
+            entry = SETTINGS[setting]
+            try:
+                checked = entry.parse(self.value, self.varpath, whole=False)
+            except SettingError as error:
+                raise ArgumentError(str(error)) from None
+            value = checked if kind in (Kind.INT, Kind.NUMBER, Kind.INT_OR_NONE) else read_value(kind, self.value)
+            advise(setting, checked, self.varpath, given=value)
+            return value
+        text = self.value.strip()
+        if kind is Kind.UNTYPED and INT_FORM.fullmatch(text):
+            digits = text.lstrip('+-').replace('_', '').lstrip('0')
+            if len(digits) > 20 or not -INT64_MAX - 1 <= int(text) <= INT64_MAX:
+                raise ArgumentError(f'{self.varpath}: expected an integer from {-INT64_MAX - 1:,} to {INT64_MAX:,}, '
+                                    f'given {shown(self.value)}')
+        try:
+            return read_value(kind, self.value)
+        except ValueError as error:
+            raise ArgumentError(f'{self.varpath}: expected {error}{given}') from None
 
 
 WHICH_PROGRAM = 'hs config which'
@@ -356,7 +382,7 @@ Options:
 """
 
 
-class ConfigWhichApp(Application):
+class ConfigWhichApp(ReadingMixin, Application):
     """Show origin of configuration option."""
 
     interface = Interface(WHICH_PROGRAM, WHICH_USAGE, WHICH_HELP)

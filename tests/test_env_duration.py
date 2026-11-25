@@ -45,15 +45,16 @@ def layered(**server: Any) -> Configuration:
 
 SECONDS: Final[Dict[str, Tuple[Any, bool, Any]]] = {
     'number': (600, False, 600),
-    'fraction': (9.5, False, 9.5),
+    'fraction': (19.5, False, 19.5),
     'units': ('10m', False, 600),
-    'fractional-units': ('1.5s', False, 1.5),
+    'fractional-units': ('10.5s', False, 10.5),
     'slurm': ('1:30:00', False, 5400),
     'spaces': (' 90 ', False, 90),
-    'whole-rounds-up': ('1.2s', True, 2),
+    'whole-rounds-up': ('10.2s', True, 11),
     'whole-units': ('5m', True, 300),
 }
-"""For each case: the value given, whether whole seconds are asked for, and the seconds read."""
+"""For each case: the value given, whether whole seconds are asked for, and the seconds read (each inside
+`server.evict`'s range, which the reader holds it to)."""
 
 
 @mark.unit
@@ -71,8 +72,8 @@ def test_config_seconds(case: str) -> None:
 def test_config_seconds_refused(value: str) -> None:
     """Text that is not a duration is refused, naming the key, the variable and the forms."""
     from hypershell.core.config import config_seconds, ConfigurationError
-    with pytest.raises(ConfigurationError, match=r'server\.evict: Duration .* is not valid: expected .*'
-                                                 r'\(from: HYPERSHELL_SERVER_EVICT\)'):
+    with pytest.raises(ConfigurationError, match=r'server\.evict: expected a duration .*from 10 s to 2,147,483,647 s, '
+                                                 r'given .* \(from: HYPERSHELL_SERVER_EVICT\)'):
         config_seconds('server', 'evict', base=layered(evict=value))
 
 
@@ -147,7 +148,7 @@ def test_duration_refused_at_start(temp_site: Path, path: str) -> None:
         env = child_env(site, HYPERSHELL_SERVER_AUTH=KEY, **variables)
     status, _, stderr = run_bounded(site, argv, env, bound=BOUND)
     source = name or str(site / 'config.toml')
-    assert_refused(status, stderr, path, source, 'Duration')
+    assert_refused(status, stderr, path, source, 'expected a duration')
 
 
 RELAY_UNITS: Final[Dict[str, Tuple[str, str, Any]]] = {

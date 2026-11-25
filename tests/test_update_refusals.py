@@ -154,7 +154,7 @@ SELECTION: Dict[str, Tuple[List[str], List[str], str]] = {
     'with-tag-long': (['--with-tag', 'n:1'], ['--with-tag', 'n:1'], '--with-tag'),
     'group-short': (['-g', '0'], ['-g', '0'], '--group'),
     'group-long': (['--group', '1'], ['--group', '1'], '--group'),
-    'limit-short': (['-l', '0'], ['-l', '0'], '--limit'),
+    'limit-short': (['-l', '0'], ['-l', '2'], '--limit'),  # the filtered form refuses -l 0 (bounded-inputs)
     'limit-long': (['--limit', '1'], ['--limit', '1'], '--limit'),
     'order-by-short': (['-s', 'args'], ['-s', 'args', '-l', '2'], '--order-by'),
     'order-by-long': (['--order-by', 'args'], ['--order-by', 'args', '-l', '2'], '--order-by'),
@@ -179,7 +179,7 @@ SELECTED: Dict[str, Any] = {
     'where-short': {2}, 'where-long': {2},
     'with-tag-short': {1}, 'with-tag-long': {1},
     'group-short': {0, 1, 2, 3}, 'group-long': {4},
-    'limit-short': set(), 'limit-long': 1,
+    'limit-short': 2, 'limit-long': 1,
     'order-by-short': {0, 1}, 'order-by-long': {0, 1}, 'desc': {3, 4},
     'failed-short': {2, 3, 4}, 'failed-long': {2, 3, 4},
     'succeeded-short': {1}, 'succeeded-long': {1},

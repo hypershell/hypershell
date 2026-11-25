@@ -11,6 +11,7 @@ from typing import List, Dict, Tuple, Any, Type, Optional, Final
 # Standard libs
 import re
 import json
+import math
 import hashlib
 from enum import Enum
 from uuid import UUID as PyUUID, uuid5
@@ -36,6 +37,7 @@ from hypershell.core.logging import Logger, HOSTNAME, INSTANCE
 from hypershell.core.heartbeat import Heartbeat
 from hypershell.core.types import (JSONData, to_json_type, from_json_type, serialize, deserialize,
                                    parse_bytes, parse_time, UnitError)
+from hypershell.core.config_schema import SETTINGS, SettingError, Kind
 from hypershell.core.uuid import uuid
 from hypershell.core.tag import Tag
 from hypershell.data.core import schema, Session
@@ -46,7 +48,8 @@ __all__ = [
     'UUID', 'TEXT', 'INTEGER', 'SMALL_INTEGER', 'BIG_INTEGER', 'DATETIME', 'BOOLEAN', 'JSON',
     'DEFAULT_TASK_GROUP', 'CANCEL_STATUS', 'TASK_TEMPLATE_ERROR', 'TASK_RESOURCE_ERROR', 'NO_RETRY_STATUSES',
     'DIRECT_SOURCE_ID', 'STDIN_SOURCE_ID', 'TaskGroupInfo', 'ResultOutcome',
-    'GROUP_MIN', 'GROUP_MAX', 'TaskGroupError', 'ensure_group', 'parse_group', 'tag_text',
+    'GROUP_MIN', 'GROUP_MAX', 'TaskInputError', 'TaskGroupError', 'TaskResourceError', 'ensure_group', 'parse_group',
+    'ensure_resources', 'read_resources', 'RESOURCE_SETTINGS', 'tag_text',
     'DEFAULT_ZONE_ID', 'DEFAULT_ZONE_NAME', 'ZONE_NAMESPACE', 'zone_id', 'zone_name',
 ]
 
@@ -61,14 +64,26 @@ DEFAULT_TASK_GROUP: Final[int] = 0
 TAG_MARKER: Final[re.Pattern] = re.compile(r'#\s*HYPERSHELL:?')
 """The inline tag marker: found anywhere on a line, with or without its colon."""
 
-GROUP_MIN: Final[int] = -2**31
+GROUP_MIN: Final[int] = SETTINGS['option.group'].low
 """Lowest task group: the range of PostgreSQL's `INTEGER`, held on every database."""
 
-GROUP_MAX: Final[int] = 2**31 - 1
+GROUP_MAX: Final[int] = SETTINGS['option.group'].high
 """Highest task group."""
 
 
-class TaskGroupError(RuntimeError):
+class TaskInputError(RuntimeError):
+    """A value of task input refused before anything is written: a group, or a resource tag.
+
+    A `RuntimeError`, so a command refused for it exits 5; :meth:`at` names where the value came
+    from (``tasks.in, line 7``, ``record 3``) once that is known.
+    """
+
+    def at(self: TaskInputError, origin: str) -> TaskInputError:
+        """The same refusal, naming where the value came from."""
+        raise NotImplementedError()
+
+
+class TaskGroupError(TaskInputError):
     """A task group taken from input that is not an integer in range.
 
     `value` is the group as written when it came from text (``1e3``, not ``1000.0``), else the value
@@ -107,12 +122,94 @@ def ensure_group(value: Any, text: Optional[str] = None) -> int:
 
 
 def parse_group(text: str) -> int:
-    """The task group written as `text`, by the rule of `-g/--group`: what `int()` takes, within range."""
+    """The task group written as `text`, by the rule of `-g/--group`: a whole number, within range."""
     try:
-        value = int(text)
-    except (TypeError, ValueError):
-        raise TaskGroupError(text) from None
-    return ensure_group(value, text=text)
+        return SETTINGS['option.group'].parse(text, 'group')
+    except SettingError as error:
+        raise TaskGroupError(text, out_of_range=error.out_of_range) from None
+
+
+class TaskResourceError(TaskInputError):
+    """A resource tag (`cores`, `memory`, `timeout`) taken from input outside its range, or not of its kind.
+
+    The message is the refusal of the tag's `task.*` entry in the table, then where it came from.
+    """
+
+    def __init__(self: TaskResourceError, message: str, origin: Optional[str] = None) -> None:
+        """Initialize with the entry's refusal `message` and where the value came from."""
+        self.message = message
+        self.origin = origin
+        super().__init__(message if origin is None else f'{message} ({origin})')
+
+    def at(self: TaskResourceError, origin: str) -> TaskResourceError:
+        """The same refusal, naming where the value came from."""
+        return TaskResourceError(self.message, origin)
+
+
+RESOURCE_SETTINGS: Final[Dict[str, str]] = {'cores': 'task.cores', 'memory': 'task.memory', 'timeout': 'task.timeout'}
+"""Each resource tag, and the entry of the table it is read by."""
+
+
+WHOLE_DECIMAL: Final[re.Pattern] = re.compile(r'(?P<whole>[+-]?[0-9]+(?:_[0-9]+)*)\.0+', re.ASCII)
+"""A whole number written as a decimal with a zero fraction (``4.0``, ``4.00``), as a tag may give it."""
+
+
+def _read_resource(setting: str, given: Any) -> Any:
+    """The resource value `given` (text as written, or a JSON value) read by the entry `setting`, else SettingError.
+
+    A whole-number value written as a decimal with a zero fraction (``4.0``) is that whole number. A
+    duration is whole seconds, a fraction rounded up as the option rounds it (a JSON ``90.5`` too),
+    and a size whole bytes, rounded down as its text is, so the value fits its integer column.
+    """
+    entry = SETTINGS[setting]
+    value = given
+    if entry.kind is Kind.INT and isinstance(given, str) and (match := WHOLE_DECIMAL.fullmatch(given.strip())):
+        value = match.group('whole')
+    try:
+        read = entry.parse(value, setting)
+    except SettingError as error:
+        raise SettingError(setting, entry, given, out_of_range=error.out_of_range) from None
+    if entry.kind is Kind.DURATION and not isinstance(read, int):
+        return math.ceil(read)
+    if entry.kind is Kind.SIZE and not isinstance(read, int):
+        return int(read)
+    return read
+
+
+def ensure_resources(tags: Dict[str, Any], texts: Optional[Dict[str, Optional[str]]] = None) -> Dict[str, Any]:
+    """`tags` with each resource tag read by its `task.*` entry, else :class:`TaskResourceError`.
+
+    A tag's text as written (`texts`, from a line or `-t`) is read as the option reads it; without
+    it, the value is read as a configuration file's value of that kind (a JSON record). An empty
+    value (a bare tag) is left as it is. A whole-number tag (`cores`) written as a decimal with a
+    zero fraction (``4.0``) is read as that whole number, as a JSON ``4.0`` is; a duration is whole
+    seconds (rounded up) and a size whole bytes (rounded down). A refusal shows the value as given.
+    """
+    for name, setting in RESOURCE_SETTINGS.items():
+        if name not in tags or tags[name] is None or tags[name] == '':
+            continue
+        text = (texts or {}).get(name)
+        try:
+            tags[name] = _read_resource(setting, tags[name] if not text else text)
+        except SettingError as error:
+            raise TaskResourceError(str(error)) from None
+    return tags
+
+
+def read_resources(tags: Dict[str, Any]) -> Dict[str, Any]:
+    """`tags` with each resource tag its entry takes read as :func:`ensure_resources` reads it; others as given.
+
+    For a JSON record's tags as they become a task: the command line refused a bad value before
+    (:func:`~hypershell.submit.validate_json_records`), and a record given to the Python API is
+    taken as given (GOAL C3), so nothing is refused here.
+    """
+    for name, setting in RESOURCE_SETTINGS.items():
+        if name in tags and tags[name] is not None and tags[name] != '':
+            try:
+                tags[name] = _read_resource(setting, tags[name])
+            except SettingError:
+                pass
+    return tags
 
 
 def tag_text(tokens: List[str], name: str) -> Optional[str]:
@@ -644,13 +741,13 @@ class Task(Entity):
         # integer bytes as the `--memory` flag does, so resource accounting stays numeric.
         memory = tag.pop('memory', other.get('memory', None))
         try:
-            other['memory'] = parse_bytes(memory) if isinstance(memory, str) else memory
+            other['memory'] = parse_bytes(memory, 'task.memory') if isinstance(memory, str) else memory
         except UnitError as error:
             raise RuntimeError(f'Failed to parse task memory ({error})') from error
         # A timeout string ('1h30m', '1:30:00') is read as integer seconds, from the tag or the option.
         timeout = tag.get('timeout', other.get('timeout', None))
         try:
-            tag['timeout'] = parse_time(timeout) if isinstance(timeout, str) else timeout
+            tag['timeout'] = parse_time(timeout, 'task.timeout') if isinstance(timeout, str) else timeout
         except UnitError as error:
             raise RuntimeError(f'Failed to parse task timeout ({error})') from error
         other['timeout'] = tag.pop('timeout', other.get('timeout', None))
@@ -725,6 +822,10 @@ class Task(Entity):
             tokens = args[match.end():].strip().split()
             try:
                 tags = Tag.parse_cmdline_list(tokens)
+            except (ValueError, TypeError) as error:
+                raise RuntimeError(f'Failed to parse inline tags ({error}, from: "{args}")') from error
+            ensure_resources(tags, {name: tag_text(tokens, name) for name in RESOURCE_SETTINGS if name in tags})
+            try:
                 cls.ensure_valid_tag(tags)
             except (ValueError, TypeError) as error:
                 raise RuntimeError(f'Failed to parse inline tags ({error}, from: "{args}")') from error

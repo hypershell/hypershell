@@ -32,6 +32,7 @@ from subprocess import run, PIPE
 from pytest import mark, raises
 from cmdkit.app import exit_status
 from cmdkit.cli import ArgumentError
+from cmdkit.config import ConfigurationError
 
 # Internal libs
 from hypershell.core.config import config, AUTH_ENV
@@ -52,9 +53,13 @@ PERIOD_APPS: Final[Dict[str, type]] = {'server': ServerApp, 'cluster': ClusterAp
 """Each command that takes -P/--period."""
 
 
+PERIOD_RANGE: Final[str] = ': expected a duration from 0 s (exclusive) to 2,147,483,647 s, given '
+"""The one refusal of a period, after the name and before the value given."""
+
+
 def refusal_line(message: str) -> str:
-    """The line of `message` that gives the floor (empty if none does)."""
-    return next((line for line in message.splitlines() if 'greater than zero' in line), '')
+    """The line of `message` that refuses a period, giving its range (empty if none does)."""
+    return next((line for line in message.splitlines() if PERIOD_RANGE in line), '')
 
 
 def names_value(line: str, value: str) -> bool:
@@ -99,11 +104,11 @@ PERIODS_REFUSED: Final[List[Any]] = [0, 0.0, -0.0, -5, -0.5, math.nan, -math.inf
 @mark.unit
 @mark.parametrize('value', PERIODS_REFUSED, ids=[repr(value) for value in PERIODS_REFUSED])
 def test_parse_period_refused(value: Any) -> None:
-    """A value that is not greater than zero is refused, NaN included, naming the value and the floor."""
+    """A value that is not greater than zero is refused, NaN included, naming the value and the range."""
     with raises(UnitError) as exc_info:
         parse_period(value)
     message = str(exc_info.value)
-    assert 'greater than zero' in message and names_value(message, repr(value))
+    assert PERIOD_RANGE in message and names_value(message, repr(value))
 
 
 PERIODS_ACCEPTED: Final[List[Tuple[Any, Any]]] = [(0.001, 1), (0.5, 1), (1, 1), (1.0, 1.0), (1.5, 1.5), (60, 60),
@@ -156,37 +161,27 @@ KEY_LAUNCHES: Final[Dict[str, Tuple[str, List[str]]]] = {
 }
 """Each launch the key is tried with: the command and its arguments (the relay's site fleet recorded unbuilt)."""
 
-KEY_ROUTES: Final[Dict[str, Tuple[str, str, str, str]]] = {
-    'env-0': ('env', '0', 'autoscale.period', '0'),
-    'env-neg5': ('env', '-5', 'autoscale.period', '-5'),
-    'env-0s': ('env', '0s', '-P/--period', "'0s'"),
-    'file-0': ('file', '0', 'autoscale.period', '0'),
-    'file-neg5': ('file', '-5', 'autoscale.period', '-5'),
-    'file-0s': ('file', '"0s"', '-P/--period', "'0s'"),
-    'file-0.0': ('file', '0.0', 'autoscale.period', '0.0'),
-    'env-nan': ('env', 'nan', '-P/--period', "'nan'"),
-    'env-neginf': ('env', '-inf', '-P/--period', "'-inf'"),
-    'env-neg0.0': ('env', '-0.0', 'autoscale.period', '-0.0'),
-    'file-nan': ('file', 'nan', 'autoscale.period', 'nan'),
-    'file-neginf': ('file', '-inf', 'autoscale.period', '-inf'),
-    'file-neg0.0': ('file', '-0.0', 'autoscale.period', '-0.0'),
+KEY_ROUTES: Final[Dict[str, Tuple[str, str, str]]] = {
+    'env-0': ('env', '0', "'0'"),
+    'env-neg5': ('env', '-5', "'-5'"),
+    'env-0s': ('env', '0s', "'0s'"),
+    'file-0': ('file', '0', '0'),
+    'file-neg5': ('file', '-5', '-5'),
+    'file-0s': ('file', '"0s"', "'0s'"),
+    'file-0.0': ('file', '0.0', '0.0'),
+    'env-nan': ('env', 'nan', "'nan'"),
+    'env-neginf': ('env', '-inf', "'-inf'"),
+    'env-neg0.0': ('env', '-0.0', "'-0.0'"),
+    'file-nan': ('file', 'nan', 'nan'),
+    'file-neginf': ('file', '-inf', '-inf'),
+    'file-neg0.0': ('file', '-0.0', '-0.0'),
 }
-"""Each route a period not greater than zero takes: where it is set, as what, the name and value the error gives.
+"""Each route a period not greater than zero takes: where it is set, as what, and the value the refusal gives.
 
-The configuration loader reads a number as a number, which no option type converts, so the error
-names the key; a string reaches the option's type as its default, so the error names the option.
-The relay has no option, so its error names the key either way. NaN, `-inf` and `-0.0` are not
-greater than zero, so a floor that tests `seconds <= 0` fails here. A variable's value is text, and
-`nan` and `-inf` as text are not durations: the refusal says so rather than giving the floor.
+The configuration is checked as it loads, for every command, so every route is refused there, naming
+the key and where it came from, exit 3 (a variable's value as its text, a file's as TOML gives it).
+NaN, `-inf` and `-0.0` are not greater than zero, so a floor that tests `seconds <= 0` fails here.
 """
-
-NOT_DURATIONS: Final[List[str]] = ['env-nan', 'env-neginf']
-"""The routes refused as not a duration rather than as not greater than zero."""
-
-
-def not_duration_line(message: str) -> str:
-    """The line of `message` that refuses a value as not a duration (empty if none does)."""
-    return next((line for line in message.splitlines() if 'is not valid' in line), '')
 
 
 def set_period(temp_site: Path, monkeypatch, where: str, text: str) -> None:
@@ -215,16 +210,17 @@ def run_recorded(temp_site: Path, monkeypatch, app: str, args: List[str]) -> Tup
 @mark.parametrize('route', list(KEY_ROUTES))
 @mark.parametrize('launch', list(KEY_LAUNCHES))
 def test_period_key_refused(temp_site: Path, monkeypatch, launch: str, route: str) -> None:
-    """A period not greater than zero, or not a duration, stops the command before it serves or launches anything."""
-    where, text, name, value = KEY_ROUTES[route]
+    """A period not greater than zero, or not a duration, stops the command as the configuration loads, exit 3,
+    before it serves or launches anything."""
+    where, text, value = KEY_ROUTES[route]
     set_period(temp_site, monkeypatch, where, text)
     app, args = KEY_LAUNCHES[launch]
     rc, report, log = run_recorded(temp_site, monkeypatch, app, args)
-    assert rc == exit_status.success, log  # The interpreter itself exits normally.
-    assert report['status'] == exit_status.bad_argument, log
-    assert report['recorded'] == []
-    line = refusal_line(log) if route not in NOT_DURATIONS else not_duration_line(log)
-    assert (name if app != 'relay' else 'autoscale.period') in line and names_value(line, value), log
+    assert rc == exit_status.bad_config, log  # Refused at import: `hs` never runs.
+    assert report == {}
+    line = refusal_line(log)
+    assert line.startswith('CRITICAL') and 'autoscale.period' + PERIOD_RANGE in line, log
+    assert names_value(line, value) and '(from: ' in line, log
 
 
 AUTOSCALING_LAUNCHES: Final[Dict[str, Tuple[str, List[str], str]]] = {
@@ -288,13 +284,14 @@ RELAY_ZEROS: Final[List[Any]] = [0, 0.0, -0.0, -5, math.nan, -math.inf, '0', '0s
 @mark.unit
 @mark.parametrize('period', RELAY_ZEROS, ids=[repr(period) for period in RELAY_ZEROS])
 def test_relay_period_zero_refused(monkeypatch, tmp_path: Path, period: Any) -> None:
-    """The relay refuses a zero or negative period before building anything, naming the key, value and floor."""
+    """The relay refuses a zero or negative period set after load before building anything, naming the key, value
+    and range, as a configuration refusal (exit 3)."""
     import hypershell.relay as relay_module
     monkeypatch.setitem(config['autoscale'], 'period', period)
-    with raises(ArgumentError) as exc_info:
+    with raises(ConfigurationError) as exc_info:
         RelayApp.from_cmdline([]).check_args()
     message = str(exc_info.value)
-    assert message.startswith('autoscale.period: ') and 'greater than zero' in message
+    assert message.startswith('autoscale.period' + PERIOD_RANGE)
     assert names_value(message, repr(period))
     built: List[Dict[str, Any]] = []
     thread = SimpleNamespace(start=lambda: None, stop=lambda: None, release=lambda: None)
@@ -304,7 +301,7 @@ def test_relay_period_zero_refused(monkeypatch, tmp_path: Path, period: Any) -> 
                  'install_drain_handlers', 'install_terminate_handler'):
         monkeypatch.setattr(relay_module, name, lambda *args, **kwargs: None)
     monkeypatch.setattr(relay_module, 'RelayThread', lambda **options: built.append(options) or thread)
-    assert RelayApp.main([]) == exit_status.bad_argument
+    assert RelayApp.main([]) == exit_status.bad_config
     assert built == []
 
 

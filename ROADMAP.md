@@ -258,14 +258,14 @@ Under a local `hs cluster`, the in-process client uses the built-in heartrate ra
 A configuration file holding `server.attempts` as a string makes every command fail at import with a traceback instead of a configuration error. Read typed keys from a file by the key's declared kind, as the environment layer does since #113, and refuse a value that does not convert with exit 3 naming the key and file.
 
 *Target: 2.9.x · Horizon: near-term, small · Depends on: — · Refs: `spec/env-config-keys/` (the typed reader); `spec/config-set-and-unread/research/`*
-**Seed:** [`issues/config-text-attempts-crashes.md`](issues/config-text-attempts-crashes.md) · *status: unshaped*
+**Seed:** [`issues/config-text-attempts-crashes.md`](issues/config-text-attempts-crashes.md) · *status: adopted:bounded-inputs*
 
 ## `hs config set` writes integers wider than 64 bits to TOML
 
 An integer value wider than 64 bits is written to the configuration file, which TOML readers then refuse or misread. Refuse an integer outside TOML's 64-bit range in `hs config set` with exit 2 naming the key.
 
 *Target: 2.9.x · Horizon: near-term, small · Depends on: — · Refs: `spec/config-set-and-unread/research/`*
-**Seed:** [`issues/config-set-wide-integers.md`](issues/config-set-wide-integers.md) · *status: unshaped*
+**Seed:** [`issues/config-set-wide-integers.md`](issues/config-set-wide-integers.md) · *status: adopted:bounded-inputs*
 
 ## The `--eager` help says "greater than one" where it means zero
 
@@ -353,7 +353,7 @@ that. It absorbs the absurd-input seeds filed during the 2.9.0 cycles.
 *Target: 2.9.0 · Horizon: near-term · Depends on: `config-set-and-unread` (landed, #117),
 `submit-input-checks` (landed, #118), `update-client-retry` · Refs: `core/config_schema.py`;
 review rubric (Scope)*
-**Seed:** [`issues/bounded-inputs.md`](issues/bounded-inputs.md) · *status: unshaped*
+**Seed:** [`issues/bounded-inputs.md`](issues/bounded-inputs.md) · *status: adopted:bounded-inputs*
 
 ## An unrecognized configuration key is silently ignored
 
@@ -367,6 +367,18 @@ strict mode that refuses unknown keys would be a 2.10.0 interface change.
 *Target: 2.9.x · Horizon: near-term, small · Depends on: — · Refs:
 `src/hypershell/core/config_schema.py` (`KEYS`, `TABLES`); `issues/bounded-inputs.md` for values*
 **Seed:** [`issues/config-unknown-key-warning.md`](issues/config-unknown-key-warning.md) · *status: unshaped*
+
+## The Python API does not hold explicit arguments to the numeric ranges
+
+`bounded-inputs` holds every option, configuration key and variable to one table of ranges, and the
+Python API's configuration-derived defaults with them. An argument a Python caller passes explicitly
+is used as given, by the maintainer's ruling (2026-11-24), and the ranges are only documented. Check
+each parameter that mirrors a setting through the same parsers and raise `ValueError` before work
+starts.
+
+*Target: 2.10.0 · Horizon: mid-term, small · Depends on: `bounded-inputs` · Refs:
+`spec/bounded-inputs/GOAL.md` (C3)*
+**Seed:** [`issues/api-argument-ranges.md`](issues/api-argument-ranges.md) · *status: unshaped*
 
 ## Docs and runtime surfacing
 

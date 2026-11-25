@@ -40,6 +40,7 @@ import psutil
 # Internal libs
 from hypershell.core.uuid import uuid
 from hypershell.core.types import parse_bytes
+from hypershell.core.config_schema import parse_setting, SettingError
 from hypershell.core.platform import default_path
 from hypershell.core.signal import check_signal, reset_signal, SIGHUP
 from hypershell.core.exceptions import write_traceback
@@ -329,12 +330,12 @@ BACKUP_COUNT: int = DEFAULT_BACKUP_COUNT
 
 
 def set_retention_count(count: int) -> None:
-    """Set global retention count for previous log files."""
+    """Set global retention count for previous log files, read by `logging.file.keep`'s entry in the table."""
     global BACKUP_COUNT
-    count = int(count)
-    if count < 0:
-        raise ConfigurationError(f'Invalid file retention count \'{count}\'')
-    BACKUP_COUNT = count
+    try:
+        BACKUP_COUNT = parse_setting('logging.file.keep', count)
+    except SettingError as error:
+        raise ConfigurationError(str(error)) from None
 
 
 def files_eligible_for_deletion(log_file: str) -> List[str]:

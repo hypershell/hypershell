@@ -146,9 +146,9 @@ def test_memory_tag_validation_names_forms(value: str) -> None:
 @mark.unit
 def test_memory_unchecked_value_refused_by_task() -> None:
     """A memory value that skipped tag validation is still refused, as a one-line RuntimeError."""
-    with raises(RuntimeError, match=r"Memory size '16X' is not valid"):
+    with raises(RuntimeError, match=r"task\.memory: expected a size .*given '16X'"):
         Task.new(args='echo a', memory='16X')
-    with raises(RuntimeError, match=r"Memory size '16X' is not valid"):
+    with raises(RuntimeError, match=r"task\.memory: expected a size .*given '16X'"):
         Task.new(args='echo a # HYPERSHELL: naked memory:16X')  # Tags after a naked tag are not checked.
 
 
@@ -319,8 +319,8 @@ def test_timeout_tag_refused(value: str) -> None:
     assert repr(value) in str(exc_info.value)
     with raises(RuntimeError, match='Failed to parse task timeout'):
         Task.new(args='echo a', timeout=value)
-    with raises(RuntimeError, match='Failed to parse task timeout'):
-        Task.new(args=f'echo a # HYPERSHELL: naked timeout:{value}')  # Tags after a naked tag are not checked.
+    with raises(RuntimeError, match=rf"task\.timeout: expected a duration .*given '{value}'"):
+        Task.new(args=f'echo a # HYPERSHELL: naked timeout:{value}')  # Read by its entry after a naked tag too.
 
 
 @mark.integration

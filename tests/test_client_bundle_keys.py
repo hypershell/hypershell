@@ -129,7 +129,7 @@ def test_client_bundlewait_refused(temp_site: Path, monkeypatch: pytest.MonkeyPa
     monkeypatch.setenv('HYPERSHELL_CLIENT_BUNDLEWAIT', '5MB')
     rc, _, stderr = main([sys.executable, '-c', READ_CLIENT])
     assert rc != exit_status.success
-    assert "'5MB'" in stderr and '1h30m' in stderr
+    assert "'5MB'" in stderr and 'client.bundlewait: expected a duration' in stderr
 
 
 @mark.integration

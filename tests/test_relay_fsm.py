@@ -983,7 +983,7 @@ def test_relay_refuses_a_site_of_no_clients(tmp_path: Path, size: str) -> None:
         assert proc.wait(DEADLINE) == exit_status.bad_argument, log.read_text()
     finally:
         finish(proc)
-    assert f'Site size must be at least 1 (given {size})' in log.read_text()
+    assert f"-N/--size: expected a whole number from 1 to 2,147,483,647, given '{size}'" in log.read_text()
     assert READY not in log.read_text()
 
 
