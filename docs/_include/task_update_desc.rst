@@ -48,8 +48,8 @@ refused in both forms.
   ``2026-01-01 09:00:00.5``, ``2026-01-01T09:00:00-05:00``); ``submit_time`` not ``none``. A value
   without an offset is local time, the zone ``hs info`` and ``hs list`` show times in; a local time
   that does not exist, in the hour skipped by a change to daylight-saving time, is refused, and one
-  that occurs twice is the first. An instant within a day of either end of the calendar (years 1 and
-  9999) is refused. A value is the same instant on SQLite and PostgreSQL. ``now``,
+  that occurs twice is the first. An instant on or near the first or last day of the calendar (years 1
+  and 9999) is refused. A value is the same instant on SQLite and PostgreSQL. ``now``,
   ``today``, ``epoch`` and other words are refused; for the time now, use ``$(date -Iseconds)``.
 - ``args``: any text, as given; not ``none``. The other text columns (``command``, ``outpath``,
   ``errpath``, ``csvpath``, ``submit_host``, ``server_host``, ``client_host``, ``fingerprint``) take
