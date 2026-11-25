@@ -58,11 +58,6 @@ tests/test_update_numbers.py::test_new_rows
 tests/test_update_numbers.py::test_refusal_before_database[attempt]
 tests/test_update_numbers.py::test_refusal_before_database[cores]
 tests/test_update_numbers.py::test_refusal_before_database[memory]
-tests/test_update_numbers.py::test_refusal_before_database[near-miss]
-tests/test_update_numbers.py::test_refusal_before_database[start_time]
-tests/test_update_numbers.py::test_refusal_before_database[tag-key]
-tests/test_update_numbers.py::test_refusal_before_database[tag]
-tests/test_update_numbers.py::test_refusal_before_database[zone]
 tests/test_update_numbers.py::test_refusal_writes_no_other_change[sqlite-filtered-no-confirm]
 tests/test_update_numbers.py::test_refusal_writes_no_other_change[sqlite-filtered-prompt]
 tests/test_update_numbers.py::test_refusal_writes_no_other_change[sqlite-single-no-confirm]
@@ -103,6 +98,7 @@ pg:tests/test_update_numbers.py::test_refusal_writes_no_other_change[postgres-si
 pg:tests/test_update_numbers.py::test_refusal_writes_no_other_change[postgres-single-prompt]
 
 # tests/test_update_kinds.py, SQLite and in process
+tests/test_update_kinds.py::test_refusal_before_database
 tests/test_update_kinds.py::test_change_value_args
 tests/test_update_kinds.py::test_change_value_retried
 tests/test_update_kinds.py::test_change_value_uuid[client_id]
@@ -162,6 +158,7 @@ pg:tests/test_update_kinds.py::test_zone_recorded[postgres-filtered]
 pg:tests/test_update_kinds.py::test_zone_recorded[postgres-single]
 
 # tests/test_update_datetime.py, SQLite and in process
+tests/test_update_datetime.py::test_refusal_before_database
 tests/test_update_datetime.py::test_change_value_accepted[completion_time]
 tests/test_update_datetime.py::test_change_value_accepted[schedule_time]
 tests/test_update_datetime.py::test_change_value_accepted[start_time]
@@ -196,6 +193,9 @@ pg:tests/test_update_datetime.py::test_same_instant[postgres-filtered]
 pg:tests/test_update_datetime.py::test_same_instant[postgres-single]
 
 # tests/test_update_tags.py, SQLite and in process
+tests/test_update_tags.py::test_refusal_before_database[tag]
+tests/test_update_tags.py::test_refusal_before_database[near-miss]
+tests/test_update_tags.py::test_refusal_before_database[tag-key]
 tests/test_update_tags.py::test_bash_completion_offers_no_whole_tag
 tests/test_update_tags.py::test_column_value_with_colon[sqlite]
 tests/test_update_tags.py::test_first_separator_splits[sqlite-colon-first]

@@ -6,7 +6,7 @@ appetite: big
 status: in_progress
 branch: fix/update-typed-columns
 base: develop
-current_phase: P2
+current_phase: P3
 last_updated: '2026-11-25'
 phases:
 - id: P0
@@ -74,7 +74,7 @@ phases:
 - id: P2
   name: 'Numbers, sizes and durations: the reader, the new rows, refusal before the
     database (R2-R4, R8-R10, R12)'
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
@@ -91,7 +91,7 @@ phases:
   - P1
   parallel: false
   hammerable: false
-  hill: uphill
+  hill: downhill
   verify: 'test -n "$HS_TEST_POSTGRES" && sh spec/update-client-retry/drive/bound.sh
     2400 uv run pytest -q -p no:cacheprovider tests/test_update_numbers.py tests/test_bounded_table.py
     tests/test_bounded_parsers.py tests/test_bounded_config_set.py tests/test_update_group.py
@@ -406,20 +406,26 @@ and every other test in the touched files passes.
 before the database is opened; `id` is refused in both forms; the advisory tier warns; the three rows
 are in the table.
 
-- [ ] `core/config_schema.py`: `EXIT_STATUS`, `PEAK_CORES`, `PEAK_MEMORY` and their `column.` keys in
+- [x] `core/config_schema.py`: `EXIT_STATUS`, `PEAK_CORES`, `PEAK_MEMORY` and their `column.` keys in
       `SETTINGS` (PLAN §2.9); `setting_for` excludes `column.`.
-- [ ] `task.py`: `COLUMN_KINDS` for the ten ranged columns plus `group`, `id`, the text columns as
+- [x] `task.py`: `COLUMN_KINDS` for the ten ranged columns plus `group`, `id`, the text columns as
       today; `change_value` dispatches by it (PLAN §2.2), unmapped columns keep today's reading until
       P4; `read_changes` (PLAN §2.1) called in `run()` before `ensuredb()`, the `process_arguments`
       checks moved into it; `update_legacy`/`update_tasks` take `self.changes`; R10 in both forms;
       `advise()` after reading (PLAN §2.6).
-- [ ] `UPDATE_HELP`, `task_update_desc.rst` (the column list with each entry's `Range.text`),
+- [x] `UPDATE_HELP`, `task_update_desc.rst` (the column list with each entry's `Range.text`),
       `task_update_help.rst`: every column `is read by its kind`, the size and duration forms, refusal
       exit 2 before anything is counted, asked or written; `task_update.rst` `versionchanged:: 2.9.0`.
-- [ ] `.github/workflows/tests.yml`: the four new files appended to the PostgreSQL job's list (line
+- [x] `.github/workflows/tests.yml`: the four new files appended to the PostgreSQL job's list (line
       121) and its comment; the `tests` job's `timeout-minutes` is already 60 on develop (#125), not edited again.
-- [ ] `spec/update-typed-columns/drive/utc_drive.sh` (new, SPDX header, `BACKEND MODE`, modes
+- [x] `spec/update-typed-columns/drive/utc_drive.sh` (new, SPDX header, `BACKEND MODE`, modes
       `numbers`, `kinds`, `datetime`, `tags`; later modes fail "not built"): PLAN §6; `numbers` here.
+- **Built (P2, 2026-11-25):** `args` keeps today's reading until P3 (its `none` refusal is P3's);
+  `ColumnKind(read, clears, form)` holds each column's reader. A test fix (TECH conventions): the
+  P1 file put every rule's before-database case in `test_update_numbers.py`, which P2's verify runs
+  whole, so the cases P3-P5 make pass moved to their own files under the same test name
+  (`test_refusal_before_database`, now in the kinds, datetime and tags files); `red.txt` renamed
+  them, still 263 nodes. The drive runs `uv` with `--project` (the site is its working directory).
 - **Verify:** see frontmatter: the numbers tests and neighbours on both backends; the `numbers` drive
   on both; the phrase in all three files; the marker; the row and its `setting_for` exclusion; the CI
   list and timeout.

@@ -4,6 +4,15 @@ Arguments
 *ARGS*...
     Assignment pairs for update.
 
+    Every column is read by its kind, in both forms, within the range the description lists:
+    ``cores``, ``exit_status``, ``attempt`` and ``part`` take a whole number; ``memory`` a size, as
+    ``hs submit -m`` reads it (``4G``, ``512MB``, ``1.5GiB``, or bytes); ``timeout``, ``waited`` and
+    ``duration`` a duration, as ``hs submit -W`` reads it (``90m``, ``1h30m``, ``1:30:00``, ``1-12``,
+    or seconds); ``cores_max`` and ``memory_max`` a number. ``none`` or ``null`` clears a column that
+    may be empty (not ``attempt`` or ``part``). Any other value exits with status 2 before anything
+    is counted, asked or written, and no other change given with it is written. ``id`` is never
+    written.
+
     A group change (``group=VALUE``, or ``ID group VALUE`` in the single-task form) takes an integer as
     ``hs submit -g`` does, in the 32-bit range; any other value exits with status 2 before anything
     is counted, asked or written, and no other change given with it is written.

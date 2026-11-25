@@ -30,7 +30,7 @@ from hypershell.task import change_value
 from tests.input_checks import db_site, rows  # noqa: F401
 from tests.test_timescale import admin, ts_database, ts_site  # noqa: F401 (fixtures db_site asks for)
 from tests.update_checks import (FORMS, REFUSED, hs, submit_three, snapshot, task_row, update_argv,
-                                 assert_refused, drive, same_bool, same_text)
+                                 assert_refused, assert_refused_before_database, drive, same_bool, same_text)
 
 
 UPPER: Final[str] = '0198F3A2-1B2C-7D3E-8F40-0123456789AB'
@@ -239,3 +239,9 @@ def test_zone_not_recorded_when_declined(db_site: Tuple[Path, Engine]) -> None:
     assert rc == 0, stderr[-4000:]
     assert snapshot(engine) == before
     assert zones_named(engine, 'lab') == 0
+
+
+@mark.integration
+def test_refusal_before_database(temp_site: Path) -> None:
+    """A refused zone exits 2 before the database is opened: a fresh site gets no database file."""
+    assert_refused_before_database(temp_site, 'zone=')

@@ -15,7 +15,7 @@ single-task tag change are as before.
 
 # Type annotations
 from __future__ import annotations
-from typing import Final, List, Tuple
+from typing import Dict, Final, List, Tuple
 from pathlib import Path
 
 # Standard libs
@@ -29,7 +29,8 @@ from sqlalchemy.engine import Engine
 # Internal libs
 from tests.input_checks import db_site  # noqa: F401
 from tests.test_timescale import admin, ts_database, ts_site  # noqa: F401 (fixtures db_site asks for)
-from tests.update_checks import (FORMS, hs, submit_three, snapshot, task_id, task_row, instant, unwritten, all_rows)
+from tests.update_checks import (FORMS, hs, submit_three, snapshot, task_id, task_row, instant, unwritten, all_rows,
+                                 assert_refused_before_database)
 from tests.test_update_datetime import NINE
 
 
@@ -327,3 +328,14 @@ def test_zsh_completion_offers_no_whole_tag() -> None:
     condition = re.search(r'for k in \$f; do (.*?) && assigns\+=', body)
     assert condition, body
     assert '!= id' in condition.group(1) and '!= tag' in condition.group(1), condition.group(1)
+
+
+BEFORE_DATABASE: Final[Dict[str, str]] = {'tag': 'tag=x', 'near-miss': 'exit_stauts=0', 'tag-key': 'a b=1'}
+"""Refused tag changes, by test id, each on a site with no database yet."""
+
+
+@mark.integration
+@mark.parametrize('change', list(BEFORE_DATABASE.values()), ids=list(BEFORE_DATABASE))
+def test_refusal_before_database(temp_site: Path, change: str) -> None:
+    """A refused change exits 2 before the database is opened: a fresh site gets no database file."""
+    assert_refused_before_database(temp_site, change)

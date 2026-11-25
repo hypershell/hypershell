@@ -6,7 +6,7 @@
 
 # Type annotations
 from __future__ import annotations
-from typing import List, Dict, Callable, IO, Tuple, Any, Optional, Type, Final
+from typing import List, Dict, Callable, IO, Tuple, Any, Optional, Type, Final, NamedTuple
 
 # Standard libs
 import os
@@ -47,6 +47,7 @@ from hypershell.core.logging import Logger, HOSTNAME
 from hypershell.core.remote import SSHConnection
 from hypershell.core.signal import exit_status_for_signal
 from hypershell.core.types import smart_coerce, JSONData, to_json_type, ranged
+from hypershell.core.config_schema import parse_setting, SettingError, advise, shown
 from hypershell.core.pretty_print import format_tag, format_json, format_bytes, format_source
 from hypershell.core.tag import Tag
 from hypershell.data.core import Session
@@ -968,6 +969,16 @@ UPDATE_HELP = f"""\
   Include any number of FIELD=VALUE or tag KEY:VALUE positional arguments.
   The -w/--where and -t/--with-tag operate just as in the search command.
 
+  Every column is read by its kind, in both forms, within the range the
+  documentation lists for it. cores, exit_status, attempt and part take a
+  whole number; memory a size, as hs submit -m reads it (4G, 512MB, 1.5GiB,
+  or bytes); timeout, waited and duration a duration, as hs submit -W reads it
+  (90m, 1h30m, 1:30:00, 1-12, or seconds); cores_max and memory_max a number.
+  none or null clears a column that may be empty (not attempt or part).
+  Any other value exits with status 2 before anything is counted, asked or
+  written, and no other change given with it is written. A change to id is
+  refused in both forms.
+
   A group change (group=VALUE, or ID group VALUE in the single-task form)
   takes an integer as hs submit -g does; any other value exits with status 2
   before anything is counted, asked or written.
@@ -1041,17 +1052,160 @@ def option_given(value: Any) -> bool:
     return value is not None
 
 
-def change_value(field: str, text: str) -> Any:
-    """The value a change writes to task column `field`, given as `text` (exit 2 for a group that is not one)."""
-    if field == 'group':
+NULL_WORDS: Final[frozenset] = frozenset({'none', 'null'})
+"""The words, in any case, that clear a column that may be empty."""
+
+
+def refusal(column: str, form: str, text: str) -> str:
+    """A refusal in the range table's one form, for a column it holds no range for: `<column>: expected <form>, given <V>`."""
+    return f'{column}: expected {form}, given {shown(text)}'
+
+
+@dataclass(frozen=True)
+class ColumnKind:
+    """How `hs update` reads a value given for a task column.
+
+    `read(column, text)` returns the value to store or raises :class:`ArgumentError` naming the column.
+    `clears` says that `none` or `null` (any case) writes NULL; otherwise the word goes to `read`, or is
+    refused as `form` with the column named as one that may not be empty when `form` is given.
+    """
+
+    read: Callable[[str, str], Any]
+    clears: bool = True
+    form: Optional[str] = None
+
+
+def by_range(setting: str, number: bool = False) -> Callable[[str, str], Any]:
+    """A reader by the range table's entry `setting`; a `number` is stored as a float (never -0.0)."""
+    def read(column: str, text: str) -> Any:
         try:
-            return parse_group(text)
-        except TaskGroupError as error:
-            raise ArgumentError(str(error)) from error
-    if Task.columns.get(field) is str:
-        # A text column takes the text as given (e.g., `args=1` stays text); `none` and `null` clear it.
-        return None if text.lower() in {'none', 'null'} else text
-    return smart_coerce(text)
+            value = parse_setting(setting, text, name=column)
+        except SettingError as error:
+            raise ArgumentError(str(error)) from None
+        return float(value) + 0.0 if number else value
+    return read
+
+
+def read_group(column: str, text: str) -> int:
+    """A task group, as `hs submit -g` reads it."""
+    try:
+        return parse_group(text)
+    except TaskGroupError as error:
+        raise ArgumentError(str(error)) from error
+
+
+def read_text(column: str, text: str) -> Optional[str]:
+    """The text as given (e.g., `args=1` stays text); `none` and `null` clear it."""
+    return None if text.lower() in NULL_WORDS else text
+
+
+def read_id(column: str, text: str) -> None:
+    """A task's id is never written."""
+    raise ArgumentError(f'Cannot alter task "id" (given: id={text})')
+
+
+RANGED_COLUMNS: Final[Dict[str, str]] = {
+    'cores': 'task.cores', 'memory': 'task.memory', 'timeout': 'task.timeout',
+    'waited': 'task.timeout', 'duration': 'task.timeout', 'exit_status': 'column.exit_status',
+    'attempt': 'server.attempts', 'part': 'option.part',
+    'cores_max': 'column.cores_max', 'memory_max': 'column.memory_max',
+}
+"""Each column read by an entry of the range table, and that entry."""
+
+ADVISED_COLUMNS: Final[Tuple[str, ...]] = ('cores', 'attempt')
+"""Ranged columns whose entry has an advisory limit."""
+
+TEXT_COLUMNS: Final[Tuple[str, ...]] = ('command', 'outpath', 'errpath', 'csvpath', 'submit_host', 'server_host',
+                                        'client_host', 'fingerprint')
+"""The text columns that may be empty."""
+
+COLUMN_KINDS: Final[Dict[str, ColumnKind]] = {
+    **{column: ColumnKind(by_range(setting, number=column in ('cores_max', 'memory_max')),
+                          clears=column not in ('attempt', 'part'))
+       for column, setting in RANGED_COLUMNS.items()},
+    'group': ColumnKind(read_group, clears=False),
+    **{column: ColumnKind(read_text, clears=False) for column in TEXT_COLUMNS},
+    'id': ColumnKind(read_id, clears=False),
+}
+"""How `hs update` reads each task column, by name."""
+
+
+def change_value(field: str, text: str) -> Any:
+    """The value a change writes to task column `field`, given as `text`; :class:`ArgumentError` (exit 2) if refused."""
+    kind = COLUMN_KINDS.get(field)
+    if kind is None:
+        # Not yet read by kind: a text column takes the text as given; `none` and `null` clear it.
+        if Task.columns.get(field) is str:
+            return None if text.lower() in NULL_WORDS else text
+        return smart_coerce(text)
+    word = text.strip().lower()
+    if word in NULL_WORDS and kind.clears:
+        return None
+    if word in NULL_WORDS and kind.form is not None:
+        raise ArgumentError(refusal(field, f'{kind.form} ({field} may not be empty)', text))
+    return kind.read(field, text)
+
+
+class Changes(NamedTuple):
+    """The changes `hs update` was given, read before the database is opened.
+
+    `columns` maps each column to the value stored; `tags` each tag to its value; `zones` the zone
+    names to record before the write; `advice` the `(setting, value, column, text)` of each value to
+    check against an advisory limit; `shown` one `(kind, text)` per change, for the prompt.
+    """
+
+    columns: Dict[str, Any]
+    tags: Dict[str, Any]
+    zones: List[str]
+    advice: List[Tuple[str, Any, str, str]]
+    shown: List[Tuple[str, str]]
+
+
+def read_changes(arguments: List[str], single: bool = False) -> Changes:
+    """The changes `hs update` was given as `arguments`, each read by its column's kind; nothing is opened.
+
+    In the `single` form the arguments are `ID FIELD VALUE`. The first argument refused raises
+    :class:`ArgumentError` (exit 2), so nothing is counted, asked or written.
+    """
+    changes = Changes(columns={}, tags={}, zones=[], advice=[], shown=[])
+    if single:
+        _, field, value = arguments
+        if field == 'tag':
+            changes.tags.update(Tag.parse_cmdline_list([value, ]))
+            changes.shown.append(('tag', value))
+            return changes
+        if field not in Task.columns:
+            raise ArgumentError(f'Invalid field name "{field}"')
+        read_column(changes, field, value)
+        return changes
+    for arg in arguments:
+        if WhereClause.pattern.match(arg):
+            raise ArgumentError(f'Positional argument matches conditional ({arg}), '
+                                f'maybe you intended to use -w/--where?')
+        if '=' in arg:
+            field, value = arg.split('=', 1)
+            if field == 'id':
+                raise ArgumentError(f'Cannot alter task "id" (given: {field}={value})')
+            if field not in Task.columns:
+                raise ArgumentError(f'Unrecognized task field "{field}"')
+            read_column(changes, field, value)
+        elif ':' in arg:
+            key, value = arg.split(':', 1)
+            changes.tags[key] = smart_coerce(value)
+            changes.shown.append(('tag', arg))
+        else:
+            raise ArgumentError(f'Argument not recognized ({arg}): missing "=" or ":"')
+    Task.ensure_valid_tag(changes.tags)
+    return changes
+
+
+def read_column(changes: Changes, column: str, text: str) -> None:
+    """Read `text` for `column` into `changes`."""
+    value = change_value(column, text)
+    changes.columns[column] = value
+    changes.shown.append(('column', f'{column}={text}'))
+    if column in ADVISED_COLUMNS and value is not None:
+        changes.advice.append((RANGED_COLUMNS[column], value, column, text))
 
 
 class TaskUpdateApp(ReadingMixin, Application, SearchableMixin):
@@ -1121,6 +1275,8 @@ class TaskUpdateApp(ReadingMixin, Application, SearchableMixin):
         **get_shared_exception_mapping(__name__)
     }
 
+    changes: Changes = None
+
     def run(self: TaskUpdateApp) -> None:
         """Update task attributes in bulk."""
         legacy = len(self.update_args) == 3 and UUID_PATTERN.match(self.update_args[0])
@@ -1137,6 +1293,14 @@ class TaskUpdateApp(ReadingMixin, Application, SearchableMixin):
         elif self.delete_mode and (self.update_args or self.remove_tag):
             words = [*self.update_args, *(['--remove-tag', *self.remove_tag] if self.remove_tag else [])]
             raise ArgumentError(f'Cannot use --delete with changes (given: {" ".join(words)})')
+        self.changes = read_changes(self.update_args, single=bool(legacy))
+        if not legacy:
+            if self.order_desc and not self.order_by:
+                raise ArgumentError('Should not provide --desc if not using -s/--order-by')
+            if self.order_by and not self.limit:
+                raise ArgumentError('Using -s/--order-by without -l/--limit is meaningless')
+        for setting, value, column, given in self.changes.advice:
+            advise(setting, value, column, given=given)
         ensuredb()
         if legacy:
             self.update_legacy()
@@ -1145,22 +1309,20 @@ class TaskUpdateApp(ReadingMixin, Application, SearchableMixin):
 
     def update_legacy(self: TaskUpdateApp) -> None:
         """Implement legacy interface to update single task."""
-        uuid, field, value = self.update_args
-        if field not in Task.columns:
-            raise ArgumentError(f'Invalid field name "{field}"')
+        uuid = self.update_args[0]
+        columns, tags = self.changes.columns, self.changes.tags
         try:
-            if field == 'tag':
-                Task.update(uuid, tag={**Task.from_id(uuid).tag,
-                                       **Tag.parse_cmdline_list([value, ])})
+            if tags:
+                Task.update(uuid, tag={**Task.from_id(uuid).tag, **tags}, **columns)
             else:
-                Task.update(uuid, **{field: change_value(field, value), })
+                Task.update(uuid, **columns)
         except StaleDataError as err:
             raise Task.NotFound(str(err)) from err
 
     def update_tasks(self: TaskUpdateApp) -> None:
         """Normal mode updates many tasks."""
 
-        field_updates, tag_updates = self.process_arguments()
+        field_updates, tag_updates = dict(self.changes.columns), dict(self.changes.tags)
 
         if DATABASE_DIALECT == 'sqlite':
             site = config.database.file
@@ -1234,37 +1396,6 @@ class TaskUpdateApp(ReadingMixin, Application, SearchableMixin):
             log.warning(f'{count - written} of the {count} tasks counted no longer matched '
                         f'and were left as they are')
         log.info(f'{"Deleted" if self.delete_mode else "Updated"} {written} tasks')
-
-    def process_arguments(self: TaskUpdateApp) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-        """Process positional arguments and build dictionaries for changes."""
-        field_updates = {}
-        tag_updates = {}
-        for arg in self.update_args:
-            if WhereClause.pattern.match(arg):
-                raise ArgumentError(f'Positional argument matches conditional ({arg}), '
-                                    f'maybe you intended to use -w/--where?')
-            if '=' in arg:
-                field, value = arg.split('=', 1)
-                if field == 'id':
-                    raise ArgumentError(f'Cannot alter task "id" (given: {field}={value})')
-                if field not in Task.columns:
-                    raise ArgumentError(f'Unrecognized task field "{field}"')
-                field_updates[field] = change_value(field, value)
-            elif ':' in arg:
-                key, value = arg.split(':', 1)
-                tag_updates[key] = smart_coerce(value)
-            else:
-                raise ArgumentError(f'Argument not recognized ({arg}): missing "=" or ":"')
-
-        Task.ensure_valid_tag(tag_updates)
-
-        if self.order_desc and not self.order_by:
-            raise ArgumentError('Should not provide --desc if not using -s/--order-by')
-
-        if self.order_by and not self.limit:
-            raise ArgumentError('Using -s/--order-by without -l/--limit is meaningless')
-
-        return field_updates, tag_updates
 
 
 TASK_PROGRAM = 'hs task'

@@ -36,7 +36,7 @@ from tests.input_checks import db_site  # noqa: F401
 from tests.test_timescale import admin, ts_database, ts_site  # noqa: F401 (fixtures db_site asks for)
 from tests.test_update_kinds import refused_in_process
 from tests.update_checks import (FORMS, LOCAL, LOCAL_ZONE, REFUSED, hs, submit_three, task_id, task_row, instant,
-                                 drive, same_instant)
+                                 drive, same_instant, assert_refused_before_database)
 
 
 COLUMNS: Final[List[str]] = ['submit_time', 'schedule_time', 'start_time', 'completion_time']
@@ -189,3 +189,9 @@ def test_same_instant(db_site: Tuple[Path, Engine], form: str) -> None:
     assert shown[0] == shown[1] == shown[2], shown
     if engine.dialect.name == 'sqlite':
         assert '2026-01-01 09:00:00' in shown[0][0] and shown[0][1].startswith('2026-01-01 09:00:00'), shown
+
+
+@mark.integration
+def test_refusal_before_database(temp_site: Path) -> None:
+    """A refused datetime exits 2 before the database is opened: a fresh site gets no database file."""
+    assert_refused_before_database(temp_site, 'start_time=now')

@@ -22,7 +22,6 @@ from typing import Any, Dict, Final, List, Tuple
 from pathlib import Path
 
 # Standard libs
-import os
 import re
 
 # External libs
@@ -37,7 +36,8 @@ from hypershell.task import change_value
 from tests.input_checks import db_site  # noqa: F401
 from tests.test_timescale import admin, ts_database, ts_site  # noqa: F401 (fixtures db_site asks for)
 from tests.update_checks import (FORMS, REFUSED, hs, submit_three, snapshot, task_id, task_row, update_argv,
-                                 assert_refused, unwritten, drive, same_int, same_float)
+                                 assert_refused, assert_refused_before_database, unwritten, drive, same_int,
+                                 same_float)
 
 
 SETTING: Final[Dict[str, str]] = {
@@ -260,23 +260,15 @@ def test_first_refusal_wins(db_site: Tuple[Path, Engine]) -> None:
     assert snapshot(engine) == before
 
 
-BEFORE_DATABASE: Final[Dict[str, str]] = {
-    'cores': 'cores=x', 'memory': 'memory=4X', 'attempt': 'attempt=none', 'start_time': 'start_time=now',
-    'zone': 'zone=', 'tag': 'tag=x', 'near-miss': 'exit_stauts=0', 'tag-key': 'a b=1',
-}
-"""Refused changes of every rule, by test id, each refused on a site with no database yet."""
+BEFORE_DATABASE: Final[Dict[str, str]] = {'cores': 'cores=x', 'memory': 'memory=4X', 'attempt': 'attempt=none'}
+"""Refused ranged changes, by test id, each on a site with no database yet (the other kinds' are in their files)."""
 
 
 @mark.integration
 @mark.parametrize('change', list(BEFORE_DATABASE.values()), ids=list(BEFORE_DATABASE))
 def test_refusal_before_database(temp_site: Path, change: str) -> None:
     """A refused change exits 2 before the database is opened: a fresh site gets no database file."""
-    database = Path(os.environ['HYPERSHELL_DATABASE_FILE'])
-    assert not database.exists()
-    rc, stdout, stderr = hs(Path(str(temp_site)), ['hs', 'update', change, '-f'])
-    assert rc == 2, stderr[-4000:]
-    unwritten(stdout, stderr)
-    assert not database.exists()
+    assert_refused_before_database(temp_site, change)
 
 
 @mark.integration

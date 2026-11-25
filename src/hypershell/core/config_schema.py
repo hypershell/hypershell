@@ -814,6 +814,16 @@ FACTOR: Final[Range] = Range(
     Kind.NUMBER, 1e-6, 1e9,
     advise=('above', 100, 'past 100 scaling hardly adds a client at all'),
     why='0 divides by zero in the scaling pressure; the same decimal span as a rate.')
+EXIT_STATUS: Final[Range] = Range(
+    Kind.INT, -INT16_MAX - 1, INT16_MAX,
+    why="A task's exit status is a 16-bit integer on PostgreSQL: 0 to 255, a signal's negative number, "
+        "-1 for cancelled, and -1001 and -1002 for a task that never ran.")
+PEAK_CORES: Final[Range] = Range(
+    Kind.NUMBER, 0, INT16_MAX,
+    why="The peak cores a client measured for a task; the ceiling is a task's cores, as no host it runs on has more.")
+PEAK_MEMORY: Final[Range] = Range(
+    Kind.NUMBER, 0, INT64_MAX, per=' bytes',
+    why="The peak memory a client measured for a task, in bytes; the ceiling is a task's memory.")
 
 SETTINGS: Final[Dict[str, Range]] = {
     # [logging]
@@ -846,9 +856,12 @@ SETTINGS: Final[Dict[str, Range]] = {
     'option.max_retries': RETRIES, 'option.group': GROUP, 'option.part': PART, 'option.limit': COUNT,
     'option.delay': DELAY, 'option.interval': SHORTEST,
     'option.client.timeout': SHORTEST, 'option.client.task_timeout': SHORTEST,
+    # Task columns `hs update` writes that no key or option reads
+    'column.exit_status': EXIT_STATUS, 'column.cores_max': PEAK_CORES, 'column.memory_max': PEAK_MEMORY,
 }
 """The range of every numeric setting: each numeric key of :data:`KEYS`, each zone key as
-`relay.zone.*.<key>`, and each option that sets no key as `option.<name>`."""
+`relay.zone.*.<key>`, each option that sets no key as `option.<name>`, and each task column that
+`hs update` writes and nothing else reads as `column.<name>`."""
 
 
 NUMERIC: Final[Tuple[Kind, ...]] = (Kind.INT, Kind.NUMBER, Kind.INT_OR_NONE, Kind.DURATION, Kind.SIZE)
@@ -856,8 +869,11 @@ NUMERIC: Final[Tuple[Kind, ...]] = (Kind.INT, Kind.NUMBER, Kind.INT_OR_NONE, Kin
 
 
 def setting_for(path: str) -> Optional[str]:
-    """The entry of :data:`SETTINGS` for the dotted key `path` (a zone key's by its zone key), or None if not numeric."""
-    if path in SETTINGS and not path.startswith('option.'):
+    """The entry of :data:`SETTINGS` for the dotted key `path` (a zone key's by its zone key), or None if not numeric.
+
+    An option's or a column's entry is not a key's, so it is never one.
+    """
+    if path in SETTINGS and not path.startswith(('option.', 'column.')):
         return path
     parts = path.split('.')
     if len(parts) == 4 and parts[:2] == ['relay', 'zone'] and ZONE_KEYS.get(parts[3]) in NUMERIC:

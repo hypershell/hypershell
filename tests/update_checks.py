@@ -134,6 +134,16 @@ def assert_refused(rc: int, stdout: str, stderr: str, column: str, value: str) -
     unwritten(stdout, stderr)
 
 
+def assert_refused_before_database(site: Path, change: str) -> None:
+    """`hs update CHANGE -f` exits 2 before the database is opened: a fresh site gets no database file."""
+    database = Path(os.environ['HYPERSHELL_DATABASE_FILE'])
+    assert not database.exists()
+    rc, stdout, stderr = hs(Path(str(site)), ['hs', 'update', change, '-f'])
+    assert rc == 2, stderr[-4000:]
+    unwritten(stdout, stderr)
+    assert not database.exists()
+
+
 def instant(value: Any) -> Optional[float]:
     """The POSIX time of a stored datetime: SQLite holds the local wall time as text, PostgreSQL the instant."""
     if value is None:
