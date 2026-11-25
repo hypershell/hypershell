@@ -17,18 +17,20 @@ Every column of `Task` has its kind in `COLUMN_KINDS`.
 
 # Type annotations
 from __future__ import annotations
-from typing import Any, Final, Iterator, List, Tuple
+from typing import Any, Dict, Final, Iterator, List, Tuple
 from pathlib import Path
 
 # Standard libs
 import os
 import time
-from datetime import datetime
+from contextlib import contextmanager
+from datetime import datetime, timezone
 
 # External libs
 import pytest
 from pytest import mark, fixture
 from sqlalchemy.engine import Engine
+from cmdkit.cli import ArgumentError
 
 # Internal libs
 from hypershell.task import change_value
@@ -36,7 +38,8 @@ from tests.input_checks import db_site  # noqa: F401
 from tests.test_timescale import admin, ts_database, ts_site  # noqa: F401 (fixtures db_site asks for)
 from tests.test_update_kinds import refused_in_process
 from tests.update_checks import (FORMS, LOCAL, LOCAL_ZONE, REFUSED, hs, submit_three, task_id, task_row, instant,
-                                 drive, same_instant, assert_refused_before_database)
+                                 drive, same_instant, assert_refused_before_database, assert_refused, snapshot,
+                                 update_argv)
 
 
 COLUMNS: Final[List[str]] = ['submit_time', 'schedule_time', 'start_time', 'completion_time']
@@ -195,3 +198,81 @@ def test_same_instant(db_site: Tuple[Path, Engine], form: str) -> None:
 def test_refusal_before_database(temp_site: Path) -> None:
     """A refused datetime exits 2 before the database is opened: a fresh site gets no database file."""
     assert_refused_before_database(temp_site, 'start_time=now')
+
+
+# The ends of the calendar, on both sides of UTC
+
+
+ZONES: Final[Dict[str, str]] = {'west': LOCAL_ZONE, 'east': 'Asia/Tokyo'}
+"""A local zone behind UTC and one ahead of it, so a time past either end of the calendar is reached both ways."""
+
+EDGE_REFUSED: Final[List[str]] = [
+    '9999-12-31T23:59', '9999-12-31T23:59:59.999999', '9999-12-31T23:59-05:00', '9999-12-31T00:00Z',
+    '0001-01-01', '0001-01-01T00:00', '0001-01-01T00:00+05:00', '0001-01-01T00:00Z', '0001-01-01T23:59Z',
+]
+"""Instants within a day of either end of the calendar, which a reader in some zone cannot hold: refused in every zone."""
+
+EDGE_EITHER: Final[List[str]] = ['9999-12-31', '9999-12-30', '0001-01-02', '0001-01-02T12:00', '9999-12-30T12:00Z',
+                                 '0001-01-02T12:00Z']
+"""Times near either end: taken or refused (exit 2) by the local zone, never a traceback; one taken is read
+back in another zone."""
+
+
+@contextmanager
+def zone_of(name: str) -> Iterator[None]:
+    """This process in the local zone `name`, restored after."""
+    held = os.environ.get('TZ')
+    os.environ['TZ'] = name
+    time.tzset()
+    try:
+        yield
+    finally:
+        if held is None:
+            os.environ.pop('TZ', None)
+        else:
+            os.environ['TZ'] = held
+        time.tzset()
+
+
+@mark.unit
+@mark.parametrize('side', list(ZONES))
+@mark.parametrize('column', COLUMNS)
+def test_change_value_calendar_ends(column: str, side: str) -> None:
+    """A time past either end of the calendar is refused naming the column; one near an end is taken or refused, never raised."""
+    with zone_of(ZONES[side]):
+        for text in EDGE_REFUSED:
+            refused_in_process(column, text)
+        for text in EDGE_EITHER:
+            try:
+                value = change_value(column, text)
+            except ArgumentError:  # The column's refusal, and no other error
+                refused_in_process(column, text)
+            else:
+                assert value.tzinfo is not None and value.astimezone(timezone.utc), (column, text, value)
+
+
+@mark.integration
+@mark.parametrize('side', list(ZONES))
+@mark.parametrize('form', FORMS)
+def test_calendar_ends(db_site: Tuple[Path, Engine], form: str, side: str) -> None:
+    """At either end of the calendar, in a zone on each side of UTC: exit 2 naming the column, or written and shown; never exit 5."""
+    site, engine = db_site
+    submit_three(site)
+    ident = task_id(engine, 1)
+    zone = {'TZ': ZONES[side]}
+    for text in EDGE_REFUSED:
+        before = snapshot(engine)
+        rc, stdout, stderr = hs(site, update_argv(engine, form, 'start_time', text, '-f'), **zone)
+        assert_refused(rc, stdout, stderr, 'start_time', text)
+        assert snapshot(engine) == before, text
+    for text in EDGE_EITHER:
+        before = snapshot(engine)
+        rc, stdout, stderr = hs(site, update_argv(engine, form, 'start_time', text, '-f'), **zone)
+        if rc == 2:
+            assert_refused(rc, stdout, stderr, 'start_time', text)
+            assert snapshot(engine) == before, text
+            continue
+        assert rc == 0 and 'Traceback' not in stderr, f'{text}: exit {rc}\n{stderr[-4000:]}'
+        for argv in (['hs', 'info', ident], ['hs', 'list', 'start_time', '-w', f'id == {ident}']):
+            rc, stdout, stderr = hs(site, argv, **zone)
+            assert rc == 0 and 'Traceback' not in stderr, f'{text}: {argv} exit {rc}\n{stderr[-4000:]}'

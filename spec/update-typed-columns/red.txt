@@ -1,11 +1,12 @@
 # Red list for update-typed-columns: every test here must fail on 674f6d85 (develop with
 # bounded-inputs, #125, as merged in P0; this branch's src and docs before the fix) for what it
 # checks, and pass after it. Checked by spec/relay-hardening/drive/red_check.sh with
-# RED_BASE_REV set to the base below; 261 tests, 105 of them `pg:` (PostgreSQL, needing
+# RED_BASE_REV set to the base below; 277 tests, 109 of them `pg:` (PostgreSQL, needing
 # HS_TEST_POSTGRES with the sandbox off, HS_TEST_TIMESCALE empty). The in-process layer is listed
 # per column (each node loops over the column's values), so the list stays within its bound.
 # The completion tests read share/, which red_check does not swap for the base's, so they are
 # guards here, not red nodes (PLAN build note, approved by the foreman, 2026-11-25).
+# The calendar-end tests (review F1, 2026-11-25) were added after P1, red on the base as well.
 # A ` raises=NAME` line is red by that exception: a name or row this cycle adds, missing on the base.
 # base: 674f6d856e2ab99f14a795bd271e459fef135026
 
@@ -160,6 +161,18 @@ pg:tests/test_update_kinds.py::test_zone_recorded[postgres-filtered]
 pg:tests/test_update_kinds.py::test_zone_recorded[postgres-single]
 
 # tests/test_update_datetime.py, SQLite and in process
+tests/test_update_datetime.py::test_change_value_calendar_ends[submit_time-west]
+tests/test_update_datetime.py::test_change_value_calendar_ends[submit_time-east]
+tests/test_update_datetime.py::test_change_value_calendar_ends[schedule_time-west]
+tests/test_update_datetime.py::test_change_value_calendar_ends[schedule_time-east]
+tests/test_update_datetime.py::test_change_value_calendar_ends[start_time-west]
+tests/test_update_datetime.py::test_change_value_calendar_ends[start_time-east]
+tests/test_update_datetime.py::test_change_value_calendar_ends[completion_time-west]
+tests/test_update_datetime.py::test_change_value_calendar_ends[completion_time-east]
+tests/test_update_datetime.py::test_calendar_ends[sqlite-filtered-west]
+tests/test_update_datetime.py::test_calendar_ends[sqlite-filtered-east]
+tests/test_update_datetime.py::test_calendar_ends[sqlite-single-west]
+tests/test_update_datetime.py::test_calendar_ends[sqlite-single-east]
 tests/test_update_datetime.py::test_refusal_before_database
 tests/test_update_datetime.py::test_change_value_accepted[completion_time]
 tests/test_update_datetime.py::test_change_value_accepted[schedule_time]
@@ -183,6 +196,10 @@ tests/test_update_datetime.py::test_same_instant[sqlite-filtered]
 tests/test_update_datetime.py::test_same_instant[sqlite-single]
 
 # tests/test_update_datetime.py, PostgreSQL
+pg:tests/test_update_datetime.py::test_calendar_ends[postgres-filtered-west]
+pg:tests/test_update_datetime.py::test_calendar_ends[postgres-filtered-east]
+pg:tests/test_update_datetime.py::test_calendar_ends[postgres-single-west]
+pg:tests/test_update_datetime.py::test_calendar_ends[postgres-single-east]
 pg:tests/test_update_datetime.py::test_column_values[postgres-completion_time-filtered]
 pg:tests/test_update_datetime.py::test_column_values[postgres-completion_time-single]
 pg:tests/test_update_datetime.py::test_column_values[postgres-schedule_time-filtered]

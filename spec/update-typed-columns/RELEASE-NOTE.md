@@ -34,7 +34,8 @@ Behaviour changes:
   databases: a date, or a date and a time joined by `T` or a space, with optional seconds, fraction
   and offset (`2026-01-01T09:00:00-05:00`, or `Z`). A value without an offset is local time, and the
   same value is the same instant on SQLite and PostgreSQL. A local time that does not exist, in the
-  hour skipped by a change to daylight-saving time, is refused. Earlier releases refused every value
+  hour skipped by a change to daylight-saving time, is refused, and so is an instant within a day of
+  either end of the calendar (years 1 and 9999), which a reader in some zone could not show. Earlier releases refused every value
   with a traceback on SQLite, and on PostgreSQL stored whatever the server read, in the server
   session's zone. `now`, `today` and `epoch`, which PostgreSQL stored, now exit with status 2: use
   `$(date -Iseconds)`.

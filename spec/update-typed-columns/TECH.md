@@ -3,7 +3,7 @@ slug: update-typed-columns
 title: hs update reads every column it writes by the column's kind
 kind: fix
 appetite: big
-status: blocked
+status: in_review
 branch: fix/update-typed-columns
 base: develop
 current_phase: done
@@ -147,6 +147,7 @@ phases:
   parallel: false
   hammerable: false
   hill: downhill
+  attempts: 1
   verify: test -n "$HS_TEST_POSTGRES" && sh spec/update-client-retry/drive/bound.sh
     2400 uv run pytest -q -p no:cacheprovider tests/test_update_datetime.py tests/test_update_kinds.py
     tests/test_update_numbers.py tests/test_update_refusals.py tests/test_update.py
@@ -469,6 +470,14 @@ instant on both backends, on Python 3.11 and 3.14 alike; every column has its ki
 - **Built (P4, 2026-11-25):** `tag` joins `COLUMN_KINDS` with today's reading (`smart_coerce`) so
   the map is complete here; P5 replaces it with the R11 refusal. The verify ran with
   `TMPDIR=/tmp/claude-501`, where the foreman built `venv311-utc` (META F2).
+- **Remediation (review cycle 1, F1, 2026-11-25):** `read_datetime` called `astimezone()` outside
+  the `try` that guards `fromisoformat`, so a date at either end of the calendar exited 5 with a
+  traceback (ValueError on 3.14, OverflowError on 3.11). It is now inside, and an instant within a
+  day of either end is refused (`DATETIME_SPAN`), so a stored instant is a date in any zone it is
+  read in: the first fix let `0001-01-01T00:00Z`, written in a zone ahead of UTC, through to
+  PostgreSQL, where a reader behind UTC could not load it (attempt 1 of this remediation).
+  `test_change_value_calendar_ends` and `test_calendar_ends` run both ends in both forms with `TZ`
+  pinned to a zone on each side of UTC; their 16 nodes join `red.txt` (277), red on the base.
 - **Verify:** see frontmatter: the datetime tests and neighbours on both backends; the datetime tests
   on Python 3.11 (SQLite and in-process); the `datetime` drive on both; the phrase; the constitution
   clause.

@@ -16,7 +16,7 @@ import csv
 import json
 import time
 import functools
-from datetime import timedelta, datetime
+from datetime import timedelta, datetime, timezone
 from dataclasses import dataclass
 from shutil import copyfileobj
 
@@ -1168,6 +1168,11 @@ seconds and fraction (up to six digits) and an optional `Z` or `±HH:MM` offset.
 DATETIME_FORM: Final[str] = 'an ISO 8601 date, or date and time (e.g., 2026-01-01T09:00:00-05:00)'
 """What a datetime column expects, for its refusal."""
 
+DATETIME_SPAN: Final[Tuple[datetime, datetime]] = (datetime.min.replace(tzinfo=timezone.utc) + timedelta(days=1),
+                                                     datetime.max.replace(tzinfo=timezone.utc) - timedelta(days=1))
+"""The earliest and latest instants a datetime column takes: a day inside either end of the calendar,
+so the instant is a date in any zone it is read in."""
+
 
 def read_datetime(column: str, text: str) -> datetime:
     """An ISO 8601 date or date and time, as an aware local time; a value without an offset is local time.
@@ -1175,14 +1180,19 @@ def read_datetime(column: str, text: str) -> datetime:
     The form is checked before Python reads it, as Python's reader takes more forms than these, and
     more on some versions than others. A local time that does not exist (in a daylight-saving gap) is
     refused, since where it would land differs by version; an ambiguous one is its first occurrence.
+    An instant within a day of either end of the calendar (years 1 and 9999) is refused too: a reader
+    in another zone could not hold it, nor can Python in some zones.
     """
     try:
         value = datetime.fromisoformat(text) if DATETIME_PATTERN.fullmatch(text) else None
-    except ValueError:  # Not a day of the calendar
+        if value is not None:
+            local = value.astimezone()
+            if not DATETIME_SPAN[0] <= local <= DATETIME_SPAN[1]:
+                value = None
+    except (ValueError, OverflowError):  # Not a day of the calendar, or an instant past either end of it
         value = None
     if value is None:
         raise ArgumentError(refusal(column, DATETIME_FORM, text))
-    local = value.astimezone()
     if value.tzinfo is None and local.replace(tzinfo=None) != value:
         raise ArgumentError(refusal(column, DATETIME_FORM, text) + ', which does not exist in local time')
     return local
