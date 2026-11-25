@@ -346,6 +346,17 @@ plan gate (Q1).
 `spec/update-typed-columns/research/03-datetime.md` (§4)*
 **Seed:** [`issues/timestamp-display-offsets.md`](issues/timestamp-display-offsets.md) · *status: unshaped*
 
+## The serial test suite outgrows the CI time limit
+
+The `tests` job runs the whole suite serially on each of four Python versions. It took under 45
+minutes before `bounded-inputs`, and since `update-typed-columns` it takes 45 to 60, with Python 3.13
+hitting the 60-minute limit (now 90). Splitting the suite into shards, each its own CI job, or
+trimming the slowest tests would keep each run well inside its limit without raising it every
+cycle.
+
+*Target: 2.9.x · Horizon: near-term, small · Depends on: — · Refs: `.github/workflows/tests.yml`*
+**Seed:** [`issues/ci-suite-split.md`](issues/ci-suite-split.md) · *status: unshaped*
+
 ## The Python API does not hold explicit arguments to the numeric ranges
 
 `bounded-inputs` holds every option, configuration key and variable to one table of ranges, and the
