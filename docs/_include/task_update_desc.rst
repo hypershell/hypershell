@@ -5,8 +5,8 @@ Include any number of `FIELD=VALUE` or tag `KEY:VALUE` positional arguments.
 Every column is read by its kind, in both forms and on every database, within the range listed
 below. Any other value exits with status 2, naming the column, the range or form and the value,
 before anything is counted, asked or written, and no other change given with it is written.
-``none`` or ``null``, in any case, clears a column that may be empty; for ``attempt`` and ``part``
-it is refused. A change to ``id`` is refused in both forms.
+``none`` or ``null``, in any case, clears a column that may be empty; for ``attempt``, ``part``,
+``retried``, ``submit_id`` and ``args`` it is refused. A change to ``id`` is refused in both forms.
 
 - ``cores``: a whole number, as ``hs submit -c`` reads it. Range: 0 (unconstrained) to 32,767.
   Above 1,024 it is written with a warning.
@@ -20,6 +20,17 @@ it is refused. A change to ``id`` is refused in both forms.
 - ``part``: a whole number; not ``none``. Range: 0 to 2,147,483,647.
 - ``cores_max``: a number, the peak cores measured. Range: 0 to 32,767.
 - ``memory_max``: a number of bytes, the peak memory measured. Range: 0 to 9,223,372,036,854,775,807 bytes.
+- ``retried``: a boolean, true/false, yes/no, on/off or 1/0 in any case; not ``none``.
+- ``submit_id``, ``server_id``, ``client_id``, ``previous_id``, ``next_id`` and ``source``: a uuid,
+  the 8-4-4-4-12 hexadecimal form in any case, stored in lower case (e.g.,
+  ``0198f3a2-1b2c-7d3e-8f40-0123456789ab``); ``submit_id`` not ``none``. A ``source`` is the id of
+  a source as ``hs info`` shows it in parentheses; the value is not checked against the sources.
+- ``zone``: a zone name, read as ``hs submit --zone`` reads it; ``default`` or ``none`` puts the task in
+  the default zone, so a zone named ``none`` or ``null`` cannot be set by ``hs update``. A new name
+  is recorded once the change is written, as ``hs submit --zone`` records it.
+- ``args``: any text, as given; not ``none``. The other text columns (``command``, ``outpath``,
+  ``errpath``, ``csvpath``, ``submit_host``, ``server_host``, ``client_host``, ``fingerprint``) take
+  any text, and ``none`` clears them.
 
 A group change (``group=VALUE``, or ``ID group VALUE`` in the single-task form) takes an integer as
 ``hs submit -g`` does, in the 32-bit range; any other value exits with status 2 before anything is

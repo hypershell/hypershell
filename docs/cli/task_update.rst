@@ -93,4 +93,15 @@ Description
    with exit status 5 and a traceback (rounding a fraction instead). ``cores`` above 1,024 and
    ``attempt`` above 100 are written with a warning.
 
+.. versionchanged:: 2.9.0
+   ``retried`` takes the boolean words a configuration key takes, ``yes``/``no`` and ``on``/``off``
+   as well as ``true``/``false`` and ``1``/``0``, in any case. The uuid columns take the 8-4-4-4-12
+   form only, stored in lower case on both databases. ``zone`` takes a zone name, as
+   ``hs submit --zone`` reads it: ``zone=default`` and ``zone=none`` put the task in the default
+   zone, and a new name is recorded so ``hs list`` and ``hs info`` show it. ``none`` for ``args``,
+   ``submit_id`` or ``retried`` exits with status 2. Before, SQLite stored any text in a uuid or
+   zone column, a zone name failed with exit status 5 on PostgreSQL, the default zone's reserved id
+   was stored where its tasks are matched by none, and ``none`` for these columns failed with exit
+   status 5 and a traceback.
+
 .. include:: ../_include/task_update_help.rst

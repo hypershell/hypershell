@@ -47,12 +47,12 @@ from hypershell.core.logging import Logger, HOSTNAME
 from hypershell.core.remote import SSHConnection
 from hypershell.core.signal import exit_status_for_signal
 from hypershell.core.types import smart_coerce, JSONData, to_json_type, ranged
-from hypershell.core.config_schema import parse_setting, SettingError, advise, shown
+from hypershell.core.config_schema import parse_setting, SettingError, advise, shown, read_value, Kind, FORMS
 from hypershell.core.pretty_print import format_tag, format_json, format_bytes, format_source
 from hypershell.core.tag import Tag
 from hypershell.data.core import Session
-from hypershell.data.model import (Task, Source, Zone, JSON, CANCEL_STATUS, zone_name, DEFAULT_ZONE_NAME,
-                                   TaskGroupError, TaskInputError, parse_group)
+from hypershell.data.model import (Task, Source, Zone, JSON, CANCEL_STATUS, zone_name, zone_id, DEFAULT_ZONE_NAME,
+                                   DEFAULT_ZONE_ID, TaskGroupError, TaskInputError, parse_group)
 from hypershell.data import ensuredb, DATABASE_DIALECT
 from hypershell.submit import read_tag_options, advise_one_task
 
@@ -974,7 +974,14 @@ UPDATE_HELP = f"""\
   whole number; memory a size, as hs submit -m reads it (4G, 512MB, 1.5GiB,
   or bytes); timeout, waited and duration a duration, as hs submit -W reads it
   (90m, 1h30m, 1:30:00, 1-12, or seconds); cores_max and memory_max a number.
-  none or null clears a column that may be empty (not attempt or part).
+  retried takes true/false, yes/no, on/off or 1/0, in any case. submit_id,
+  server_id, client_id, previous_id, next_id and source take a uuid, the
+  8-4-4-4-12 hexadecimal form in any case, stored in lower case. zone takes
+  a zone name as hs submit --zone reads it; default or none is the default
+  zone (so a zone named none or null cannot be set here). args takes any text
+  but none or null; the other text columns take any text.
+  none or null clears a column that may be empty (not attempt, part,
+  retried, submit_id or args).
   Any other value exits with status 2 before anything is counted, asked or
   written, and no other change given with it is written. A change to id is
   refused in both forms.
@@ -1099,6 +1106,45 @@ def read_text(column: str, text: str) -> Optional[str]:
     return None if text.lower() in NULL_WORDS else text
 
 
+UUID_FORM: Final[str] = 'a uuid (8-4-4-4-12 hexadecimal digits)'
+"""What a uuid column expects, for its refusal."""
+
+ZONE_FORM: Final[str] = 'a zone name (1 to 256 printable characters; default or none for the default zone)'
+"""What `zone` expects, for its refusal."""
+
+
+def read_bool(column: str, text: str) -> bool:
+    """A boolean: the words a boolean configuration key takes, in any case."""
+    try:
+        return read_value(Kind.BOOL, text)
+    except ValueError:
+        raise ArgumentError(refusal(column, FORMS[Kind.BOOL], text)) from None
+
+
+def read_uuid(column: str, text: str) -> str:
+    """A uuid in the 8-4-4-4-12 form, in any case, as lower case (surrounding spaces aside)."""
+    value = text.strip(' ')
+    if not UUID_PATTERN.fullmatch(value):
+        raise ArgumentError(refusal(column, UUID_FORM, text))
+    return value.lower()
+
+
+def read_zone(column: str, text: str) -> Optional[str]:
+    """The id of the zone named `text`, read as `hs submit --zone` reads it; None for the default zone."""
+    try:
+        ident = zone_id(zone_name(text))
+    except ValueError:
+        raise ArgumentError(refusal(column, ZONE_FORM, text)) from None
+    return None if ident == DEFAULT_ZONE_ID else ident
+
+
+def read_args(column: str, text: str) -> str:
+    """The text as given; a task's command may not be empty, so `none` and `null` are refused."""
+    if text.lower() in NULL_WORDS:
+        raise ArgumentError(refusal(column, f'text ({column} may not be empty)', text))
+    return text
+
+
 def read_id(column: str, text: str) -> None:
     """A task's id is never written."""
     raise ArgumentError(f'Cannot alter task "id" (given: id={text})')
@@ -1115,6 +1161,9 @@ RANGED_COLUMNS: Final[Dict[str, str]] = {
 ADVISED_COLUMNS: Final[Tuple[str, ...]] = ('cores', 'attempt')
 """Ranged columns whose entry has an advisory limit."""
 
+UUID_COLUMNS: Final[Tuple[str, ...]] = ('server_id', 'client_id', 'previous_id', 'next_id', 'source')
+"""The uuid columns that may be empty (`submit_id` may not)."""
+
 TEXT_COLUMNS: Final[Tuple[str, ...]] = ('command', 'outpath', 'errpath', 'csvpath', 'submit_host', 'server_host',
                                         'client_host', 'fingerprint')
 """The text columns that may be empty."""
@@ -1124,6 +1173,11 @@ COLUMN_KINDS: Final[Dict[str, ColumnKind]] = {
                           clears=column not in ('attempt', 'part'))
        for column, setting in RANGED_COLUMNS.items()},
     'group': ColumnKind(read_group, clears=False),
+    'retried': ColumnKind(read_bool, clears=False, form=FORMS[Kind.BOOL]),
+    'submit_id': ColumnKind(read_uuid, clears=False, form=UUID_FORM),
+    **{column: ColumnKind(read_uuid) for column in UUID_COLUMNS},
+    'zone': ColumnKind(read_zone),
+    'args': ColumnKind(read_args, clears=False),
     **{column: ColumnKind(read_text, clears=False) for column in TEXT_COLUMNS},
     'id': ColumnKind(read_id, clears=False),
 }
@@ -1204,6 +1258,8 @@ def read_column(changes: Changes, column: str, text: str) -> None:
     value = change_value(column, text)
     changes.columns[column] = value
     changes.shown.append(('column', f'{column}={text}'))
+    if column == 'zone' and value is not None:
+        changes.zones.append(zone_name(text))
     if column in ADVISED_COLUMNS and value is not None:
         changes.advice.append((RANGED_COLUMNS[column], value, column, text))
 
@@ -1312,6 +1368,7 @@ class TaskUpdateApp(ReadingMixin, Application, SearchableMixin):
         uuid = self.update_args[0]
         columns, tags = self.changes.columns, self.changes.tags
         try:
+            self.record_zones()
             if tags:
                 Task.update(uuid, tag={**Task.from_id(uuid).tag, **tags}, **columns)
             else:
@@ -1373,6 +1430,8 @@ class TaskUpdateApp(ReadingMixin, Application, SearchableMixin):
             log.info('Updated 0 tasks')
             return
 
+        self.record_zones()
+
         if self.limit is not None:
             # An UPDATE cannot take a LIMIT, so the tasks are selected first, then each is written
             # by id while it still matches the filter, all in one transaction.
@@ -1389,6 +1448,11 @@ class TaskUpdateApp(ReadingMixin, Application, SearchableMixin):
         # missed under contention are found and written by id (see `Task.update_matching`).
         written = Task.update_matching(self.filter_criteria(), field_updates, tag_updates, self.remove_tag or [])
         self.report_written(count, written)
+
+    def record_zones(self: TaskUpdateApp) -> None:
+        """Record each zone a change names, as `hs submit --zone` does, so its tasks show the name."""
+        for name in self.changes.zones:
+            Zone.ensure(name)
 
     def report_written(self: TaskUpdateApp, count: int, written: int) -> None:
         """Log the number of tasks written, and how many of those counted were not, if any."""

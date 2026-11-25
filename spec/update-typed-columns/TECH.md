@@ -6,7 +6,7 @@ appetite: big
 status: in_progress
 branch: fix/update-typed-columns
 base: develop
-current_phase: P3
+current_phase: P4
 last_updated: '2026-11-25'
 phases:
 - id: P0
@@ -107,7 +107,7 @@ phases:
     1; done && grep -q ''timeout-minutes: 60'' .github/workflows/tests.yml'
 - id: P3
   name: Booleans, uuids, the zone and the text columns (R5, R7, R8)
-  status: pending
+  status: done
   satisfies:
   - R1
   - R5
@@ -121,7 +121,7 @@ phases:
   - P2
   parallel: false
   hammerable: false
-  hill: uphill
+  hill: downhill
   verify: test -n "$HS_TEST_POSTGRES" && sh spec/update-client-retry/drive/bound.sh
     2400 uv run pytest -q -p no:cacheprovider tests/test_update_kinds.py tests/test_update_numbers.py
     tests/test_update_group.py tests/test_update_refusals.py tests/test_update.py
@@ -439,13 +439,13 @@ are in the table.
 **Goal:** `retried`, the six uuid columns, `zone`, `args` and the text columns are read by kind in both
 forms; a zone name is recorded only after the prompt.
 
-- [ ] `task.py`: boolean (`read_value(Kind.BOOL)`), `uuid_value`, `zone_value` (PLAN §2.3, §2.4)
+- [x] `task.py`: boolean (`read_value(Kind.BOOL)`), `uuid_value`, `zone_value` (PLAN §2.3, §2.4)
       in `COLUMN_KINDS`; `args` refuses `none`/`null`; `Changes.zones` recorded with `Zone.ensure`
       just before the write in both forms.
-- [ ] Help and docs: the forms for `retried` (`yes/no` on one line with the other words), the uuid
+- [x] Help and docs: the forms for `retried` (`yes/no` on one line with the other words), the uuid
       columns (`8-4-4-4-12`), `zone` (read as `hs submit --zone` reads it; `default` and `none` the
       default zone; a zone named `none` or `null` cannot be set); the `versionchanged` entry extended.
-- [ ] `utc_drive.sh`: `kinds` mode.
+- [x] `utc_drive.sh`: `kinds` mode.
 - **Verify:** see frontmatter: the kinds tests and neighbours (with `tests/test_zone_postgres.py`) on
   both backends; the `kinds` drive on both; the phrases; no `hs task `.
 - **Touches:** `src/hypershell/task.py`, `docs/_include/task_update_desc.rst`,

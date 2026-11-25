@@ -44,7 +44,7 @@ pass() { echo "ok   [$backend $mode] $*"; }
 hs() { uv run --quiet --project "$root" hs "$@"; }
 field() { hs list "$1" -t "$2" 2>/dev/null; }
 
-built='numbers'  # The modes built so far
+built='numbers kinds'  # The modes built so far
 case " $built " in *" $mode "*) ;; *) fail "mode $mode not built" ;; esac
 
 admin() {  # Run one statement on the server's maintenance database with AUTOCOMMIT.
@@ -130,7 +130,7 @@ numbers)
     ;;
 kinds)
     hs update retried=yes -t n:1 -f 2> err.txt || fail "retried=yes exited $?: $(cat err.txt)"
-    stored retried True
+    stored retried true
     pass 'retried=yes stores true'
     hs update source=0198F3A2-1B2C-7D3E-8F40-0123456789AB -t n:1 -f 2> err.txt || fail "source exited $?: $(cat err.txt)"
     stored source 0198f3a2-1b2c-7d3e-8f40-0123456789ab
