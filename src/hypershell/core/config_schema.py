@@ -780,7 +780,8 @@ CORES: Final[Range] = Range(
     advise=('above', 1024, 'no node a task runs on has more'),
     why="A task's cores are a 16-bit integer on PostgreSQL.")
 PORT: Final[Range] = Range(Kind.INT, 1, 65_535, why='A TCP port.')
-GROUP: Final[Range] = Range(Kind.INT, -INT32_MAX - 1, INT32_MAX, why="A task's group is a 32-bit integer.")
+GROUP: Final[Range] = Range(Kind.INT, 0, INT32_MAX,
+                            why="Groups run lowest first from the default, 0. The ceiling is a 32-bit signed integer.")
 PART: Final[Range] = Range(Kind.INT, 0, INT32_MAX, why="A task's part is a 32-bit integer.")
 DURATION: Final[Range] = Range(
     Kind.DURATION, 0, INT32_MAX,

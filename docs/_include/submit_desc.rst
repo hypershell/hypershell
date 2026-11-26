@@ -47,6 +47,9 @@ recently scheduled group is below it, so it is never refused.
    :pr:`118`: a group that is not an integer is refused; a task below the reached group is refused;
    with the database, standard input is read in full before anything is submitted.
 
+.. versionchanged:: 2.9.0
+   A group below 0 is refused, as a group that is not an integer is; earlier releases accepted it.
+
 The resource tags ``cores``, ``memory`` and ``timeout`` take the ranges of the ``-c``, ``-m`` and
 ``-W`` options, and are refused as a group is, wherever they come from (an inline tag, ``-t`` or a
 ``--from-json`` record): input read in full is refused whole, with nothing submitted, naming the

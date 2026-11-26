@@ -60,7 +60,7 @@ Description
 
 .. versionchanged:: 2.9.0
    :pr:`124`: a group change, ``group=VALUE`` or ``ID group VALUE`` in the single-task form, takes
-   an integer as ``hs submit -g`` does, in the 32-bit range. Any other value exits with status 2
+   a non-negative integer as ``hs submit -g`` does. Any other value exits with status 2
    before anything is counted, asked or written, and no other change given with it is written.
    Before, a text, fractional or out-of-range group was stored on SQLite, ``1e3`` and ``true`` were
    stored as 1000 and 1, and ``none``, ``null`` and ``nan`` failed with exit status 5 and a

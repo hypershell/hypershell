@@ -137,14 +137,13 @@ Options
 ``-g``, ``--group`` *NUM*
     Task group for dependency management (default: 0).
 
-    Range: -2,147,483,648 to 2,147,483,647.
-
     Assigns submitted tasks to a specific group. Tasks are executed in ascending group order,
     with all tasks in a group completing before the next group begins. This enables simple
     workflow management without requiring explicit DAG-based definitions.
 
-    All tasks default to group 0 for backwards compatibility. Users can organize tasks into
-    multiple groups (e.g., 0, 1, 2, ...) where lower-numbered groups execute first.
+    All tasks default to group 0 for backwards compatibility. A group is a non-negative integer:
+    users can organize tasks into multiple groups (e.g., 0, 1, 2, ...) where lower-numbered groups
+    execute first.
 
 ``--zone`` *NAME*
     Zone of the submitted tasks (default: none, the reserved default zone).

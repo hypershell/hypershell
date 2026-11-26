@@ -113,8 +113,8 @@ subsystems.
   tasks arrive late. File input to `hs cluster`/`hs server` is submitted in full (the whole file)
   before the scheduler starts, so its groups run in order. Stream input is best effort: a late
   lower group runs after the current one, with a warning.
-- **A task group must be an integer** (`ensure_group`: an `int`, not a `bool`, in PostgreSQL's
-  32-bit range) wherever input sets it: an inline or tag-only `group:` tag, `-t group:…` (exit 2,
+- **A task group must be a non-negative integer** (`ensure_group`: an `int`, not a `bool`, from 0
+  to the top of PostgreSQL's 32-bit range) wherever input sets it: an inline or tag-only `group:` tag, `-t group:…` (exit 2,
   before any input is read), a `--from-json` `group` key. Anything else raises `TaskGroupError`
   (exit 5) naming the value and its line or record. `hs update group=VALUE` and
   `hs update ID group VALUE` take it by `parse_group` (exit 2, before counting or writing).

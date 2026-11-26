@@ -6,7 +6,7 @@ appetite: small
 status: in_progress
 branch: fix/range-docs-and-group-floor
 base: develop
-current_phase: P2
+current_phase: P3
 last_updated: '2026-11-25'
 phases:
 - id: P1
@@ -24,7 +24,7 @@ phases:
     ')" -ge 6
 - id: P2
   name: 'The floor: GROUP starts at 0; group docs say non-negative (R4, R5)'
-  status: pending
+  status: done
   satisfies:
   - R4
   - R5
@@ -32,14 +32,15 @@ phases:
   - P1
   parallel: false
   hammerable: false
-  hill: uphill
+  hill: downhill
   verify: uv run pytest -q -p no:cacheprovider tests/test_group_floor.py tests/test_bounded_table.py
     tests/test_bounded_parsers.py tests/test_bounded_options.py tests/test_update_group.py
     tests/test_group_integer.py tests/test_group_order.py && ! grep -rn '32-bit range'
-    docs/_include docs/cli AGENTS.md .agents/factory/invariants.md && grep -q 'non-negative'
-    docs/_include/submit_help.rst && .agents/factory/bin/temp_site.sh sh -c "uv run
-    hs submit -g -1 echo a; test \$? -eq 2 && uv run hs submit -g 0 echo a && uv run
-    hs list -g -1; test \$? -eq 2"
+    docs/_include docs/cli && grep -q 'non-negative' docs/_include/submit_help.rst
+    && .agents/factory/bin/temp_site.sh sh -c "uv run hs submit -g -1 echo a 2>err;
+    test \$? -eq 2 || exit 11; grep -q 'from 0' err || exit 12; uv run hs submit -g
+    0 echo a || exit 13; uv run hs list -g -1; test \$? -eq 2 || exit 14; test \$(uv
+    run hs list -g 0 -c) -eq 1 || exit 15"
 - id: P3
   name: Figures out of the docs and man pages; the guard (R1, R2, R3, R6)
   status: pending
@@ -127,14 +128,14 @@ resume ground-truth (`uv run python .agents/factory/bin/next_phase.py spec/range
 ## Phase P2 — The floor
 **Satisfies:** R4, R5 · **Depends on:** P1
 
-- [ ] `core/config_schema.py`: `GROUP` low bound 0, `why` per PLAN §2.1.
-- [ ] `data/model.py`: `GROUP_MIN` docstring (code unchanged).
-- [ ] Existing tests whose bound moves: `test_bounded_table.py:131`, `test_bounded_parsers.py:46`,
-      `test_bounded_options.py:164,166`, `test_update_group.py:51`, `test_group_order.py:268,416`
-      (PLAN §4).
-- [ ] Docs (PLAN §2.2): `submit_help.rst` `-g`, `task_update_desc.rst`, `task_update_help.rst`,
+- [x] `core/config_schema.py`: `GROUP` low bound 0, `why` per PLAN §2.1.
+- [x] `data/model.py`: `GROUP_MIN` docstring (code unchanged).
+- [x] Existing tests whose bound moves: `test_bounded_table.py:131`, `test_bounded_parsers.py:46`,
+      `test_bounded_options.py:164,166`, `test_update_group.py:51`, `test_group_order.py:416`, `test_group_integer.py`
+      (PLAN §4; `test_group_order.py:268` stays, as rows a 2.8 database holds).
+- [x] Docs (PLAN §2.2): `submit_help.rst` `-g`, `task_update_desc.rst`, `task_update_help.rst`,
       `docs/cli/task_update.rst:63`, the group markers on the `hs submit` and `hs update` pages.
-- [ ] `AGENTS.md:276`, `invariants.md:117`: the floor, in lockstep.
+- [x] `AGENTS.md:276`, `invariants.md:117`: the floor, in lockstep.
 
 ## Phase P3 — Figures out of the docs and man pages; the guard
 **Satisfies:** R1, R2, R3, R6 · **Depends on:** P2
