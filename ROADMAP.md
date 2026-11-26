@@ -322,7 +322,7 @@ a likely typo. Found by the maintainer testing 2.9.0a10.
 
 *Target: 2.9.0 · Horizon: now · Depends on: — · Refs: `data/model.py` (`Task.new`,
 `split_argline`), `task.py` (`read_changes`), `submit.py` (`read_tag_options`)*
-**Seed:** [`issues/input-directive-fields.md`](issues/input-directive-fields.md) · *status: unshaped*
+**Seed:** [`issues/input-directive-fields.md`](issues/input-directive-fields.md) · *status: adopted:input-directive-fields*
 
 ## The tag check stops at the first tag with an empty value
 
@@ -334,7 +334,7 @@ position. Pre-existing; found by `update-typed-columns`' research, which works a
 
 *Target: 2.9.x · Horizon: near-term, small · Depends on: — · Refs: `data/model.py`
 (`ensure_valid_tag`), `spec/update-typed-columns/PLAN.md` (D11)*
-**Seed:** [`issues/tag-check-stops-at-empty-value.md`](issues/tag-check-stops-at-empty-value.md) · *status: unshaped*
+**Seed:** [`issues/tag-check-stops-at-empty-value.md`](issues/tag-check-stops-at-empty-value.md) · *status: adopted:input-directive-fields*
 
 ## `hs info` and `hs list` show a timestamp's offset differently on each backend
 
