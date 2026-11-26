@@ -128,7 +128,7 @@ RANGES: Final[Dict[str, Tuple[Any, Any, Any]]] = {
     'server.attempts': (1, 32_767, ('above', 100)), 'option.max_retries': (0, 32_766, ('above', 99)),
     'task.cores': (0, 32_767, ('above', 1024)), 'client.cores': (0, 32_767, ('above', 1024)),
     'server.port': (1, 65_535, None), 'database.port': (1, 65_535, None),
-    'option.group': (-2**31, 2**31 - 1, None), 'option.part': (0, 2**31 - 1, None),
+    'option.group': (0, 2**31 - 1, None), 'option.part': (0, 2**31 - 1, None),
     'task.timeout': (0, 2**31 - 1, None), 'server.poll': (0, 2**31 - 1, None),
     'server.tls.handshake': (1, 86_400, None), 'option.interval': (1, 2**31 - 1, None),
     'option.client.timeout': (1, 2**31 - 1, None), 'option.client.task_timeout': (1, 2**31 - 1, None),

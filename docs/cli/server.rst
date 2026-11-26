@@ -60,15 +60,15 @@ Description
    :pr:`118`: a line whose first non-blank character is ``#`` is a comment, and a ``#`` anywhere
    else is part of the command, run as written; earlier releases cut the command at the first ``#``.
    The ``# HYPERSHELL:`` marker is recognised anywhere on a line, so a command that must contain
-   that text breaks it with shell quoting (``echo '#'' HYPERSHELL:'``). A task's group must be an
-   integer: a *FILE* holding any other group value is refused whole, with nothing run, naming the
+   that text breaks it with shell quoting (``echo '#'' HYPERSHELL:'``). A task's group must be a
+   non-negative integer: a *FILE* holding any other group value is refused whole, with nothing run, naming the
    value and its line, while on a stream only the offending line is refused, with an error naming
    it. With a database kept from an earlier run, a *FILE* that would submit a task below its reached
    group is refused before anything runs; tasks still in flight from an interrupted run do not
    count. A stream's late lower group still runs, with a warning.
 
 .. versionchanged:: 2.9.0
-   :pr:`125`: each numeric option has a range, given with the option below. A value outside it, or
+   :pr:`125`: each numeric option has a range. A value outside it, or
    one that is not a number of the option's kind, stops the command before it starts, with one line
    naming the option, the range and the value (exit status 2). An option with an advisory limit
    takes a value past it and runs, with one warning.

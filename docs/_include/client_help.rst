@@ -4,8 +4,6 @@ Options
 ``-N``, ``--num-threads`` *NUM*
     Number of task executor threads (default: 1).
 
-    Range: 0 (all cores) to 4,194,304. Above 1,024 it runs with a warning.
-
     Set to 0 to auto-detect based on available CPU cores.
 
 ``-t``, ``--template`` *CMD*
@@ -22,8 +20,6 @@ Options
     Size of task bundle to request from the server and to return results in (default: the
     server's).
 
-    Range: 1 to 2,147,483,647.
-
     When given (on the command line, by ``HYPERSHELL_CLIENT_BUNDLESIZE``, or in a configuration
     file as ``client.bundlesize``), the client advertises this size and the server replies with
     up to this many tasks, never more than its cap (``server.bundlemax``). When not given, the
@@ -37,8 +33,6 @@ Options
 
 ``-w``, ``--bundlewait`` *SEC*
     Time to wait before flushing tasks (default: 5, or ``client.bundlewait``).
-
-    Range: 0 s to 2,147,483,647 s.
 
     Specify a number of seconds, units ``d``, ``h``, ``m`` and ``s`` in that order, whole or
     fractional (e.g., ``30s``, ``5m``, ``1h30m``, ``1.5h``), or a Slurm time ``MM:SS``,
@@ -68,12 +62,8 @@ Options
 ``-p``, ``--port`` *NUM*
     Port number to connect with server (default: 50001).
 
-    Range: 1 to 65,535.
-
 ``-d``, ``--delay-start`` *SEC*
     Delay time before connecting to server (default: 0).
-
-    Range: -2,147,483,647 s to 2,147,483,647 s.
 
     Specify a number of seconds, units ``d``, ``h``, ``m`` and ``s`` in that order, whole or
     fractional (e.g., ``30s``, ``10m``, ``1h30m``, ``1.5h``), or a Slurm time ``MM:SS``,
@@ -120,8 +110,6 @@ Options
 ``-T``, ``--timeout`` *SEC*
     Timeout in seconds for client. Automatically shutdown if no tasks received (default: never).
 
-    Range: 1 s to 2,147,483,647 s.
-
     This feature allows for gracefully scaling down a cluster when task throughput subsides.
     The timeout counts from when the client starts, after any ``--delay-start``, so the delay
     does not count toward it.
@@ -134,8 +122,6 @@ Options
 ``-W``, ``--task-timeout`` *SEC*
     Task-level walltime limit (default: none).
 
-    Range: 1 s to 2,147,483,647 s.
-
     Executors will send a progression of SIGINT, SIGTERM, and SIGKILL.
     If the process still persists the executor itself will shutdown.
 
@@ -146,8 +132,6 @@ Options
 ``-C``, ``--client-cores`` *NUM*
     Limit available cores for client (default: all cores).
 
-    Range: 0 (unconstrained) to 32,767. Above 1,024 it runs with a warning.
-
     Sets an upper bound on the number of CPU cores that the client can use.
     This allows running multiple clients on the same node by partitioning resources.
     The client will not execute tasks if doing so would exceed this limit.
@@ -156,8 +140,6 @@ Options
 
 ``-M``, ``--client-memory`` *SIZE*
     Limit available memory for client (default: all memory).
-
-    Range: 0 bytes (unconstrained) to 9,223,372,036,854,775,807 bytes.
 
     Sets an upper bound on the amount of memory that the client can use.
     Specify memory size in bytes or with a unit ``K``, ``M``, ``G`` or ``T``, alone or followed
@@ -178,12 +160,8 @@ Options
     Maximum allowed tasks per second per client; a number, e.g. 0.5 (default: none).
     Individual tasks are throttled if exceeding this average limit.
 
-    Range: 0.000001 to 1,000,000,000 tasks per second, or 0 (no limit). Below 0.001 tasks per second, other than 0, it runs with a warning.
-
 ``-S``, ``--signalwait`` *SEC*
     Task-level signal escalation wait period (default: 10).
-
-    Range: 0 s to 2,147,483,647 s.
 
     Specify a number of seconds, units ``d``, ``h``, ``m`` and ``s`` in that order, whole or
     fractional (e.g., ``30s``, ``5m``, ``1h30m``, ``1.5h``), or a Slurm time ``MM:SS``,

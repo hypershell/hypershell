@@ -1,10 +1,10 @@
 # SPDX-FileCopyrightText: 2026 Geoffrey Lentner
 # SPDX-License-Identifier: Apache-2.0
 
-"""A task group is an integer, wherever it is given; input read in full is refused whole otherwise.
+"""A task group is a non-negative integer, wherever it is given; input read in full is refused whole otherwise.
 
-A tag value is an integer when `-g/--group` would accept the same text (`7`, `-3`, `+5`, `07`), and a
-JSON value when it is a JSON integer, within PostgreSQL's 32-bit `INTEGER` range on every database.
+A tag value is an integer when `-g/--group` would accept the same text (`7`, `+5`, `07`), and a
+JSON value when it is a JSON integer, from 0 to the top of PostgreSQL's 32-bit `INTEGER` on every database.
 A task file, a JSON source, arguments and `hs submit`'s standard input are refused whole with exit
 status 5 and nothing inserted, naming the value and its line or record. `-t group:x` and an
 out-of-range `-g` exit 2 before any input is read.
@@ -51,7 +51,7 @@ ACCEPTED_TEXT: List[Tuple[str, str, int]] = [
     ('plain', '3', 3),
     ('zero-padded', '07', 7),
     ('plus', '+5', 5),
-    ('minus', '-3', -3),
+    ('zero', '0', 0),
 ]
 """Group tag text that `-g` accepts, and the group it gives, by test id."""
 
@@ -59,16 +59,16 @@ ACCEPTED_TEXT: List[Tuple[str, str, int]] = [
 # --- The rule ------------------------------------------------------------------------------------
 
 @mark.unit
-@mark.parametrize('value', [0, 7, -3, 2**31 - 1, -2**31])
+@mark.parametrize('value', [0, 7, 2**31 - 1])
 def test_ensure_group_accepts_integer(value: int) -> None:
-    """An integer in the 32-bit range is a group."""
+    """An integer from 0 to the 32-bit maximum is a group."""
     from hypershell.data.model import ensure_group
     assert ensure_group(value) == value
 
 
 @mark.unit
 @mark.parametrize('value', ['7', 'x', '', 1.5, 1000.0, float('nan'), float('inf'), True, False, None,
-                            2**31, -2**31 - 1, 10**20])
+                            2**31, -1, -2**31, 10**20])
 def test_ensure_group_refuses(value: Any) -> None:
     """Anything else is refused: text, a float (integral or not), a boolean, null, and an integer out of range."""
     from hypershell.data.model import ensure_group, TaskGroupError
@@ -77,7 +77,7 @@ def test_ensure_group_refuses(value: Any) -> None:
 
 
 @mark.unit
-@mark.parametrize('text, value', [('7', 7), ('07', 7), ('+5', 5), ('-3', -3), (' 7 ', 7), ('2147483647', 2**31 - 1)])
+@mark.parametrize('text, value', [('7', 7), ('07', 7), ('+5', 5), ('0', 0), (' 7 ', 7), ('2147483647', 2**31 - 1)])
 def test_parse_group_accepts(text: str, value: int) -> None:
     """The `-g` rule takes what `int()` takes, within range."""
     from hypershell.data.model import parse_group
@@ -219,10 +219,10 @@ def test_submit_json_refuses_group(temp_site: Path, name: str, value: Any) -> No
 def test_submit_json_accepts_integer_group(temp_site: Path) -> None:
     """A `--from-json` record whose group is a JSON integer is stored in that group."""
     site = Path(str(temp_site))
-    path = create_json_taskfile(site, [{'args': 'echo a', 'group': 4}, {'args': 'echo b', 'group': -2}])
+    path = create_json_taskfile(site, [{'args': 'echo a', 'group': 4}, {'args': 'echo b', 'group': 0}])
     rc, _, stderr = submit('--from-json', str(path), cwd=site)
     assert rc == 0, stderr[-4000:]
-    assert stored_groups(sqlite_engine()) == {'echo a': 4, 'echo b': -2}
+    assert stored_groups(sqlite_engine()) == {'echo a': 4, 'echo b': 0}
 
 
 # --- Options -------------------------------------------------------------------------------------
@@ -242,7 +242,7 @@ def test_submit_tag_option_refuses_group(temp_site: Path, mode: str) -> None:
 
 
 @mark.integration
-@mark.parametrize('text, value', [('07', 7), ('-3', -3)])
+@mark.parametrize('text, value', [('07', 7), ('0', 0)])
 def test_submit_tag_option_accepts_group(temp_site: Path, text: str, value: int) -> None:
     """`-t group:N` with text `-g` would accept sets that group."""
     site = Path(str(temp_site))

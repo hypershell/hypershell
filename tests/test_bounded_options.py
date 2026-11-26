@@ -161,9 +161,9 @@ IN_RANGE: Final[List[Tuple[type, List[str], Dict[str, Any]]]] = [
     (ServerApp, ['-r', '0', '-F', '1e-6', '-P', '2147483647', '-c', '0', '-m', '0'],
      {'max_retries': 0, 'autoscaling_factor': 1e-6, 'autoscaling_period': 2147483647}),
     (RelayApp, ['-N', '2147483647', '-p', '1', '--port', '65535'], {'size': 2147483647, 'upstream_port': 1}),
-    (SubmitApp, ['-g', '-2147483648', '-b', '2147483647', '-c', '0', 'echo'], {'group': -2**31, 'bundlesize': 2**31 - 1}),
+    (SubmitApp, ['-g', '0', '-b', '2147483647', '-c', '0', 'echo'], {'group': 0, 'bundlesize': 2**31 - 1}),
     (TaskSearchApp, ['-l', '2147483647', '-g', '2147483647', '--part', '0'], {'limit': 2**31 - 1}),
-    (TaskUpdateApp, ['-l', '1', '-g', '-2147483648', 'x', 'y'], {'limit': 1}),
+    (TaskUpdateApp, ['-l', '1', '-g', '0', 'x', 'y'], {'limit': 1}),
     (TaskWaitApp, ['-n', '1', 'id'], {'interval': 1}),
     (TaskRunApp, ['-n', '2147483647', 'echo'], {'interval': 2**31 - 1}),
 ]

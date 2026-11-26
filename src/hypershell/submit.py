@@ -80,7 +80,7 @@ from hypershell.core.exceptions import (handle_exception, handle_disconnect,
                                         handle_address_unknown, HostAddressInfo, get_shared_exception_mapping,
                                         ReadingMixin, reading)
 from hypershell.data.model import (Task, Source, Zone, DIRECT_SOURCE_ID, STDIN_SOURCE_ID, DEFAULT_TASK_GROUP,
-                                   TaskGroupInfo, TaskGroupError, TaskInputError, ensure_group, ensure_resources, read_resources,
+                                   TaskGroupInfo, GROUP_MIN, TaskGroupError, TaskInputError, ensure_group, ensure_resources, read_resources,
                                    RESOURCE_SETTINGS, tag_text,
                                    serialize_tasks, zone_name)
 from hypershell.data import initdb, checkdb, DATABASE_DIALECT, DATABASE_ENABLED
@@ -1779,13 +1779,16 @@ class SubmitApp(ReadingMixin, Application):
 
         This is the most recently scheduled group, unless that is below the reached group (a late
         lower group is running) or is not an integer; then it is the reached group, so a submission
-        that names no group is never refused for it.
+        that names no group is never refused for it. It is never below `GROUP_MIN`: a database from
+        an earlier release may hold a group below it, and new tasks are not added there.
         """
         group = Task.current_group()
         reached = self.reached_group
         if reached is not None and (not isinstance(group.value, int) or group.value < reached):
             reason = 'below it' if isinstance(group.value, int) else 'not an integer'
             group = TaskGroupInfo(reached, f'reached group; most recently scheduled group {group.value} is {reason}')
+        if isinstance(group.value, int) and group.value < GROUP_MIN:
+            group = TaskGroupInfo(GROUP_MIN, f'lowest task group; {group.value} is below it')
         log.info(f'Auto-selected task group {group.value} ({group.reason})')
         return group.value
 
