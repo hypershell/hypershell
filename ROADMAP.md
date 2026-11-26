@@ -358,6 +358,17 @@ plan gate (Q1).
 `spec/update-typed-columns/research/03-datetime.md` (§4)*
 **Seed:** [`issues/timestamp-display-offsets.md`](issues/timestamp-display-offsets.md) · *status: unshaped*
 
+## The queue-server hand-back test fails once with "handle is closed"
+
+`test_handback_over_a_queue_server_requeues_only_the_relays_assignments` failed once on CI (Python
+3.11): the relay's first work request found its proxy connection already closed. The same commit
+passed elsewhere. Make the test reliable, or find the window in which a client's connection closes
+between `connect()` and its first request.
+
+*Target: 2.9.x · Horizon: near-term, small · Depends on: — · Refs: `tests/test_topology_server.py`,
+`core/queue.py` (`SecureConnection`)*
+**Seed:** [`issues/handback-test-closed-handle.md`](issues/handback-test-closed-handle.md) · *status: unshaped*
+
 ## The serial test suite outgrows the CI time limit
 
 The `tests` job runs the whole suite serially on each of four Python versions. It took under 45
