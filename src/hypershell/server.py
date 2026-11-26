@@ -2012,15 +2012,15 @@ class ServerApp(ReadingMixin, Application):
     def prepare_source(self: ServerApp) -> None:
         """Check a named task file whole before anything is inserted or dispatched, with a database or without.
 
-        A group that is not an integer refuses the file (exit 5). The server ingests raw lines, so
-        the scan uses the default template. With a database, a task below the reached group
+        A group that is not an integer refuses the file (exit 5), as does a zone with no database. The
+        server ingests raw lines, so the scan uses the default template. With a database, a task below the reached group
         refuses the file (exit 2); tasks in flight do not count toward it, since the scheduler
         reverts them when it starts. A stream is checked line by line as it arrives.
         """
         if self.input_stream is not None and is_file_input(self.input_stream):
             path = os.path.abspath(self.filepath)
             with open(path, mode='r') as stream:
-                scan = scan_task_lines(stream, name=path)
+                scan = scan_task_lines(stream, name=path, zones=not self.in_memory and DATABASE_ENABLED)
             if not self.in_memory and DATABASE_ENABLED:
                 refuse_below_reached_group(scan.groups, Task.reached_group(in_flight=False))
 

@@ -54,7 +54,7 @@ from hypershell.data.core import Session
 from hypershell.data.model import (Task, Source, Zone, JSON, CANCEL_STATUS, zone_name, zone_id, DEFAULT_ZONE_NAME,
                                    DEFAULT_ZONE_ID, TaskGroupError, TaskInputError, parse_group)
 from hypershell.data import ensuredb, DATABASE_DIALECT
-from hypershell.submit import read_tag_options, advise_one_task
+from hypershell.submit import read_tag_options, advise_one_task, input_zone
 
 # Public interface
 __all__ = ['TaskGroupApp',
@@ -117,6 +117,8 @@ class TaskSubmitApp(ReadingMixin, Application):
         args = ' '.join(self.argv)
         task = Task.new(args=args, tag=self.tags, zone=zone)
         advise_one_task(args, self.tags)
+        if (name := input_zone({**self.tags, **Task.split_argline(args)[1]})) is not None:
+            Zone.ensure(name)  # Recorded as `--zone` records its zone
         Task.add(task)
         print(task.id)
 
@@ -451,12 +453,14 @@ class TaskRunApp(ReadingMixin, Application):
             raise ArgumentError(str(error)) from error
         args = ' '.join(self.argv)
         try:
-            Task.split_argline(args)  # The inline tags too, before the database is opened (exit 5)
+            _, inline_tags = Task.split_argline(args)  # The inline tags too, before the database is opened (exit 5)
         except TaskInputError as error:
             raise error.at('arguments') from error
         ensuredb()
         task = Task.new(args=args, tag=tags or None)
         advise_one_task(args, tags)
+        if (name := input_zone({**tags, **inline_tags})) is not None:
+            Zone.ensure(name)  # Recorded as `--zone` records its zone
         Task.add(task)
         TaskWaitApp(uuid=task.id, interval=self.interval).run()
         TaskInfoApp(uuid=task.id, print_stdout=True).run()

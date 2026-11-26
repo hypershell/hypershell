@@ -6,7 +6,7 @@ appetite: big
 status: in_progress
 branch: fix/input-directive-fields
 base: develop
-current_phase: P4
+current_phase: P5
 last_updated: '2026-11-25'
 phases:
 - id: P1
@@ -77,7 +77,7 @@ phases:
 - id: P4
   name: 'Zones from input: registration, JSON, no database, the cluster warning (R1,
     R6, R7)'
-  status: pending
+  status: done
   satisfies:
   - R1
   - R6
@@ -206,12 +206,17 @@ Resume ground-truth: `uv run python .agents/factory/bin/next_phase.py spec/input
 ## Phase P4 — Zones from input
 **Satisfies:** R1, R6, R7 · **Depends on:** P3
 
-- [ ] Registration: scan `zones` → `SubmitApp.run`, cluster/server `prepare_source`; `DatabaseCommitter`
-      for streams; `hs run`/`submit_one` before the add (PLAN §2.3).
-- [ ] JSON `zone` key (string only) in `validate_json_records` and `json_record_tags`.
-- [ ] R7: the `zones=False` flag on scans and `LiveSubmitThread` Loaders; `--queue` `-t` refusal.
-- [ ] `hs cluster`: one WARNING per input zone its clients do not serve.
-- [ ] `idf_drive.sh`: modes `zones` and `nodb`.
+- [x] Registration: `DatabaseCommitter` records each input zone before the first task in it, on the
+      writing thread, for every Loader path with a database (whole input and streams alike; the Loader
+      hands it `zone_names`, id → name); `hs run`, `submit_one` and the one-task submit before the add.
+      *Amended:* the scan does not collect zones and `SubmitApp.run`/`prepare_source` do not ensure
+      them — the committer covers those paths too, so registration has one home.
+- [x] JSON `zone` key (string only) in `validate_json_records` (`json_record_tags` carries it to
+      `Task.new`, which pops it, unchanged).
+- [x] R7: the `zones=False` flag on scans and `LiveSubmitThread` Loaders; `--queue` `-t` refusal.
+- [x] `hs cluster`: one WARNING per input zone its clients do not serve (`GatedSource.serves`; none
+      under `--autoscaling`, which launches clients for every zone).
+- [x] `idf_drive.sh`: modes `zones` and `nodb`.
 
 ## Phase P5 — Docs, help and the constitution
 **Satisfies:** R10 · **Depends on:** P4
