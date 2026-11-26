@@ -15,25 +15,23 @@ replace every tag at once, is refused: change one tag with ``KEY=VALUE`` or ``KE
 one with ``--remove-tag``. Every tag is checked by the tag rules (as ``hs submit -t`` checks it), and
 one that breaks them exits with status 2 before anything is counted, asked or written.
 
-Every column is read by its kind, in both forms and on every database, within the range listed
+Every column is read by its kind, in both forms and on every database, within its range, as listed
 below. Any other value exits with status 2, naming the column, the range or form and the value,
 before anything is counted, asked or written, and no other change given with it is written.
 ``none`` or ``null``, in any case, clears a column that may be empty; for ``attempt``, ``part``,
 ``retried``, ``submit_id``, ``submit_time`` and ``args`` it is refused. A change to ``id`` is
 refused in both forms.
 
-- ``cores``: a whole number, as ``hs submit -c`` reads it. Range: 0 (unconstrained) to 32,767.
-  Above 1,024 it is written with a warning.
-- ``memory``: a size, as ``hs submit -m`` reads it (e.g., ``4G``, ``512MB``, ``1.5GiB``, or a number of bytes). Range: 0 bytes (unconstrained) to 9,223,372,036,854,775,807 bytes.
-- ``timeout``: a duration, as ``hs submit -W`` reads it (e.g., ``90m``, ``1h30m``, ``1:30:00``, ``1-12``, or a number of seconds), rounded up to whole seconds. Range: 0 s to 2,147,483,647 s.
-- ``waited``: a duration in seconds, read as ``timeout`` is. Range: 0 s to 2,147,483,647 s.
-- ``duration``: a duration in seconds, read as ``timeout`` is. Range: 0 s to 2,147,483,647 s.
-- ``exit_status``: a whole number. Range: -32,768 to 32,767.
-- ``attempt``: a whole number; not ``none``. Range: 1 to 32,767.
-  Above 100 it is written with a warning.
-- ``part``: a whole number; not ``none``. Range: 0 to 2,147,483,647.
-- ``cores_max``: a number, the peak cores measured. Range: 0 to 32,767.
-- ``memory_max``: a number of bytes, the peak memory measured. Range: 0 to 9,223,372,036,854,775,807 bytes.
+- ``cores``: a whole number, as ``hs submit -c`` reads it.
+- ``memory``: a size, as ``hs submit -m`` reads it (e.g., ``4G``, ``512MB``, ``1.5GiB``, or a number of bytes).
+- ``timeout``: a duration, as ``hs submit -W`` reads it (e.g., ``90m``, ``1h30m``, ``1:30:00``, ``1-12``, or a number of seconds), rounded up to whole seconds.
+- ``waited``: a duration in seconds, read as ``timeout`` is.
+- ``duration``: a duration in seconds, read as ``timeout`` is.
+- ``exit_status``: a whole number.
+- ``attempt``: a whole number; not ``none``.
+- ``part``: a whole number; not ``none``.
+- ``cores_max``: a number, the peak cores measured.
+- ``memory_max``: a number of bytes, the peak memory measured.
 - ``retried``: a boolean, true/false, yes/no, on/off or 1/0 in any case; not ``none``.
 - ``submit_id``, ``server_id``, ``client_id``, ``previous_id``, ``next_id`` and ``source``: a uuid,
   the 8-4-4-4-12 hexadecimal form in any case, stored in lower case (e.g.,
@@ -55,8 +53,8 @@ refused in both forms.
   ``errpath``, ``csvpath``, ``submit_host``, ``server_host``, ``client_host``, ``fingerprint``) take
   any text, and ``none`` clears them.
 
-A group change (``group=VALUE``, or ``ID group VALUE`` in the single-task form) takes an integer as
-``hs submit -g`` does, in the 32-bit range; any other value exits with status 2 before anything is
+A group change (``group=VALUE``, or ``ID group VALUE`` in the single-task form) takes a non-negative
+integer as ``hs submit -g`` does; any other value exits with status 2 before anything is
 counted, asked or written, and no other change given with it is written.
 
 The ``-w``/``--where`` and ``-t``/``--with-tag`` operate just as in the search command.

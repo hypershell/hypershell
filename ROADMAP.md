@@ -324,6 +324,17 @@ a likely typo. Found by the maintainer testing 2.9.0a10.
 `split_argline`), `task.py` (`read_changes`), `submit.py` (`read_tag_options`)*
 **Seed:** [`issues/input-directive-fields.md`](issues/input-directive-fields.md) · *status: adopted:input-directive-fields*
 
+## A directive in a single quoted command argument is refused
+
+`hs submit "echo e # HYPERSHELL: group:4"` exits 5: the arguments are joined with `quote_arg`, which
+wraps the whole command in quotes, and the closing quote is read as part of the last tag. A directive
+given that way should be read as from a task file. Pre-existing; found by `input-directive-fields`'
+research.
+
+*Target: 2.9.x · Horizon: near-term, small · Depends on: `input-directive-fields` · Refs: `submit.py`
+(`quote_arg`, `direct_args`), `data/model.py` (`split_argline`)*
+**Seed:** [`issues/submit-args-quote-directive.md`](issues/submit-args-quote-directive.md) · *status: unshaped*
+
 ## The tag check stops at the first tag with an empty value
 
 `Task.ensure_valid_tag` returns at the first naked tag, so no tag after it is checked, key or value.
@@ -346,6 +357,17 @@ plan gate (Q1).
 *Target: 2.9.x · Horizon: near-term, small · Depends on: — · Refs:
 `spec/update-typed-columns/research/03-datetime.md` (§4)*
 **Seed:** [`issues/timestamp-display-offsets.md`](issues/timestamp-display-offsets.md) · *status: unshaped*
+
+## The queue-server hand-back test fails once with "handle is closed"
+
+`test_handback_over_a_queue_server_requeues_only_the_relays_assignments` failed once on CI (Python
+3.11): the relay's first work request found its proxy connection already closed. The same commit
+passed elsewhere. Make the test reliable, or find the window in which a client's connection closes
+between `connect()` and its first request.
+
+*Target: 2.9.x · Horizon: near-term, small · Depends on: — · Refs: `tests/test_topology_server.py`,
+`core/queue.py` (`SecureConnection`)*
+**Seed:** [`issues/handback-test-closed-handle.md`](issues/handback-test-closed-handle.md) · *status: unshaped*
 
 ## The serial test suite outgrows the CI time limit
 

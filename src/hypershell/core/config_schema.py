@@ -585,7 +585,7 @@ class Range:
 
     @property
     def bounds(self: Range) -> str:
-        """The range as a refusal and the documentation give it (`0 (unconstrained) to 32,767`)."""
+        """The range as a refusal gives it (`0 (unconstrained) to 32,767`); the user documentation gives no figures."""
         unit = self.unit
         if self.least is not None:
             return f'{figure(self.least)} to {figure(self.high)}{unit}, or 0 ({self.zero})'
@@ -595,21 +595,6 @@ class Range:
         if self.low_open:
             low += ' (exclusive)'
         return f'{low} to {figure(self.high)}{unit}'
-
-    @property
-    def text(self: Range) -> str:
-        """The range as one sentence of the documentation."""
-        none = ', or <none>' if self.kind is Kind.INT_OR_NONE else ''
-        return f'Range: {self.bounds}{none}.'
-
-    @property
-    def advice_text(self: Range) -> Optional[str]:
-        """The advisory limit as one sentence of the documentation, or None."""
-        if self.advise is None:
-            return None
-        direction, limit, _ = self.advise
-        other = ', other than 0,' if direction == 'below' and self.low == 0 else ''
-        return f'{direction.capitalize()} {figure(limit)}{self.unit}{other} it runs with a warning.'
 
     def refusal(self: Range, name: str, value: Any, source: Optional[str] = None, out_of_range: bool = True) -> str:
         """The one refusal: `<name>: expected <form> from <A> to <B>, given <V>`, and its source.
@@ -780,7 +765,8 @@ CORES: Final[Range] = Range(
     advise=('above', 1024, 'no node a task runs on has more'),
     why="A task's cores are a 16-bit integer on PostgreSQL.")
 PORT: Final[Range] = Range(Kind.INT, 1, 65_535, why='A TCP port.')
-GROUP: Final[Range] = Range(Kind.INT, -INT32_MAX - 1, INT32_MAX, why="A task's group is a 32-bit integer.")
+GROUP: Final[Range] = Range(Kind.INT, 0, INT32_MAX,
+                            why="Groups run lowest first from the default, 0. The ceiling is a 32-bit signed integer.")
 PART: Final[Range] = Range(Kind.INT, 0, INT32_MAX, why="A task's part is a 32-bit integer.")
 DURATION: Final[Range] = Range(
     Kind.DURATION, 0, INT32_MAX,

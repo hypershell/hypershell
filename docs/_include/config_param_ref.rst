@@ -91,8 +91,6 @@
             Number of *uncompressed* rotated files to retain (default: ``0``). Only applies
             when compression is enabled; without compression, rotated files are never deleted.
 
-            Range: 0 to 2,147,483,647.
-
             .. only:: html
 
                 .. versionchanged:: 2.9.0
@@ -142,8 +140,6 @@
     ``.port``
         Port number to connect with database server.
         The default value depends on the provider, e.g., 5432 for Postgres.
-
-        Range: 1 to 65,535.
 
         .. only:: html
 
@@ -258,8 +254,6 @@
         This is an arbitrary choice and simply must be an available port. The default option chosen
         here is typically available on most platforms and is not expected by any known major software.
 
-        Range: 1 to 65,535.
-
         .. only:: html
 
             .. versionchanged:: 2.9.0
@@ -286,8 +280,6 @@
         On large scale workflows with many clients (e.g., 100) it may be advantageous to allow
         the scheduler to work ahead in selecting new tasks.
 
-        Range: 1 to 2,147,483,647.
-
         .. only:: html
 
             .. versionchanged:: 2.9.0
@@ -311,8 +303,6 @@
 
         See also ``-b``/``--bundlesize`` command-line option.
 
-        Range: 1 to 2,147,483,647.
-
         .. only:: html
 
             .. versionchanged:: 2.9.0
@@ -330,8 +320,6 @@
         A client advertises its own bundle size (its ``-b``); the server never replies with more
         than this many tasks, whatever a client asks for. The effective cap is never smaller than
         the server's own ``.bundlesize``. There is no command-line option.
-
-        Range: 1 to 2,147,483,647.
 
         .. only:: html
 
@@ -363,8 +351,6 @@
         they are not given ``max_retries``.
 
         See also ``.eager``.
-
-        Range: 1 to 32,767. Above 100 it runs with a warning.
 
         .. only:: html
 
@@ -414,8 +400,6 @@
 
         See also ``-Q``/``--poll`` command-line option.
 
-        Range: 0 s to 2,147,483,647 s.
-
         .. only:: html
 
             .. versionchanged:: 2.9.0
@@ -442,9 +426,7 @@
         Takes a number of seconds or a string in the duration forms: units ``d``, ``h``, ``m``
         and ``s`` (e.g., ``"30s"``, ``"5m"``, ``"1h30m"``) or a Slurm time (e.g., ``"1:30"``);
         fractions are kept. Every command stops before it starts if the value is not a duration or
-        is under 10 seconds or over the longest duration (about 68 years).
-
-        Range: 10 s to 2,147,483,647 s.
+        is under 10 seconds.
 
         .. only:: html
 
@@ -534,8 +516,6 @@
             it starts. Also set with ``HYPERSHELL_SERVER_TLS_HANDSHAKE``. A server without TLS, by
             ``--no-tls`` or ``.enabled`` set to `false`, ignores it; clients never read it.
 
-            Range: 1 s to 86,400 s.
-
             .. only:: html
 
                 .. versionadded:: 2.9.0
@@ -569,8 +549,6 @@
 
         See also ``-b``/``--bundlesize`` command-line option.
 
-        Range: 1 to 2,147,483,647.
-
         .. only:: html
 
             .. versionchanged:: 2.9.0
@@ -599,8 +577,6 @@
 
         See also ``-w``/``--bundlewait`` command-line option.
 
-        Range: 0 s to 2,147,483,647 s.
-
         .. only:: html
 
             .. versionchanged:: 2.9.0
@@ -621,8 +597,6 @@
         and ``s`` (e.g., ``"30s"``, ``"5m"``, ``"1h30m"``) or a Slurm time (e.g., ``"1:30"``);
         fractions are kept. ``hs client`` stops before it starts if the value is not a duration.
 
-        Range: 0 s to 2,147,483,647 s.
-
         .. only:: html
 
             .. versionchanged:: 2.9.0
@@ -641,8 +615,6 @@
         A string takes the same forms as ``-T``/``--timeout``: units ``d``, ``h``, ``m`` and
         ``s`` (e.g., ``"1h30m"``, ``"1.5h"``) or a Slurm time (e.g., ``"1:30:00"``, ``"1-12"``).
 
-        Range: 0 s to 2,147,483,647 s.
-
         .. only:: html
 
             .. versionchanged:: 2.9.0
@@ -658,8 +630,6 @@
         partition a node between multiple clients.
 
         See also ``-C``/``--client-cores`` command-line option.
-
-        Range: 0 (unconstrained) to 32,767. Above 1,024 it runs with a warning.
 
         .. only:: html
 
@@ -678,8 +648,6 @@
 
         See also ``-M``/``--client-memory`` command-line option.
 
-        Range: 0 bytes (unconstrained) to 9,223,372,036,854,775,807 bytes.
-
         .. only:: html
 
             .. versionchanged:: 2.9.0
@@ -694,13 +662,10 @@
         A number (e.g., ``0.5``, one task every two seconds), read by ``hs client`` and by
         ``hs cluster`` for each of its clients. A value of ``0`` disables rate limiting. Useful to
         throttle very short tasks so that task launch does not overwhelm a shared resource.
-        A rate other than ``0`` under ``0.000001`` (one task in about 11.6 days) is refused, from
-        ``-R`` and from the configuration alike.
+        A rate other than ``0`` below the range is refused, from ``-R`` and from the configuration
+        alike.
 
         See also ``-R``/``--ratelimit`` command-line option.
-
-        Range: 0.000001 to 1,000,000,000 tasks per second, or 0 (no limit). Below 0.001 tasks per
-        second, other than 0, it runs with a warning.
 
         .. only:: html
 
@@ -727,8 +692,6 @@
 
         See also ``-b``/``--bundlesize`` command-line option.
 
-        Range: 1 to 2,147,483,647.
-
         .. only:: html
 
             .. versionchanged:: 2.9.0
@@ -753,8 +716,6 @@
         ``hs client`` reads ``client.bundlewait``.
 
         See also ``-w``/``--bundlewait`` command-line option.
-
-        Range: 0 s to 2,147,483,647 s.
 
         .. only:: html
 
@@ -783,8 +744,6 @@
 
         See also ``-c``/``--cores`` command-line option.
 
-        Range: 0 (unconstrained) to 32,767. Above 1,024 it runs with a warning.
-
         .. only:: html
 
             .. versionchanged:: 2.9.0
@@ -803,8 +762,6 @@
 
         See also ``-m``/``--memory`` command-line option.
 
-        Range: 0 bytes (unconstrained) to 9,223,372,036,854,775,807 bytes.
-
         .. only:: html
 
             .. versionchanged:: 2.9.0
@@ -822,8 +779,6 @@
         ``"1h30m"``, ``"1.5h"``) or a Slurm time (e.g., ``"1:30:00"``, ``"1-12"``); individual
         tasks may override this inline in the same forms (e.g., ``# HYPERSHELL: timeout:1h30m``).
 
-        Range: 0 s to 2,147,483,647 s.
-
         .. only:: html
 
             .. versionchanged:: 2.9.0
@@ -840,8 +795,6 @@
         is seconds.
 
         See also ``-S``, ``--signalwait`` command-line option.
-
-        Range: 0 s to 2,147,483,647 s.
 
         .. only:: html
 
@@ -912,8 +865,6 @@
 
         See also ``.period``.
 
-        Range: 0.000001 to 1,000,000,000. Above 100 it runs with a warning.
-
         .. only:: html
 
             .. versionchanged:: 2.9.0
@@ -935,8 +886,6 @@
         The period must be greater than zero: ``hs cluster``, ``hs server`` and ``hs relay`` each
         refuse zero or a negative value at start-up. A period below one second, in any form, is one
         second.
-
-        Range: 0 s (exclusive) to 2,147,483,647 s. Above 3,600 s it runs with a warning.
 
         .. only:: html
 
@@ -1021,8 +970,6 @@
 
         Its environment form is ``HYPERSHELL_AUTOSCALE_FAILED_LAUNCHES``.
 
-        Range: 0 to 2,147,483,647.
-
         .. only:: html
 
             .. versionadded:: 2.9.0
@@ -1042,8 +989,6 @@
             For a *fixed* policy cluster, this should be given with a ``.min`` size, and likely
             the same value.
 
-            Range: 0 to 2,147,483,647.
-
             .. only:: html
 
                 .. versionchanged:: 2.9.0
@@ -1058,8 +1003,6 @@
             Regardless of autoscaling policy, if the number of launched clients drops below this
             value we will scale up by one. Allowing ``min = 0`` is an important feature for
             efficient use of computing resources in the absence of tasks.
-
-            Range: 0 to 2,147,483,647.
 
             .. only:: html
 
@@ -1077,8 +1020,6 @@
 
         A server autoscaling with relay sites ignores ``[size]``: each relay advertises the
         ``min``, ``max`` and ``init`` of each zone it serves, and the server plans within those.
-
-            Range: 0 to 2,147,483,647.
 
             .. only:: html
 
@@ -1136,8 +1077,6 @@
 
         See also ``--port`` command-line option.
 
-        Range: 1 to 65,535.
-
         .. only:: html
 
             .. versionchanged:: 2.9.0
@@ -1152,8 +1091,6 @@
 
         It is never smaller than ``relay.num_threads``: a *client* asks for one bundle at a time,
         so a smaller bundle would leave its executors idle between requests.
-
-        Range: 1 to 2,147,483,647.
 
         .. only:: html
 
@@ -1171,8 +1108,6 @@
         Takes a number of seconds or a string in the duration forms: units ``d``, ``h``, ``m``
         and ``s`` (e.g., ``"30s"``, ``"5m"``, ``"1h30m"``) or a Slurm time (e.g., ``"1:30"``);
         fractions are kept. ``hs relay`` stops before it starts if the value is not a duration.
-
-        Range: 0 s to 2,147,483,647 s.
 
         .. only:: html
 
@@ -1197,8 +1132,6 @@
         and ``s`` (e.g., ``"30s"``, ``"5m"``, ``"1h30m"``) or a Slurm time (e.g., ``"1:30"``);
         fractions are kept. ``hs relay`` stops before it starts if the value is not a duration.
 
-        Range: 0 s to 2,147,483,647 s.
-
         .. only:: html
 
             .. versionchanged:: 2.9.0
@@ -1216,8 +1149,6 @@
         Takes a number of seconds or a string in the duration forms: units ``d``, ``h``, ``m``
         and ``s`` (e.g., ``"30s"``, ``"5m"``, ``"1h30m"``) or a Slurm time (e.g., ``"1:30"``);
         fractions are kept. ``hs relay`` stops before it starts if the value is not a duration.
-
-        Range: 0 s to 2,147,483,647 s.
 
         .. only:: html
 
@@ -1253,11 +1184,6 @@
 
         See also ``--zone`` command-line option, which names the zones in place of this one.
 
-        The numeric keys of a zone table:
-
-        - ``size``. Range: 1 to 2,147,483,647.
-        - ``min``, ``max`` and ``init``. Range: 0 to 2,147,483,647.
-
         .. only:: html
 
             .. versionchanged:: 2.9.0
@@ -1275,8 +1201,6 @@
         Against an upstream *server* autoscaling with relay sites it is the default ``.max``.
         See also ``-N``, ``--size`` command-line option.
 
-        Range: 1 to 2,147,483,647.
-
         .. only:: html
 
             .. versionchanged:: 2.9.0
@@ -1287,8 +1211,6 @@
 
     ``.min``
         Fewest *clients* of each zone an upstream topology assigns this site (default: `0`).
-
-        Range: 0 to 2,147,483,647, or <none>.
 
         .. only:: html
 
@@ -1309,8 +1231,6 @@
     ``.max``
         Most *clients* of each zone an upstream topology assigns this site (default: the size).
 
-        Range: 0 to 2,147,483,647, or <none>.
-
         .. only:: html
 
             .. versionadded:: 2.9.0
@@ -1328,8 +1248,6 @@
     ``.init``
         *Clients* of each zone an upstream topology assigns this site when the relay starts
         (default: ``.min``).
-
-        Range: 0 to 2,147,483,647, or <none>.
 
         .. only:: html
 
@@ -1378,8 +1296,6 @@
     ``.num_threads``
         Executor threads for each *client* at the site (default: `1`).
 
-        Range: 0 (all cores) to 4,194,304. Above 1,024 it runs with a warning.
-
         .. only:: html
 
             .. versionchanged:: 2.9.0
@@ -1397,8 +1313,6 @@
         and ``s`` (e.g., ``"30s"``, ``"5m"``, ``"1h30m"``) or a Slurm time (e.g., ``"1:30"``);
         rounded up to whole seconds, since each *client* is given it as ``-T``. ``hs relay`` stops
         before it starts if the value is not a duration.
-
-        Range: 0 s to 2,147,483,647 s.
 
         .. only:: html
 
@@ -1425,8 +1339,6 @@
 
             See also ``--upstream-port`` command-line option.
 
-            Range: 1 to 65,535.
-
             .. only:: html
 
                 .. versionchanged:: 2.9.0
@@ -1451,8 +1363,6 @@
             whole difference (never more than this size at once), so the site has a second round
             of work ready while the first runs.
 
-            Range: 1 to 2,147,483,647.
-
             .. only:: html
 
                 .. versionchanged:: 2.9.0
@@ -1466,8 +1376,6 @@
             Takes a number of seconds or a string in the duration forms: units ``d``, ``h``, ``m``
             and ``s`` (e.g., ``"30s"``, ``"5m"``, ``"1h30m"``) or a Slurm time (e.g., ``"1:30"``);
             fractions are kept. ``hs relay`` stops before it starts if the value is not a duration.
-
-            Range: 0 s to 2,147,483,647 s.
 
             .. only:: html
 
@@ -1491,8 +1399,6 @@
             and ``s`` (e.g., ``"30s"``, ``"5m"``, ``"1h30m"``) or a Slurm time (e.g., ``"1:30"``);
             fractions are kept. ``hs relay`` stops before it starts if the value is not a duration.
 
-            Range: 0 s to 2,147,483,647 s.
-
             .. only:: html
 
                 .. versionchanged:: 2.9.0
@@ -1513,8 +1419,6 @@
             Takes a number of seconds or a string in the duration forms: units ``d``, ``h``, ``m``
             and ``s`` (e.g., ``"30s"``, ``"5m"``, ``"1h30m"``) or a Slurm time (e.g., ``"1:30"``);
             fractions are kept. ``hs relay`` stops before it starts if the value is not a duration.
-
-            Range: 0 s to 2,147,483,647 s.
 
             .. only:: html
 
@@ -1538,8 +1442,6 @@
             Takes a number of seconds or a string in the duration forms: units ``d``, ``h``, ``m``
             and ``s`` (e.g., ``"30s"``, ``"5m"``, ``"1h30m"``) or a Slurm time (e.g., ``"1:30"``);
             fractions are kept. ``hs relay`` stops before it starts if the value is not a duration.
-
-            Range: 0 s to 2,147,483,647 s.
 
             .. only:: html
 

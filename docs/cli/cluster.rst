@@ -77,7 +77,7 @@ Description
    :pr:`117`: ``-R``/``--ratelimit`` takes a number (e.g., ``-R 0.5``), and defaults to
    ``client.ratelimit`` in every mode; the undocumented ``task.ratelimit`` is no longer read. A
    fractional rate is passed to launched clients, which must be of this release or later. A rate
-   other than ``0`` under ``0.000001`` is refused before anything starts.
+   other than ``0`` below the range is refused before anything starts.
 
 .. versionchanged:: 2.9.0
    :pr:`112`: ``--no-db`` leaves the configured database alone: it is not opened, created or
@@ -107,8 +107,8 @@ Description
    :pr:`118`: a line whose first non-blank character is ``#`` is a comment, and a ``#`` anywhere
    else is part of the command, run as written; earlier releases cut the command at the first ``#``.
    The ``# HYPERSHELL:`` marker is recognised anywhere on a line, so a command that must contain
-   that text breaks it with shell quoting (``echo '#'' HYPERSHELL:'``). A task's group must be an
-   integer: a *FILE* holding any other group value is refused whole, with nothing run, naming the
+   that text breaks it with shell quoting (``echo '#'' HYPERSHELL:'``). A task's group must be a
+   non-negative integer: a *FILE* holding any other group value is refused whole, with nothing run, naming the
    value and its line, while on a stream only the offending line is refused, with an error naming
    it. A *FILE* that would submit a task below the database's reached group (with ``--restart``,
    ``--update`` or ``--repeat``, or a database kept from an earlier run) is refused before anything
@@ -116,7 +116,7 @@ Description
    present are not checked. A stream's late lower group still runs, with a warning.
 
 .. versionchanged:: 2.9.0
-   :pr:`125`: each numeric option has a range, given with the option below. A value outside it, or
+   :pr:`125`: each numeric option has a range. A value outside it, or
    one that is not a number of the option's kind, stops the command before it starts, with one line
    naming the option, the range and the value (exit status 2). An option with an advisory limit
    takes a value past it and runs, with one warning. ``-N 0`` still runs one thread per core;

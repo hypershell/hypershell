@@ -1009,8 +1009,8 @@ UPDATE_HELP = f"""\
   refused in both forms.
 
   A group change (group=VALUE, or ID group VALUE in the single-task form)
-  takes an integer as hs submit -g does; any other value exits with status 2
-  before anything is counted, asked or written.
+  takes a non-negative integer as hs submit -g does; any other value exits with
+  status 2 before anything is counted, asked or written.
 
   Using --cancel marks tasks terminal (schedule_time and completion_time to now,
   exit_status to {CANCEL_STATUS}); they will not be scheduled, retried, or reverted.

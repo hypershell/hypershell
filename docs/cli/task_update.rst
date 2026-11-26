@@ -60,7 +60,7 @@ Description
 
 .. versionchanged:: 2.9.0
    :pr:`124`: a group change, ``group=VALUE`` or ``ID group VALUE`` in the single-task form, takes
-   an integer as ``hs submit -g`` does, in the 32-bit range. Any other value exits with status 2
+   a non-negative integer as ``hs submit -g`` does. Any other value exits with status 2
    before anything is counted, asked or written, and no other change given with it is written.
    Before, a text, fractional or out-of-range group was stored on SQLite, ``1e3`` and ``true`` were
    stored as 1000 and 1, and ``none``, ``null`` and ``nan`` failed with exit status 5 and a
@@ -76,22 +76,22 @@ Description
    same way.
 
 .. versionchanged:: 2.9.0
-   :pr:`125`: each numeric option has a range, given with the option below. A value outside it, or
+   :pr:`125`: each numeric option has a range. A value outside it, or
    one that is not a number of the option's kind, stops the command before it starts, with one line
    naming the option, the range and the value (exit status 2). ``-l``/``--limit`` below 1 is
-   refused, and so is a ``-g``/``--group`` outside 32 bits.
+   refused, and so is a ``-g``/``--group`` outside its range (a group below 0 among them).
 
 .. versionchanged:: 2.9.0
    :pr:`126`: every column ``hs update`` writes is read by its kind, in both forms and on SQLite and
    PostgreSQL alike. ``cores``, ``memory`` and ``timeout`` are read as ``hs submit -c``, ``-m`` and
    ``-W`` read them, so ``memory=4G`` and ``timeout=1:30:00`` store bytes and seconds; ``waited``
    and ``duration`` take durations; ``exit_status``, ``attempt`` and ``part`` take whole numbers,
-   and ``cores_max`` and ``memory_max`` numbers, each within the range the description lists (the
-   exit status and peak ranges are new). Any other value, ``none`` for ``attempt`` or ``part``, and
+   and ``cores_max`` and ``memory_max`` numbers, each within its range (the exit status and peak
+   ranges are new). Any other value, ``none`` for ``attempt`` or ``part``, and
    ``ID id VALUE`` exit with status 2 before anything is counted, asked or written. Before, SQLite
    stored text, fractions and out-of-range numbers, ``true`` was stored as 1, and PostgreSQL failed
-   with exit status 5 and a traceback (rounding a fraction instead). ``cores`` above 1,024 and
-   ``attempt`` above 100 are written with a warning.
+   with exit status 5 and a traceback (rounding a fraction instead). A ``cores`` or ``attempt`` past
+   its advisory limit is written, with a warning.
 
 .. versionchanged:: 2.9.0
    :pr:`126`: ``retried`` takes the boolean words a configuration key takes, ``yes``/``no`` and

@@ -28,7 +28,7 @@ Description
 
 .. versionchanged:: 2.9.0
    :pr:`117`: ``-R``/``--ratelimit`` takes a number (e.g., ``-R 0.5``, one task every two seconds),
-   as ``client.ratelimit`` does. A rate other than ``0`` under ``0.000001`` is refused.
+   as ``client.ratelimit`` does. A rate other than ``0`` below the range is refused.
 
 .. versionchanged:: 2.9.0
    :pr:`106`: ``-w``/``--bundlewait``, ``-S``/``--signalwait`` and ``-d``/``--delay-start`` take a
@@ -52,7 +52,7 @@ Description
    ``server.bind``.
 
 .. versionchanged:: 2.9.0
-   :pr:`125`: each numeric option has a range, given with the option below. A value outside it, or
+   :pr:`125`: each numeric option has a range. A value outside it, or
    one that is not a number of the option's kind, stops the command before it starts, with one line
    naming the option, the range and the value (exit status 2). An option with an advisory limit
    takes a value past it and runs, with one warning. A negative ``-R``/``--ratelimit`` is refused.

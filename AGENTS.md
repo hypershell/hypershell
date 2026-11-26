@@ -273,7 +273,7 @@ understanding it. Once the group clears, the next group is the smallest one with
 tasks, which may be lower when tasks arrive late. File input to `hs cluster`/`hs server` is
 submitted in full (the whole file) before the scheduler starts, so its groups run in order. Stream
 input is best effort: a late lower group runs after the current one, with a warning. A task group
-must be an integer: `ensure_group` accepts an `int` (not a `bool`) in PostgreSQL's 32-bit range,
+must be a non-negative integer: `ensure_group` accepts an `int` (not a `bool`) from 0 to the top of PostgreSQL's 32-bit range,
 from an inline or tag-only `group:` tag, `-t group:…` (exit 2, before any input is read) or a
 `--from-json` `group` key, and anything else raises `TaskGroupError` (exit 5) naming the value and
 its line or record; `hs update group=VALUE` and `hs update ID group VALUE` take it by `parse_group`

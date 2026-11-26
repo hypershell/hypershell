@@ -1,4 +1,4 @@
-Tasks may be assigned to an integer *group* for simple dependency management. Groups are
+Tasks may be assigned to a non-negative integer *group* for simple dependency management. Groups are
 scheduled in ascending order: every task in the active group must reach a terminal state before
 any task in the next group is scheduled. Within a group there is no ordering and all tasks may
 run concurrently. Tasks default to group ``0``.
@@ -16,8 +16,8 @@ The directive takes ``group=1`` as well as ``group:1``: either separator sets th
 .. versionchanged:: 2.9.0
    ``group=N`` sets the group, as ``group:N`` does; it was refused as a malformed tag.
 
-A group is an integer from -2147483648 to 2147483647, written as ``-g``/``--group`` takes it
-(``7``, ``-3``, ``+5`` and ``07`` are accepted). Any other value is refused wherever it arrives: an
+A group is a non-negative integer, written as ``-g``/``--group`` takes it (``7``, ``+5`` and
+``07`` are accepted). Any other value, including a group below 0, is refused wherever it arrives: an
 inline ``group:`` tag, ``-t group:...`` or the ``group`` key of a ``--from-json`` record, which must
 be a JSON integer (``"7"``, ``3.0``, ``true`` and ``null`` are refused). Input read in full (a task
 file given to ``hs submit``, ``hs cluster`` or ``hs server``, a ``--from-json`` source, a command given
@@ -30,6 +30,10 @@ tag-only line sets nothing. ``-t group:x`` exits with status 2 before any input 
 .. versionchanged:: 2.9.0
    :pr:`118`: a group that is not an integer is refused. Earlier releases stored such values as
    given on SQLite and ran them in an undocumented order, and ``group:nan`` hung the run.
+
+.. versionchanged:: 2.9.0
+   A group below 0 is refused, as any other value outside the range is. Earlier releases accepted
+   a negative group; a database that already holds one still runs it first.
 
 The server advances through groups automatically as each one completes. If a group cannot be
 completed because it still holds failed tasks (after any ``--max-retries`` attempts are

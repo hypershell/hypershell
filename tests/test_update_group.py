@@ -4,7 +4,7 @@
 """`hs update` writes a task group only when it is an integer by the rule of `hs submit -g`.
 
 A group change, `group=VALUE` in the filtered form or `ID group VALUE` in the single-task form, is
-taken as `hs submit -g/--group` takes a group: an integer in the 32-bit range, stored as that integer.
+taken as `hs submit -g/--group` takes a group: an integer from 0 to the 32-bit maximum, stored as that integer.
 Anything else exits with status 2, naming the value, before anything is counted, asked or written,
 and no other change given with it lands. Each test runs on SQLite and, with `HS_TEST_POSTGRES`, on
 PostgreSQL.
@@ -40,7 +40,8 @@ REFUSED: List[Tuple[str, str]] = [
     ('null', 'null'),
     ('nan', 'nan'),
     ('above', '2147483648'),
-    ('below', '-2147483649'),
+    ('below', '-1'),
+    ('int32-min', '-2147483648'),
 ]
 """Group change values that are not a task group, by test id."""
 
@@ -48,7 +49,7 @@ ACCEPTED: List[Tuple[str, str, int]] = [
     ('zero-padded', '07', 7),
     ('plus', '+5', 5),
     ('plain', '3', 3),
-    ('min', '-2147483648', -2**31),
+    ('min', '0', 0),
     ('max', '2147483647', 2**31 - 1),
 ]
 """Group change values that `hs submit -g` accepts, and the group each gives, by test id."""

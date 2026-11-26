@@ -70,7 +70,7 @@ template is applied, so comment, blank and tag-only lines never become tasks.
    releases cut the command at the first ``#``. Under ``--template``, comment, blank and tag-only
    lines are no longer submitted as tasks.
 
-A task's group must be an integer, as ``-g``/``--group`` takes it, whether it comes from
+A task's group must be a non-negative integer, as ``-g``/``--group`` takes it, whether it comes from
 ``-t group:N``, an inline ``group:`` tag or a ``--from-json`` record. A task file, a JSON source,
 the arguments or standard input holding any other group value is refused whole, with nothing
 submitted, naming the value and its line (or record); ``-t group:x`` is refused before any input is
@@ -88,15 +88,14 @@ recently scheduled group is below it, so it is never refused.
    :pr:`118`: a group that is not an integer is refused; a task below the reached group is refused;
    with the database, standard input is read in full before anything is submitted.
 
+.. versionchanged:: 2.9.0
+   A group below 0 is refused, as a group that is not an integer is; earlier releases accepted it.
+
 The resource tags ``cores``, ``memory`` and ``timeout`` take the ranges of the ``-c``, ``-m`` and
 ``-W`` options, and are refused as a group is, wherever they come from (an inline tag, ``-t`` or a
 ``--from-json`` record): input read in full is refused whole, with nothing submitted, naming the
 value and its line (or record); on a stream only that line is refused, with an error; ``-t`` is
 refused before any input is read (exit status 2), here and on ``hs run``.
-
-- ``cores``: Range: 0 (unconstrained) to 32,767. Above 1,024 it runs with a warning.
-- ``memory``: Range: 0 bytes (unconstrained) to 9,223,372,036,854,775,807 bytes.
-- ``timeout``: Range: 0 s to 2,147,483,647 s.
 
 A tag is read as its option reads it, with one difference: ``cores`` written as a decimal with a
 zero fraction (``cores:4.0``) is that whole number, while a non-zero fraction (``cores:4.5``) is

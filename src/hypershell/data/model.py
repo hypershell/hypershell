@@ -66,10 +66,10 @@ TAG_MARKER: Final[re.Pattern] = re.compile(r'#\s*HYPERSHELL:?')
 """The inline tag marker: found anywhere on a line, with or without its colon."""
 
 GROUP_MIN: Final[int] = SETTINGS['option.group'].low
-"""Lowest task group: the range of PostgreSQL's `INTEGER`, held on every database."""
+"""Lowest task group: 0, the default. Groups run lowest first, so none comes before it."""
 
 GROUP_MAX: Final[int] = SETTINGS['option.group'].high
-"""Highest task group."""
+"""Highest task group: the top of PostgreSQL's `INTEGER`, held on every database."""
 
 
 class TaskInputError(RuntimeError):

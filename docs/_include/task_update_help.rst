@@ -26,8 +26,8 @@ Arguments
     is counted, asked or written, and no other change given with it is written. ``id`` is never
     written.
 
-    A group change (``group=VALUE``, or ``ID group VALUE`` in the single-task form) takes an integer as
-    ``hs submit -g`` does, in the 32-bit range; any other value exits with status 2 before anything
+    A group change (``group=VALUE``, or ``ID group VALUE`` in the single-task form) takes a non-negative
+    integer as ``hs submit -g`` does; any other value exits with status 2 before anything
     is counted, asked or written, and no other change given with it is written.
 
 Options
@@ -81,8 +81,6 @@ Options
 ``-g``, ``--group`` *GROUP*
     Filter matches to a single task group.
 
-    Range: -2,147,483,648 to 2,147,483,647.
-
 ``-s``, ``--order-by`` *FIELD* ``[--desc]``
     Order results by field. Optionally, in descending order.
 
@@ -92,8 +90,6 @@ Options
 
 ``-l``, ``--limit`` *NUM*
     Limit the number of results.
-
-    Range: 1 to 2,147,483,647.
 
 ``-F``, ``--failed``
     Alias for ``-w 'exit_status != 0'``.

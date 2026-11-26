@@ -31,12 +31,8 @@ Options
 ``-g``, ``--group`` *GROUP*
     Filter results to a single task group.
 
-    Range: -2,147,483,648 to 2,147,483,647.
-
 ``--part`` *N*
     Filter results to a single database partition.
-
-    Range: 0 to 2,147,483,647.
 
     After ``hs initdb --rotate``, completed tasks are moved into numbered partition files and
     stamped with that partition's index in their ``part`` column. ``--part`` *N* restricts the
@@ -97,8 +93,6 @@ Options
 
 ``-l``, ``--limit`` *NUM*
     Limit the number of results.
-
-    Range: 1 to 2,147,483,647.
 
 ``-c``, ``--count``
     Show count of results.

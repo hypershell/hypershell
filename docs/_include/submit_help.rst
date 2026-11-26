@@ -64,8 +64,6 @@ Options
 ``-p``, ``--port`` *NUM*
     Port number for server (default: 50001).
 
-    Range: 1 to 65,535.
-
     Only used with ``--queue`` mode to specify the server port.
 
 ``--template`` *CMD*
@@ -82,8 +80,6 @@ Options
 ``-b``, ``--bundlesize`` *NUM*
     Size of task bundle (default: 1).
 
-    Range: 1 to 2,147,483,647.
-
     The default value allows for greater concurrency and responsiveness on small scales.
     Using larger bundles is a good idea for large distributed workflows; specifically, it is best
     to coordinate bundle size with the number of executors in use by each client.
@@ -92,8 +88,6 @@ Options
 
 ``-w``, ``--bundlewait`` *SEC*
     Time to wait before flushing tasks (default: 5).
-
-    Range: 0 s to 2,147,483,647 s.
 
     Specify a number of seconds, units ``d``, ``h``, ``m`` and ``s`` in that order, whole or
     fractional (e.g., ``30s``, ``5m``, ``1h30m``, ``1.5h``), or a Slurm time ``MM:SS``,
@@ -108,15 +102,11 @@ Options
 ``-c``, ``--cores`` *NUM*
     Number of CPU cores required per task (default: none).
 
-    Range: 0 (unconstrained) to 32,767. Above 1,024 it runs with a warning.
-
     Sets the default core requirement for all submitted tasks. Individual tasks can override
     this with inline comments (e.g., ``#HYPERSHELL: cores:8``).
 
 ``-m``, ``--memory`` *MEM*
     Amount of memory required per task (default: none).
-
-    Range: 0 bytes (unconstrained) to 9,223,372,036,854,775,807 bytes.
 
     Sets the default memory requirement for all submitted tasks. Specify memory size in bytes
     or with a unit ``K``, ``M``, ``G`` or ``T``, alone or followed by ``B`` or ``iB``, in any
@@ -126,8 +116,6 @@ Options
 
 ``-W``, ``--timeout`` *SEC*
     Task-level walltime limit in seconds (default: none).
-
-    Range: 0 s to 2,147,483,647 s.
 
     Sets the default timeout for all submitted tasks. Individual tasks can override this
     with inline comments, which take the same forms (e.g., ``#HYPERSHELL: timeout:3600`` or
@@ -140,14 +128,13 @@ Options
 ``-g``, ``--group`` *NUM*
     Task group for dependency management (default: 0).
 
-    Range: -2,147,483,648 to 2,147,483,647.
-
     Assigns submitted tasks to a specific group. Tasks are executed in ascending group order,
     with all tasks in a group completing before the next group begins. This enables simple
     workflow management without requiring explicit DAG-based definitions.
 
-    All tasks default to group 0 for backwards compatibility. Users can organize tasks into
-    multiple groups (e.g., 0, 1, 2, ...) where lower-numbered groups execute first.
+    All tasks default to group 0 for backwards compatibility. A group is a non-negative integer:
+    users can organize tasks into multiple groups (e.g., 0, 1, 2, ...) where lower-numbered groups
+    execute first.
 
 ``--zone`` *NAME*
     Zone of the submitted tasks (default: none, the reserved default zone).
