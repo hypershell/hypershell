@@ -33,6 +33,8 @@ Description
 .. versionchanged:: 2.9.0
    ``-t`` and an inline directive take ``KEY=VALUE`` as well as ``KEY:VALUE``; ``zone`` sets the
    task's zone, recorded in the database, where it was stored as a tag; with ``=`` a likely typo of
-   a task column is refused (exit status 2 for ``-t``).
+   a task column is refused (exit status 2 for ``-t``). ``cores:none``, ``memory:none`` and
+   ``timeout:none`` are refused, where they cleared the option's value for that task, and so is a
+   field with no value, where it was stored as empty.
 
 .. include:: ../_include/task_run_help.rst
