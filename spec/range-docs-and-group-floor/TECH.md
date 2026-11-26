@@ -3,7 +3,7 @@ slug: range-docs-and-group-floor
 title: Numeric ranges out of the user docs; task groups start at 0
 kind: fix
 appetite: small
-status: in_review
+status: blocked
 branch: fix/range-docs-and-group-floor
 base: develop
 current_phase: done
@@ -81,10 +81,11 @@ phases:
     3600 uv run pytest -q -p no:cacheprovider tests/test_group_floor.py tests/test_update_group.py
     tests/test_group_integer.py tests/test_update_numbers.py tests/test_bounded_table.py
 review:
-  last_reviewed_commit: ''
-  verdict: none
-  blocked_reason: ''
-  cycle: 0
+  last_reviewed_commit: 9339df346ab969942600f7d55077cc2f014ba3c3
+  verdict: changes-requested
+  blocked_reason: F1 group docs without the floor; F2 guard misses uncommaed figures;
+    F3 auto-selected negative group
+  cycle: 1
 ---
 # TECH.md — Numeric ranges out of the user docs; task groups start at 0
 
