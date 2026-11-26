@@ -1,5 +1,5 @@
 ---
-status: unshaped
+status: adopted:input-directive-fields
 kind: fix
 appetite: small
 target: 2.9.x

@@ -20,6 +20,9 @@ Options
     base command (reachable as ``{}``). Every ``{key}`` is validated against all task
     objects before anything is submitted.
 
+    A record's ``group``, ``zone``, ``cores``, ``memory`` and ``timeout`` keys set those fields of
+    its task, over ``-t`` and the options; a ``zone`` must be a JSON string.
+
 ``--repeat``
     Re-submit a known file's tasks again as a brand-new source.
 
@@ -141,6 +144,9 @@ Options
     default zone). Zones are recorded in the database, so ``--zone`` cannot be used with
     ``--queue``. Zone is placement only: task groups still run in order across all zones.
 
+    A zone named in the input (``zone:NAME`` or ``zone=NAME`` inline or with ``-t``, or a
+    ``--from-json`` record's ``zone``) wins over ``--zone`` for its tasks.
+
 ``--initdb``
     Auto-initialize database.
 
@@ -157,5 +163,11 @@ Options
     groups of tasks. They are defined with both a `key` and `value` (e.g., ``--tag file:a``).
     The default `value` for tags is blank. When searching with tags, not specifying a `value`
     will return any task with that `key` defined regardless of `value` (including blank).
+
+    Each item is ``KEY:VALUE``, ``KEY=VALUE`` or a bare ``KEY``, read as an inline directive is.
+    The declarable fields (``group``, ``zone``, ``cores``, ``memory``, ``timeout``) set the task's
+    field with either separator, over its option. With ``=``, a key one edit from a task column is
+    refused as a likely typo and a column task input does not set is refused; with ``:`` both are
+    tags. A refused item exits with status 2 before any input is read.
 
 .. include:: /_include/tls_cli_options.rst

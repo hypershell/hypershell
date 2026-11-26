@@ -1,0 +1,148 @@
+# REVIEW — Task input sets every declarable field, with `KEY=VALUE` or `KEY:VALUE`
+
+> Adversarial QA by `hs-review`. The correctness pass graded the branch diff (spec/ excluded) against
+> [`GOAL.md`](GOAL.md) and the AGENTS.md invariants only, without `PLAN.md`/`TECH.md`. Every finding
+> cites an executed command.
+
+## Review cycle 1 — changes-requested (2026-11-26)
+
+- **Reviewed commit:** ca288b1e · **Base:** develop · **Mode:** fresh blind pass, xhigh
+- **Contract drift:** GOAL changed once after shaping (dac3d1fb), recording the maintainer's
+  plan-gate rulings; graded as locked.
+- **Verdict:** changes-requested (1 CONFIRMED HIGH under §12, 3 CONFIRMED LOW; all documentation)
+
+### Verification run
+
+- 22 input, update, group, zone, model and submit files, serially with `HS_TEST_POSTGRES` → 1,376
+  passed, 1 skipped (by design: PostgreSQL stores only integer groups).
+- 7 cluster and zone dispatch, display, workload and autoscale files, plus group order and resubmit
+  → 187 passed.
+- `sphinx-build -W --keep-going -b html` → exit 0; a fresh `-b man` matches `share/man/man1` bar `.TH`.
+- About 13 CLI probe scripts in throwaway sites (submit, cluster, server, run, task submit, the
+  queue path against a live `--no-db` server), one on PostgreSQL; develop's `src` exported beside the
+  branch for side-by-side comparison of the directive reader and `hs update`'s `read_changes`.
+
+### Requirement → evidence matrix
+
+| R-ID | Verified how | Status |
+|------|--------------|--------|
+| R1 | inline `zone:`/`zone=`, `-t`, JSON, `hs run`; zone table on SQLite and PostgreSQL; `none`/`default` read as `--zone` reads them; JSON non-string zone exit 5 | ✅ |
+| R2 | directive > tag-only line > `-t` > option, for submit, JSON, `hs run` and `hs cluster` | ✅ |
+| R3 | both separators; each field by its option's parser and range (`cores=4.0` → 4 per ruling) | ✅ |
+| R4 | `grop=2`, `GROUP=1`, `Cores=2`, `port=80` refused; `grop:2` a tag; `-t` exit 2 | ✅ |
+| R5 | `exit_status=`, `tag=`, `id=` refused; with `:` they are tags | ✅ |
+| R6 | file exit 5 naming the line; stdin whole input exit 5; streams refuse one line; `-t` exit 2 | ✅ |
+| R7 | `--queue`, `--no-db` (cluster, server), no database configured | ✅ |
+| R8 | 39 `hs update` forms identical to develop, bar a long-key message (now correct); `test_update_*` pass | ✅ |
+| R9 | naked tag after another refused on `-t`, inline and a queue stream | ✅ |
+| R10 | submit, run, cluster, server pages and markers; `-W` build | ❌ partly (F1, F2) |
+
+Unmapped changes: a tag-rule refusal on a stream now refuses one line rather than ending the input
+(documented, `test_group_stream` updated); `hs task submit` on the shared reader (fits the GOAL's
+outcome; its docs are F1); the unserved-zone warning (the plan-gate clarification); `check_tag`'s
+key-size message now correct for a non-text value. None harmful.
+
+### Findings
+
+#### [HIGH/CONFIRMED, §12] F1 — `hs task submit` changed, its page did not
+- **Where:** `src/hypershell/task.py:82,117-121`; `docs/_include/task_submit_help.rst`,
+  `docs/cli/task_submit.rst`.
+- **Failure scenario:** `hs task submit -t zone=tz cores=3 -- echo ts1` stores zone `tz`, cores 3, no
+  tags; `--help` says so, but the page documents `-t` as tags only and has no 2.9.0 marker for it.
+- **Evidence:** the command above and `hs list`; `git diff develop...HEAD` over the three task-submit
+  docs files is empty; the built page has no `KEY=VALUE`.
+- **Requirement:** R10 / AGENTS.md §12. The page is `:orphan:` and the GOAL's list does not name it.
+
+#### [LOW/CONFIRMED] F2 — `hs cluster` help contradicts the behaviour
+- **Where:** `docs/_include/cluster_help.rst:51-57,163-165`, `docs/_include/cluster_desc.rst:10`.
+- **Failure scenario:** the help says tasks read from FILE are placed in the `--zone` zone and every
+  `--from-json` key becomes a tag; an input zone wins over `--zone` and the five field keys are fields.
+- **Evidence:** `hs cluster -N1 --zone gpu z.in` with `zone:other` inline stores the task in `other`
+  and warns it is unserved.
+- **Requirement:** R10.
+
+#### [LOW/CONFIRMED] F3 — A new example does not run as written
+- **Where:** `docs/_include/submit_desc.rst:30` (`echo '…' | hs submit`); the same pattern pre-exists
+  in `docs/_include/task_groups_alt.rst:10-11`.
+- **Failure scenario:** with no argument `hs submit` prints its usage and exits 1; `hs submit -`
+  stores the task.
+- **Evidence:** both commands in a throwaway site; develop behaves the same.
+
+#### [LOW/CONFIRMED] F4 — A removed behaviour is not in the change marker
+- **Where:** `docs/_include/submit_desc.rst`'s `versionchanged:: 2.9.0`.
+- **Failure scenario:** a 2.8 user's `# HYPERSHELL: cores:none` cleared `-c` for that task; it now
+  exits 5 (R3 requires this, and the prose states it, but the marker does not).
+- **Evidence:** `Task.new(args='echo # HYPERSHELL: cores:none', cores=8)` on develop's export →
+  `cores: null`; on the branch → `TaskResourceError`.
+
+Notes (not findings): `.agents/factory/invariants.md:383` still says queue mode silently ignores
+`-t`; `-t zone` is now refused there.
+
+### Human-gate triggers
+
+- None. Every finding is in documentation; no CONFIRMED finding in `data/model.py` or another
+  high-blast-radius file, nor a security or DB invariant.
+
+## Review cycle 2 — changes-requested (2026-11-26)
+
+- **Reviewed commit:** 25627e9a · **Mode:** scoped — verify the cycle-1 remediation and look for
+  regressions it introduced (blind; GOAL, the cycle-1 findings and the diff only).
+- **F1 fixed:** every new `hs task submit` sentence driven (22 invocations, plus 11 against develop
+  for the marker's "was" claims): both separators, `-t` over `--zone`, inline over `-t`, the typo and
+  column refusals, `none` and bare fields refused, nothing written on a refused `-t`.
+- **F2 fixed:** an input zone wins over `--zone` with one warning per unserved zone (file and stdin);
+  record keys set fields over the options; non-string zone and `--no-db` refused.
+- **F3 fixed:** the literal examples with `hs submit -` store what they say; no bare pipe into
+  `hs submit` remains in tracked docs.
+- **F4 fixed:** develop cleared the option on `cores:none`/`memory:none`/`timeout:none` and stored a
+  bare field as `''`; the branch refuses each (exit 5 input, 2 for `-t`).
+- **Docs:** `-W` html and man builds clean; committed man pages match a fresh build bar `.TH`.
+- **Tests:** the 10 docs-reading files, serially → all passed.
+
+### Findings
+
+#### [LOW/CONFIRMED] N1 — The sibling markers miss the F4 change
+- **Where:** `docs/cli/cluster.rst:126-131`, `docs/cli/task_run.rst:33-36`, `docs/cli/server.rst:76-80`.
+- **Failure scenario:** `hs cluster c.in -c 4` with `# HYPERSHELL: cores:none` ran with cores cleared
+  on develop and exits 5 on the branch; `hs run -t cores:none` was written on develop and exits 2;
+  the markers do not say so. Not introduced by the remediation.
+- **Evidence:** both commands on develop's export and the branch; `hs server` confirmed by the
+  foreman (`TaskResourceError … given 'none'`, nothing stored).
+
+### Human-gate triggers
+
+- None.
+
+## Review cycle 3 — changes-requested (2026-11-26)
+
+- **Reviewed commit:** 2b633541 · **Mode:** scoped — verify N1 and look for regressions (blind).
+- **N1 fixed:** the `hs cluster`, `hs server` and `hs run` markers say the `none` forms and a field
+  with no value are refused; refused on the branch for every field and separator (exit 5 input, 2
+  for `-t`, one line on a stream); develop cleared the option on each `:none` form.
+- **Docs:** `-W` clean. **Tests:** `test_bounded_docs` 26 passed; `test_input_fields` 124 passed,
+  14 skipped.
+
+### Findings
+
+#### [LOW/CONFIRMED] F1 — "a field with no value … was stored as empty" holds for `cores` only
+- **Where:** `docs/cli/cluster.rst:133`, `docs/cli/server.rst:81-82`, `docs/cli/task_run.rst:37-38`.
+- **Failure scenario:** on develop a bare `memory`, `timeout` or `group` was already refused (exit 5);
+  only a bare `cores` was stored as `""` (and a bare `zone` as an empty tag). The marker tells an
+  upgrading reader all three were accepted.
+- **Evidence:** the bare forms on develop's export and the branch, through `hs cluster`, `hs server`
+  and `hs run`.
+
+Dropped: `--from-json` records with `""`/`null` field values behave the same on develop and the
+branch (pre-existing, outside R3).
+
+### Human-gate triggers
+
+- None. The review bound (3 cycles) is reached; escalated to the maintainer.
+
+## Maintainer override — publish (2026-11-26)
+
+The 3-cycle bound was reached on a docs wording finding (cycle 3 F1). The foreman narrowed the
+sentence in 08c1630a ("a field with no value is refused; a bare ``cores`` was stored as empty", on
+the `hs submit`, `hs cluster`, `hs server` and `hs run` markers), rebuilt the man pages, and ran the
+docs build with `-W` and the docs tests (32 passed). The maintainer chose to publish without a
+fourth review cycle; the post-review docs commit is disclosed in the PR body.

@@ -93,11 +93,16 @@ def test_loader_whole_input_raises() -> None:
 
 
 @mark.unit
-def test_loader_other_tag_errors_still_end_the_stream() -> None:
-    """Only a refused group is skipped: any other malformed tag still ends the stream, as before."""
-    with pytest.raises(RuntimeError) as caught:
-        load(iter(['echo a', 'echo b # HYPERSHELL: bad@key:1', 'echo c']))
-    assert 'must be an integer' not in str(caught.value)
+def test_loader_other_tag_errors_refuse_one_line(caplog: pytest.LogCaptureFixture) -> None:
+    """A malformed tag on a stream refuses its line alone, as a refused group does; the stream reads on."""
+    caplog.set_level(logging.DEBUG, logger='hypershell')
+    try:
+        tasks = load(iter(['echo a', 'echo b # HYPERSHELL: bad@key:1', 'echo c']))
+    except RuntimeError as error:
+        pytest.fail(f'The stream ended on {error}')
+    assert tasks == [('echo a', 0), ('echo c', 0)]
+    messages = refusals(caplog)
+    assert len(messages) == 1 and 'line 2' in messages[0] and 'bad@key' in messages[0], messages
 
 
 # --- hs cluster ----------------------------------------------------------------------------------

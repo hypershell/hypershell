@@ -28,7 +28,7 @@ level margin: \\n[rst2man-indent\\n[rst2man-indent-level]]
 .\" new: \\n[rst2man-indent\\n[rst2man-indent-level]]
 .in \\n[rst2man-indent\\n[rst2man-indent-level]]u
 ..
-.TH "HS" "1" "Nov 25, 2026" "2.9.0a10" "hypershell"
+.TH "HS" "1" "Nov 26, 2026" "2.9.0a10" "hypershell"
 .SH NAME
 hs \- Process shell commands over a distributed, asynchronous queue
 .SH SYNOPSIS
@@ -110,7 +110,8 @@ given. The command\-line tasks are pulled in and either directly published to a 
 (see \fB\-\-no\-db\fP) or committed to a database first before being scheduled later.
 .sp
 Alternatively, use \fB\-\-from\-json\fP to read tasks from a JSON file (\fBFILE[@path]\fP); each task
-object\(aqs keys become named \fB{key}\fP fields in the \fB\-\-template\fP (and task tags). In this mode the
+object\(aqs keys become named \fB{key}\fP fields in the \fB\-\-template\fP (and task tags, but for the
+\fBgroup\fP, \fBzone\fP, \fBcores\fP, \fBmemory\fP and \fBtimeout\fP keys, which set those fields). In this mode the
 template is expanded when tasks are ingested rather than by the clients. A JSON source participates
 in the same re\-submission gating as a plain \fIFILE\fP — \fB\-\-restart\fP (idempotent requeue),
 \fB\-\-repeat\fP, and \fB\-\-update \-\-restart\fP all apply — keyed by the file\(aqs absolute path together
@@ -212,6 +213,9 @@ document (e.g. \fBplan.json@chunks\fP); with no \fB@\fP the file\(aqs top level 
 list. Each task object\(aqs keys become named \fB{key}\fP fields in the \fB\-\-template\fP and
 task tags. In this mode the template is expanded when tasks are ingested (submit\-side),
 not by the clients.
+.sp
+A record\(aqs \fBgroup\fP, \fBzone\fP, \fBcores\fP, \fBmemory\fP and \fBtimeout\fP keys set those fields of
+its task, over the options, and are not stored as tags; a \fBzone\fP must be a JSON string.
 .TP
 .B \fB\-H\fP, \fB\-\-bind\fP \fIADDR\fP
 Bind address (default: localhost, or 0.0.0.0 for remote clients).
@@ -317,7 +321,9 @@ Zone of the submitted tasks and of every client the cluster launches; the own zo
 \fB\-\-autoscaling\fP (default: none).
 .sp
 The tasks read from \fIFILE\fP (or \fB\-\-from\-json\fP) are placed in this zone, and each client is
-launched with the same \fB\-\-zone\fP, so it runs them. Zones are recorded in the database, so
+launched with the same \fB\-\-zone\fP, so it runs them. A zone named in the input (\fBzone:NAME\fP
+or \fBzone=NAME\fP inline, or a record\(aqs \fBzone\fP) wins over \fB\-\-zone\fP for its tasks; without
+\fB\-\-autoscaling\fP, one warning names each such zone the clients do not serve. Zones are recorded in the database, so
 \fB\-\-zone\fP cannot be used with \fB\-\-no\-db\fP\&.
 .sp
 With \fB\-\-autoscaling\fP, this is the cluster\(aqs own zone: the one that \fB\-\-init\-size\fP and
@@ -1439,6 +1445,53 @@ Any tags specified with \fB\-t\fP/\fB\-\-tag\fP are applied to all tasks submitt
 Use the special comment syntax, \fB# HYPERSHELL: ...\fP, to include resource limits or tags inline.
 If the comment is alone on the line it will be applied to all tasks that follow.
 .sp
+An inline directive and \fB\-t\fP/\fB\-\-tag\fP take each item as \fBKEY:VALUE\fP or \fBKEY=VALUE\fP, split at
+the first \fB:\fP or \fB=\fP; a bare \fBKEY\fP is a tag with no value. The \fIdeclarable fields\fP, \fBgroup\fP,
+\fBzone\fP, \fBcores\fP, \fBmemory\fP and \fBtimeout\fP, set the task\(aqs own field with either separator,
+read as the option that sets it reads it (\fB\-g\fP, \fB\-\-zone\fP, \fB\-c\fP, \fB\-m\fP, \fB\-W\fP), and are never
+stored as tags; \fBcores:4.0\fP is 4. A field with no value is refused, and so is \fBnone\fP for every
+field but \fBzone\fP\&. Any other key is a tag.
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.EX
+hs submit \-t site=lab \-\- stage.sh
+echo \(aqtrain.sh  # HYPERSHELL: zone=gpu cores=8 timeout:2h model:resnet\(aq | hs submit \-
+.EE
+.UNINDENT
+.UNINDENT
+.sp
+\fBKEY=VALUE\fP says that the key names a field, so the key is checked against the task\(aqs columns: a
+key one edit from a column name, letter case aside (\fBgrop=2\fP, \fBCores=4\fP), is refused as a likely
+typo, naming the column it is near; write \fBgrop:2\fP to store a tag by that name. A column that task
+input does not set (\fBexit_status=0\fP, \fBattempt=2\fP, \fBid=...\fP) is refused; \fBexit_status:0\fP is a
+tag. \fBKEY:VALUE\fP is never refused for being near a column name. Every tag is checked by the tag
+rules wherever it stands, so a tag with no value does not end the check: \fBnaked other:a/b\fP is
+refused as \fBother:a/b\fP is.
+.sp
+A \fBzone\fP places the task in that zone, as \fB\-\-zone\fP does: the name is the text as written
+(\fBzone:007\fP is a zone called 007, \fBzone:none\fP a zone called none, \fBzone:default\fP the default
+zone), and the zone is recorded in the database. A \fB\-\-from\-json\fP record\(aqs \fBzone\fP key does the
+same when it is a JSON string; any other JSON value is refused, as a \fBgroup\fP that is not a JSON
+integer is. Zones require the database, so with \fB\-\-queue\fP a zone in the input is refused, as
+\fB\-\-zone\fP is.
+.sp
+When more than one source gives a field, the most specific wins: the line\(aqs own directive (or the
+record\(aqs key), then a tag\-only line before it, then \fB\-t\fP, then the field\(aqs option.
+.sp
+Each of these refusals takes the form a refused group takes (below): input read in full is refused
+whole, with nothing submitted, exit status 5 and an error naming the value and its line or record;
+on a stream only that line is refused, with an error naming it, and a refused tag\-only line sets
+nothing; \fB\-t\fP is refused before any input is read, with exit status 2.
+.sp
+Changed in version 2.9.0: A directive and \fB\-t\fP take \fBKEY=VALUE\fP as well as \fBKEY:VALUE\fP, with a likely typo of a field
+refused. \fBzone\fP from a directive, \fB\-t\fP or a \fB\-\-from\-json\fP record sets the task\(aqs zone; it
+was stored as a tag. A tag after one with no value is checked. On a stream, a directive the tag
+rules refuse refuses its line alone; it ended the input. \fBcores:none\fP, \fBmemory:none\fP and
+\fBtimeout:none\fP are refused; they cleared the option\(aqs value for that task. A field with no
+value is refused; a bare \fBcores\fP was stored as empty.
+
+.sp
 A line whose first non\-blank character is \fB#\fP is a comment. A \fB#\fP anywhere else is part of the
 command and is submitted and run as written, whether in quotes, in a URL fragment or in \fB$#\fP; a
 trailing \fB# note\fP stays in the command and the shell ignores it. The \fB# HYPERSHELL:\fP marker is
@@ -1552,6 +1605,9 @@ be the list, and a \fBFILE\fP of \fB\-\fP reads from \fB<stdin>\fP\&. Each task 
 become named \fB{key}\fP template fields and task tags; an optional \fBargs\fP key is the
 base command (reachable as \fB{}\fP). Every \fB{key}\fP is validated against all task
 objects before anything is submitted.
+.sp
+A record\(aqs \fBgroup\fP, \fBzone\fP, \fBcores\fP, \fBmemory\fP and \fBtimeout\fP keys set those fields of
+its task, over \fB\-t\fP and the options; a \fBzone\fP must be a JSON string.
 .TP
 .B \fB\-\-repeat\fP
 Re\-submit a known file\(aqs tasks again as a brand\-new source.
@@ -1673,6 +1729,9 @@ Only a client launched with the same \fB\-\-zone\fP runs these tasks; a client g
 \fB\-\-zone\fP runs only tasks without one. Zone names are arbitrary text (\fBdefault\fP names the
 default zone). Zones are recorded in the database, so \fB\-\-zone\fP cannot be used with
 \fB\-\-queue\fP\&. Zone is placement only: task groups still run in order across all zones.
+.sp
+A zone named in the input (\fBzone:NAME\fP or \fBzone=NAME\fP inline or with \fB\-t\fP, or a
+\fB\-\-from\-json\fP record\(aqs \fBzone\fP) wins over \fB\-\-zone\fP for its tasks.
 .TP
 .B \fB\-\-initdb\fP
 Auto\-initialize database.
@@ -1690,6 +1749,12 @@ Tags allow for user\-defined tracking of information related to individual tasks
 groups of tasks. They are defined with both a \fIkey\fP and \fIvalue\fP (e.g., \fB\-\-tag file:a\fP).
 The default \fIvalue\fP for tags is blank. When searching with tags, not specifying a \fIvalue\fP
 will return any task with that \fIkey\fP defined regardless of \fIvalue\fP (including blank).
+.sp
+Each item is \fBKEY:VALUE\fP, \fBKEY=VALUE\fP or a bare \fBKEY\fP, read as an inline directive is.
+The declarable fields (\fBgroup\fP, \fBzone\fP, \fBcores\fP, \fBmemory\fP, \fBtimeout\fP) set the task\(aqs
+field with either separator, over its option. With \fB=\fP, a key one edit from a task column is
+refused as a likely typo and a column task input does not set is refused; with \fB:\fP both are
+tags. A refused item exits with status 2 before any input is read.
 .UNINDENT
 .INDENT 0.0
 .TP
@@ -1880,6 +1945,10 @@ database is opened, with one line naming the tag\(aqs key (e.g., \fBtask.memory\
 value (exit status 2). A \fBcores\fP tag past its advisory limit runs,
 with one warning.
 .sp
+Tags and fields are given with \fB\-t\fP/\fB\-\-tag\fP or inline (\fB# HYPERSHELL: ...\fP) as \fBKEY:VALUE\fP
+or \fBKEY=VALUE\fP, read as on \fBhs submit\fP\&. A \fBzone\fP places the task in that zone and records the
+zone in the database, as \fBhs submit \-\-zone\fP does; an inline field wins over \fB\-t\fP\&.
+.sp
 See \fBinfo\fP and \fBwait\fP commands.
 .SS Arguments
 .INDENT 0.0
@@ -1908,6 +1977,12 @@ Tags allow for user\-defined tracking of information related to individual tasks
 groups of tasks. They are defined with both a \fIkey\fP and \fIvalue\fP (e.g., \fB\-\-tag file:a\fP).
 The default \fIvalue\fP for tags is blank. When searching with tags, not specifying a \fIvalue\fP
 will return any task with that \fIkey\fP defined regardless of \fIvalue\fP (including blank).
+.sp
+Each item is \fBKEY:VALUE\fP, \fBKEY=VALUE\fP or a bare \fBKEY\fP, read as on \fBhs submit\fP: the
+declarable fields (\fBgroup\fP, \fBzone\fP, \fBcores\fP, \fBmemory\fP, \fBtimeout\fP) set the task\(aqs
+field with either separator, and with \fB=\fP a likely typo of a task column, or a column task
+input does not set, is refused. A refused item exits with status 2 before the database is
+opened.
 .UNINDENT
 .SH LIST USAGE
 .INDENT 0.0
@@ -2684,11 +2759,17 @@ Assign a group at submit time with \fB\-g\fP/\fB\-\-group\fP, or per task with a
 .INDENT 3.5
 .sp
 .EX
-echo \(aqstage\-one.sh  # HYPERSHELL: group:0\(aq | hs submit
-echo \(aqstage\-two.sh  # HYPERSHELL: group:1\(aq | hs submit
+echo \(aqstage\-one.sh  # HYPERSHELL: group:0\(aq | hs submit \-
+echo \(aqstage\-two.sh  # HYPERSHELL: group:1\(aq | hs submit \-
 .EE
 .UNINDENT
 .UNINDENT
+.sp
+The directive takes \fBgroup=1\fP as well as \fBgroup:1\fP: either separator sets the group, never a tag
+(see \fBhs submit\fP). With \fB=\fP, a likely typo such as \fBgrop=1\fP is refused, naming \fBgroup\fP\&.
+.sp
+Changed in version 2.9.0: \fBgroup=N\fP sets the group, as \fBgroup:N\fP does; it was refused as a malformed tag.
+
 .sp
 A group is a non\-negative integer, written as \fB\-g\fP/\fB\-\-group\fP takes it (\fB7\fP, \fB+5\fP and
 \fB07\fP are accepted). Any other value, including a group below 0, is refused wherever it arrives: an

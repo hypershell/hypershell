@@ -75,20 +75,19 @@ from hypershell.core.template import Template, DEFAULT_TEMPLATE
 from hypershell.core.types import JSONData, ranged
 from hypershell.core.config_schema import SETTINGS, figure
 from hypershell.core.pretty_print import format_tag
-from hypershell.core.tag import Tag
 from hypershell.core.exceptions import (handle_exception, handle_disconnect,
                                         handle_address_unknown, HostAddressInfo, get_shared_exception_mapping,
                                         ReadingMixin, reading)
 from hypershell.data.model import (Task, Source, Zone, DIRECT_SOURCE_ID, STDIN_SOURCE_ID, DEFAULT_TASK_GROUP,
-                                   TaskGroupInfo, GROUP_MIN, TaskGroupError, TaskInputError, ensure_group, ensure_resources, read_resources,
-                                   RESOURCE_SETTINGS, tag_text,
-                                   serialize_tasks, zone_name)
+                                   TaskGroupInfo, GROUP_MIN, TaskGroupError, TaskInputError, TaskTokenError, ensure_group,
+                                   ensure_resources, read_resources, RESOURCE_SETTINGS, read_input_tokens, ensure_zone,
+                                   serialize_tasks, zone_name, zone_id, DEFAULT_ZONE_ID, DEFAULT_ZONE_NAME)
 from hypershell.data import initdb, checkdb, DATABASE_DIALECT, DATABASE_ENABLED
 
 # Public interface
 __all__ = ['submit_from', 'submit_file', 'load_json_tasks', 'load_json_source', 'json_source_key',
            'validate_json_expansion', 'validate_json_groups', 'validate_json_records', 'TagAdvice',
-           'read_tag_options', 'advise_one_task',
+           'read_tag_options', 'advise_one_task', 'input_zone', 'refuse_zone_without_database',
            'GatedSource', 'InputScan', 'scan_task_lines', 'read_in_full', 'source_fingerprint', 'is_file_input',
            'source_name',
            'source_fingerprint_and_count', 'apply_source_gate', 'decide_source_gate', 'GateDecision',
@@ -115,6 +114,9 @@ class GatedSource:
     the single ``Loader``/``Task.new`` stamping chokepoint instead of the ~10 coupled-core
     constructors (submit_from / SubmitThread / ServerThread / cluster launchers).
 
+    ``serves`` names the one zone the clients of the run serve (``hs cluster``): the Loader warns once
+    for each other zone the input places a task in.
+
     ``__iter__`` delegates to the wrapped iterable, so every existing consumer that only
     iterates ``source`` keeps working unchanged.
     """
@@ -124,13 +126,15 @@ class GatedSource:
                  source_id: str,
                  skip_fingerprints: Optional[set] = None,
                  name: Optional[str] = None,
-                 zone_id: Optional[str] = None) -> None:
+                 zone_id: Optional[str] = None,
+                 serves: Optional[str] = None) -> None:
         """Initialize wrapper around `iterable` with gate context."""
         self.iterable = iterable
         self.source_id = source_id
         self.skip_fingerprints = skip_fingerprints
         self.name = name
         self.zone_id = zone_id
+        self.serves = serves
 
     def __iter__(self: GatedSource) -> Iterator[str | dict]:
         """Delegate iteration to the wrapped source."""
@@ -232,14 +236,29 @@ class TagAdvice:
 
 
 def read_tag_options(taglist: Optional[List[str]]) -> Dict[str, JSONData]:
-    """The tags given by `-t` (`key:value` tokens), each resource tag read by its `task.*` entry.
+    """The fields and tags given by `-t` (`KEY=VALUE`, `KEY:VALUE` or `KEY` tokens), as an inline directive reads them.
 
-    A resource tag's text is read as written, as the option of that resource reads it. Raises
-    :class:`~hypershell.data.model.TaskInputError` naming the entry (``task.memory``), for the
-    command to refuse with exit status 2 before anything is written.
+    A declarable field (group, zone, cores, memory, timeout) is read from its text as written, as
+    its option reads it; every other key is a tag checked by the tag rules
+    (:func:`~hypershell.data.model.read_input_tokens`). Raises
+    :class:`~hypershell.data.model.TaskInputError`, for the command to refuse with exit status 2
+    before anything is written.
     """
-    tags = {} if not taglist else Tag.parse_cmdline_list(taglist)
-    return ensure_resources(tags, {name: tag_text(taglist, name) for name in RESOURCE_SETTINGS if name in tags})
+    return read_input_tokens(taglist or [])
+
+
+def input_zone(tags: Dict[str, JSONData]) -> Optional[str]:
+    """The name of the zone task input `tags` place a task in, read as `--zone` reads it, else None."""
+    return ensure_zone(tags['zone']) if 'zone' in tags else None
+
+
+def refuse_zone_without_database(tags: Dict[str, JSONData]) -> None:
+    """Refuse task input `tags` naming a zone where there is no database, as `--zone` is refused there.
+
+    Raises :class:`~hypershell.data.model.TaskTokenError` for the caller to name where the zone came from.
+    """
+    if 'zone' in tags:
+        raise TaskTokenError(f'zone {tags["zone"]}: zones require the database (none in use)')
 
 
 def advise_one_task(args: str, tags: Optional[Dict[str, JSONData]] = None) -> None:
@@ -251,14 +270,16 @@ def advise_one_task(args: str, tags: Optional[Dict[str, JSONData]] = None) -> No
 
 def task_lines(lines: Iterable[str], *, template: str = DEFAULT_TEMPLATE,
                tags: Optional[Dict[str, JSONData]] = None,
-               name: str = '<input>', advice: Optional[TagAdvice] = None) -> Iterator[Tuple[str, str, Dict[str, JSONData]]]:
+               name: str = '<input>', advice: Optional[TagAdvice] = None,
+               zones: bool = True) -> Iterator[Tuple[str, str, Dict[str, JSONData]]]:
     """Replay the Loader's line rules over `lines`: each task's command, expanded command and tags.
 
     Lines are split as the Loader splits them (:func:`split_task_line`) and numbered from 1 as
     physical lines. A tag-only line updates a running copy of `tags`, and only after its group is
     accepted; a task's tags are the running tags with its inline tags over them. A group that is
     not an integer, or a resource tag out of its range, raises
-    :class:`~hypershell.data.model.TaskInputError` naming the value as written and ``{name}, line {n}``.
+    :class:`~hypershell.data.model.TaskInputError` naming the value as written and ``{name}, line {n}``;
+    so does a zone when `zones` is false (no database).
     A task whose resource tags are past an advisory limit is counted in `advice`.
     """
     engine = Template(template)
@@ -266,6 +287,8 @@ def task_lines(lines: Iterable[str], *, template: str = DEFAULT_TEMPLATE,
     for number, line in enumerate(lines, start=1):
         try:
             command, args, inline_tags = split_task_line(line, engine)
+            if not zones:
+                refuse_zone_without_database(inline_tags)
         except TaskInputError as error:
             raise error.at(f'{name}, line {number}') from error
         if args:
@@ -278,15 +301,17 @@ def task_lines(lines: Iterable[str], *, template: str = DEFAULT_TEMPLATE,
 
 def scan_task_lines(lines: Iterable[str], *, template: str = DEFAULT_TEMPLATE,
                     group: Optional[int] = DEFAULT_TASK_GROUP, tags: Optional[Dict[str, JSONData]] = None,
-                    name: str = '<input>') -> InputScan:
+                    name: str = '<input>', zones: bool = True) -> InputScan:
     """Check every line of input read in full before anything is written, and count its tasks.
 
     The Loader's own line rules (:func:`task_lines`) are replayed over `lines`; a task's group is
-    its tags' group, else `group`. Nothing is read from or written to the database.
+    its tags' group, else `group`. With `zones` false (no database) a line naming a zone is refused.
+    Nothing is read from or written to the database.
     """
     advice = TagAdvice()
     groups = [task_tags.get('group', group)
-              for _, _, task_tags in task_lines(lines, template=template, tags=tags, name=name, advice=advice)]
+              for _, _, task_tags in task_lines(lines, template=template, tags=tags, name=name, advice=advice,
+                                                zones=zones)]
     advice.log()
     return InputScan(count=len(groups), groups=groups)
 
@@ -545,7 +570,8 @@ class Loader(StateMachine):
                  timeout: int = None,
                  template: str = DEFAULT_TEMPLATE,
                  group: int = DEFAULT_TASK_GROUP,
-                 tags: Dict[str, str] = None) -> None:
+                 tags: Dict[str, str] = None,
+                 zones: bool = True) -> None:
         """Initialize source to read tasks and submit to database.
 
         A :class:`GatedSource` is unwrapped here: its ``source_id`` is stamped onto every
@@ -554,15 +580,23 @@ class Loader(StateMachine):
 
         A stream (:func:`is_file_input` is false) refuses a line whose group is not an integer and
         reads on; whole input raises instead, since it is checked whole before it reaches the Loader.
+        With `zones` false (no database) a line naming a zone is refused the same way. The name of
+        each zone the input places a task in is kept by its id (`zone_names`), for the committer to
+        record it.
         """
         if isinstance(source, GatedSource):
             self.source_id = source.source_id
             self.skip_fingerprints = source.skip_fingerprints
             self.zone_id = source.zone_id
+            self.serves = source.serves
         else:
             self.source_id = None
             self.skip_fingerprints = None
             self.zone_id = None
+            self.serves = None
+        self.zones = zones
+        self.zone_names: Dict[str, str] = {}
+        self.unserved: set = set()
         self.template = Template(template)
         self.source = iter(source)
         self.queue = queue
@@ -596,9 +630,10 @@ class Loader(StateMachine):
     def get_task(self: Loader) -> LoaderState:
         """Get the next item from the source and dispatch by its kind.
 
-        Text lines are numbered from 1, every physical line counted. On a stream, a line whose group
-        is not an integer is refused alone: an ERROR names it and the Loader reads on, and a refused
-        tag-only line sets nothing. Any other error still ends the input.
+        Text lines are numbered from 1, every physical line counted. On a stream, a line refused as
+        task input (a group that is not an integer, a field out of its range, a likely typo of a
+        column, a tag the tag rules refuse) is refused alone: an ERROR names it and the Loader reads
+        on, and a refused tag-only line sets nothing. Any other error still ends the input.
         """
         try:
             item = next(self.source)
@@ -619,18 +654,22 @@ class Loader(StateMachine):
         """Build the next task from a command-line string in the text source.
 
         The raw line is split first (:func:`split_task_line`) and the template expands only its
-        command. A tag-only line sets its tags for the lines after it; group, cores, memory and
-        timeout are carried as tags and taken out again by :meth:`Task.new`.
+        command. A tag-only line sets its tags for the lines after it; the declarable fields (group,
+        zone, cores, memory and timeout) are carried as tags and taken out again by :meth:`Task.new`.
         """
         command, args, inline_tags = split_task_line(line, self.template)
+        if not self.zones:
+            refuse_zone_without_database({**self.tags, **inline_tags})
         if args:
-            self.advice.note({**self.tags, **inline_tags}, f'{self.name}, line {self.line}')
+            tags = {**self.tags, **inline_tags}
+            self.advice.note(tags, f'{self.name}, line {self.line}')
             self.task = Task.new(args=args, raw_args=command, parse_inline=False,
                                  source=self.source_id, zone=self.zone_id,
                                  cores=self.cores, memory=self.memory, timeout=self.timeout,
-                                 group=self.group, tag={**self.tags, **inline_tags})
+                                 group=self.group, tag=tags)
             if self.skip_task():
                 return LoaderState.GET
+            self.note_zone(tags)
             log.trace(f'Loaded task ({self.task.args})')
             return LoaderState.PUT
         if not command and inline_tags:
@@ -649,13 +688,34 @@ class Loader(StateMachine):
         base = str(record.get('args', ''))
         args = self.template.expand(base, context=record)
         tags = {**(self.tags or {}), **json_record_tags(record)}
+        if not self.zones:
+            refuse_zone_without_database(tags)
         self.task = Task.new(args=args, raw_args=base, source=self.source_id, zone=self.zone_id,
                              cores=self.cores, memory=self.memory, timeout=self.timeout,
                              group=self.group, tag=tags, strict_tag=False, parse_inline=False)
         if self.skip_task():
             return LoaderState.GET
+        self.note_zone(tags)
         log.trace(f'Loaded task ({self.task.args})')
         return LoaderState.PUT
+
+    def note_zone(self: Loader, tags: Dict[str, JSONData]) -> None:
+        """Keep the name of the zone the loaded task's `tags` place it in, and warn once for a zone not served.
+
+        The warning is given only when the source names the zone its clients serve (``hs cluster``):
+        a task in any other zone waits for a client that the run does not launch.
+        """
+        name = input_zone(tags)
+        if name is not None:
+            self.zone_names.setdefault(zone_id(name), name)
+        if self.serves is None:
+            return
+        task_zone = self.task.zone or DEFAULT_ZONE_ID
+        if task_zone != zone_id(self.serves) and task_zone not in self.unserved:
+            self.unserved.add(task_zone)
+            shown = self.zone_names.get(task_zone, DEFAULT_ZONE_NAME if task_zone == DEFAULT_ZONE_ID else task_zone)
+            log.warning(f'Input places tasks in zone {shown}, which the clients of this run do not serve '
+                        f'(they serve zone {self.serves}); those tasks wait for a client in that zone')
 
     def skip_task(self: Loader) -> bool:
         """True if the loaded task's identity is already present in the prior lineage (de-dup).
@@ -707,11 +767,12 @@ class LoaderThread(Thread):
                  memory: int = None,
                  timeout: int = None,
                  group: int = DEFAULT_TASK_GROUP,
-                 tags: Dict[str, str] = None) -> None:
+                 tags: Dict[str, str] = None,
+                 zones: bool = True) -> None:
         """Initialize machine."""
         super().__init__(name='hypershell-submit-loader')
         self.machine = Loader(source=source, queue=queue, cores=cores, memory=memory, timeout=timeout,
-                              template=template, group=group, tags=tags)
+                              template=template, group=group, tags=tags, zones=zones)
         self.left = threading.Event()
 
     def run_with_exceptions(self: LoaderThread) -> None:
@@ -772,12 +833,19 @@ class DatabaseCommitter(StateMachine):
     def __init__(self: DatabaseCommitter,
                  queue: Queue[Optional[Task]],
                  bundlesize: int = DEFAULT_BUNDLESIZE,
-                 bundlewait: int = DEFAULT_BUNDLEWAIT) -> None:
-        """Initialize with task queue and buffering parameters."""
+                 bundlewait: int = DEFAULT_BUNDLEWAIT,
+                 zone_names: Optional[Dict[str, str]] = None) -> None:
+        """Initialize with task queue and buffering parameters.
+
+        `zone_names` maps the id of each zone named by the input to its name (the Loader's
+        :attr:`Loader.zone_names`, filled as it reads): a zone is recorded before the first task in it.
+        """
         self.queue = queue
         self.tasks = []
         self.bundlesize = bundlesize
         self.bundlewait = bundlewait
+        self.zone_names = {} if zone_names is None else zone_names
+        self.recorded: set = set()
 
     @functools.cached_property
     def actions(self: DatabaseCommitter) -> Dict[DatabaseCommitterState, Callable[[], DatabaseCommitterState]]:
@@ -811,8 +879,16 @@ class DatabaseCommitter(StateMachine):
             return DatabaseCommitterState.FINAL
 
     def commit(self: DatabaseCommitter) -> DatabaseCommitterState:
-        """Commit tasks to database."""
+        """Commit tasks to database, recording first each zone the input names that this committer has not.
+
+        The zone is recorded here, on the thread that writes the tasks, so the input never adds a writer.
+        """
         if self.tasks:
+            for task in self.tasks:
+                if task.zone is not None and task.zone not in self.recorded:
+                    if (name := self.zone_names.get(task.zone)) is not None:
+                        Zone.ensure(name)
+                    self.recorded.add(task.zone)
             Task.add_all(self.tasks)
             log.debug(f'Submitted {len(self.tasks)} tasks')
             self.tasks.clear()
@@ -832,10 +908,12 @@ class DatabaseCommitterThread(Thread):
     def __init__(self: DatabaseCommitterThread,
                  queue: Queue[Optional[Task]],
                  bundlesize: int = DEFAULT_BUNDLESIZE,
-                 bundlewait: int = DEFAULT_BUNDLEWAIT) -> None:
+                 bundlewait: int = DEFAULT_BUNDLEWAIT,
+                 zone_names: Optional[Dict[str, str]] = None) -> None:
         """Initialize machine."""
         super().__init__(name='hypershell-submit-committer')
-        self.machine = DatabaseCommitter(queue=queue, bundlesize=bundlesize, bundlewait=bundlewait)
+        self.machine = DatabaseCommitter(queue=queue, bundlesize=bundlesize, bundlewait=bundlewait,
+                                         zone_names=zone_names)
 
     def run_with_exceptions(self: DatabaseCommitterThread) -> None:
         """Run machine."""
@@ -918,7 +996,8 @@ class SubmitThread(Thread):
         self.loader = LoaderThread(source=source, queue=self.queue,
                                    cores=cores, memory=memory, timeout=timeout,
                                    template=template, group=group, tags=tags)
-        self.committer = DatabaseCommitterThread(queue=self.queue, bundlesize=bundlesize, bundlewait=bundlewait)
+        self.committer = DatabaseCommitterThread(queue=self.queue, bundlesize=bundlesize, bundlewait=bundlewait,
+                                                 zone_names=self.loader.machine.zone_names)
         super().__init__(name='hypershell-submit')
 
     def run_with_exceptions(self: SubmitThread) -> None:
@@ -1175,7 +1254,8 @@ class LiveSubmitThread(Thread):
         self.source = source
         self.local = Queue(maxsize=bundlesize)
         self.loader = LoaderThread(source=source, queue=self.local, cores=cores, memory=memory,
-                                   timeout=timeout, group=group, template=template, tags=tags)
+                                   timeout=timeout, group=group, template=template, tags=tags,
+                                   zones=False)  # No database: a zone in the input is refused
         self.client = QueueClient(config=queue_config)
         self.committer = QueueCommitterThread(local=self.local, client=self.client,
                                               bundlesize=bundlesize, bundlewait=bundlewait)
@@ -1515,9 +1595,10 @@ def validate_json_expansion(records: List[dict], template: str = DEFAULT_TEMPLAT
                                 f'(provide an "args" field or a --template with fields)')
 
 
-def validate_json_records(records: List[dict]) -> None:
-    """Fail-fast pre-flight: the ``group`` of every record in `records` is a JSON integer in range, and its
-    resource tags (``cores``, ``memory``, ``timeout``) are inside their ranges.
+def validate_json_records(records: List[dict], zones: bool = True) -> None:
+    """Fail-fast pre-flight: the ``group`` of every record in `records` is a JSON integer in range, its
+    ``zone`` a JSON string naming a zone, and its resource tags (``cores``, ``memory``, ``timeout``)
+    are inside their ranges. With `zones` false (no database) a record naming a zone is refused.
 
     Raises :class:`~hypershell.data.model.TaskInputError` naming the value and its record (numbered
     from 0, as :func:`validate_json_expansion` does) on the first refusal, before any task is
@@ -1528,6 +1609,10 @@ def validate_json_records(records: List[dict]) -> None:
         try:
             if 'group' in record:
                 ensure_group(record['group'])
+            if 'zone' in record:
+                ensure_zone(record['zone'])
+                if not zones:
+                    refuse_zone_without_database(record)
             advice.note(ensure_resources({name: record[name] for name in RESOURCE_SETTINGS if name in record}),
                         f'record {index}')
         except TaskInputError as error:
@@ -1596,7 +1681,8 @@ APP_HELP: Final[str] = f"""\
   Submit a single command using positional arguments.
   If a filepath is provided, read many tasks from the file instead.
   With --from-json, read tasks from a JSON file and expand named "{{key}}"
-  fields in the template from each task object (keys also become tags).
+  fields in the template from each task object (keys also become tags; group,
+  zone, cores, memory and timeout keys set those fields of the task).
   Submit directly to a live queue with --queue. The key to connect to the server is
   taken from the {AUTH_ENV} environment variable or from server.auth in a
   configuration file, never from the command line.
@@ -1626,7 +1712,7 @@ Options:
   -b, --bundlesize   NUM     Number of lines to buffer (default: {DEFAULT_BUNDLESIZE}).
   -w, --bundlewait   SEC     Wait before flushing tasks; seconds, 30s, 5m or [D-]HH:MM:SS (default: {DEFAULT_BUNDLEWAIT}).
       --initdb               Auto-initialize database.
-  -t, --tag          TAG...  Assign tags as `key:value`.
+  -t, --tag          TAG...  Assign tags and fields as `key:value` or `key=value`.
   -h, --help                 Show this message and exit.\
 """
 
@@ -1843,6 +1929,8 @@ class SubmitApp(ReadingMixin, Application):
             task = Task.new(args=args, cores=self.cores, memory=self.memory, timeout=self.timeout,
                             group=self.group, tag=self.tags, source=self.source_id, zone=self.zone_id)
             advise_one_task(args, self.tags)
+            if (name := input_zone({**self.tags, **Task.split_argline(args)[1]})) is not None:
+                Zone.ensure(name)
             Task.add(task)
             log.info(f'Submitted task ({task.id})')
 
@@ -1857,16 +1945,15 @@ class SubmitApp(ReadingMixin, Application):
             checkdb()
 
     def check_tags(self: SubmitApp) -> None:
-        """Ensure valid tags, before any input is read: a group among them must be an integer (else exit 2).
+        """Read `-t` before any input is read, as an inline directive is read (else exit 2).
 
         Tags are checked in both modes, but only a submission to the database applies them: queue
-        mode leaves them unset, as it always has.
+        mode leaves them unset, as it always has, and refuses a zone, as it refuses `--zone`.
         """
         try:
             tags = read_tag_options(self.taglist)
-            Task.ensure_valid_tag(tags)
-            if 'group' in tags:
-                tags['group'] = ensure_group(tags['group'], text=tag_text(self.taglist, 'group'))
+            if self.queue_mode:
+                refuse_zone_without_database(tags)
         except (ValueError, TypeError, TaskInputError) as error:
             raise ArgumentError(str(error)) from error
         if not self.queue_mode:
@@ -1879,7 +1966,7 @@ class SubmitApp(ReadingMixin, Application):
                 raise ArgumentError('Cannot combine --from-json with -f/--task-file or positional arguments')
             records, self.json_fingerprint = load_json_source(self.from_json)
             validate_json_expansion(records, self.template)
-            validate_json_records(records)
+            validate_json_records(records, zones=not self.queue_mode)
             log.debug(f'Loaded {len(records)} tasks from JSON ({self.from_json})')
             self.source = records
             return
@@ -1936,23 +2023,27 @@ class SubmitApp(ReadingMixin, Application):
 
         A named file, a stream read in full and the arguments are scanned with the template, the
         default group and the tags the submission uses; a ``--from-json`` source was checked as it
-        was loaded. A stream in queue mode is checked line by line as it arrives.
+        was loaded. A stream in queue mode is checked line by line as it arrives. In queue mode there is
+        no database, so a zone named in the input is refused.
         """
         if self.from_json:
             return
         if self.source is None:
             try:
-                Task.split_argline(self.direct_args)
+                _, inline_tags = Task.split_argline(self.direct_args)
+                if self.queue_mode:
+                    refuse_zone_without_database(inline_tags)
             except TaskInputError as error:
                 raise error.at('arguments') from error
             return
+        zones = not self.queue_mode  # With --queue there is no database to hold a zone
         if isinstance(self.source, list):
             self.scan = scan_task_lines(self.source, template=self.template, group=self.group,
-                                        tags=self.tags, name=self.source_name)
+                                        tags=self.tags, name=self.source_name, zones=zones)
         elif self.source is not sys.stdin and self.source.seekable():
             with open(self.source_path, mode='r') as stream:
                 self.scan = scan_task_lines(stream, template=self.template, group=self.group,
-                                            tags=self.tags, name=self.source_path)
+                                            tags=self.tags, name=self.source_path, zones=zones)
 
     def decide_source(self: SubmitApp) -> None:
         """Make the re-submission gate's decision for a named file or ``--from-json`` file, writing nothing.

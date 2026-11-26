@@ -17,6 +17,49 @@ Any tags specified with ``-t``/``--tag`` are applied to all tasks submitted.
 Use the special comment syntax, ``# HYPERSHELL: ...``, to include resource limits or tags inline.
 If the comment is alone on the line it will be applied to all tasks that follow.
 
+An inline directive and ``-t``/``--tag`` take each item as ``KEY:VALUE`` or ``KEY=VALUE``, split at
+the first ``:`` or ``=``; a bare ``KEY`` is a tag with no value. The *declarable fields*, ``group``,
+``zone``, ``cores``, ``memory`` and ``timeout``, set the task's own field with either separator,
+read as the option that sets it reads it (``-g``, ``--zone``, ``-c``, ``-m``, ``-W``), and are never
+stored as tags; ``cores:4.0`` is 4. A field with no value is refused, and so is ``none`` for every
+field but ``zone``. Any other key is a tag.
+
+.. code-block:: shell
+
+    hs submit -t site=lab -- stage.sh
+    echo 'train.sh  # HYPERSHELL: zone=gpu cores=8 timeout:2h model:resnet' | hs submit -
+
+``KEY=VALUE`` says that the key names a field, so the key is checked against the task's columns: a
+key one edit from a column name, letter case aside (``grop=2``, ``Cores=4``), is refused as a likely
+typo, naming the column it is near; write ``grop:2`` to store a tag by that name. A column that task
+input does not set (``exit_status=0``, ``attempt=2``, ``id=...``) is refused; ``exit_status:0`` is a
+tag. ``KEY:VALUE`` is never refused for being near a column name. Every tag is checked by the tag
+rules wherever it stands, so a tag with no value does not end the check: ``naked other:a/b`` is
+refused as ``other:a/b`` is.
+
+A ``zone`` places the task in that zone, as ``--zone`` does: the name is the text as written
+(``zone:007`` is a zone called 007, ``zone:none`` a zone called none, ``zone:default`` the default
+zone), and the zone is recorded in the database. A ``--from-json`` record's ``zone`` key does the
+same when it is a JSON string; any other JSON value is refused, as a ``group`` that is not a JSON
+integer is. Zones require the database, so with ``--queue`` a zone in the input is refused, as
+``--zone`` is.
+
+When more than one source gives a field, the most specific wins: the line's own directive (or the
+record's key), then a tag-only line before it, then ``-t``, then the field's option.
+
+Each of these refusals takes the form a refused group takes (below): input read in full is refused
+whole, with nothing submitted, exit status 5 and an error naming the value and its line or record;
+on a stream only that line is refused, with an error naming it, and a refused tag-only line sets
+nothing; ``-t`` is refused before any input is read, with exit status 2.
+
+.. versionchanged:: 2.9.0
+   A directive and ``-t`` take ``KEY=VALUE`` as well as ``KEY:VALUE``, with a likely typo of a field
+   refused. ``zone`` from a directive, ``-t`` or a ``--from-json`` record sets the task's zone; it
+   was stored as a tag. A tag after one with no value is checked. On a stream, a directive the tag
+   rules refuse refuses its line alone; it ended the input. ``cores:none``, ``memory:none`` and
+   ``timeout:none`` are refused; they cleared the option's value for that task. A field with no
+   value is refused; a bare ``cores`` was stored as empty.
+
 A line whose first non-blank character is ``#`` is a comment. A ``#`` anywhere else is part of the
 command and is submitted and run as written, whether in quotes, in a URL fragment or in ``$#``; a
 trailing ``# note`` stays in the command and the shell ignores it. The ``# HYPERSHELL:`` marker is

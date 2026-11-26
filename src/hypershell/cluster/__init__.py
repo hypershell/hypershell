@@ -28,7 +28,7 @@ from hypershell.core.logging import Logger
 from hypershell.core.template import DEFAULT_TEMPLATE
 from hypershell.core.exceptions import get_shared_exception_mapping, ReadingMixin, reading
 from hypershell.data import initdb, checkdb, DATABASE_DIALECT, DATABASE_ENABLED
-from hypershell.data.model import Task, Source, Zone, STDIN_SOURCE_ID, DEFAULT_TASK_GROUP, zone_name
+from hypershell.data.model import Task, Source, Zone, STDIN_SOURCE_ID, DEFAULT_TASK_GROUP, DEFAULT_ZONE_NAME, zone_name
 from hypershell.client import DEFAULT_NUM_THREADS, DEFAULT_DELAY, DEFAULT_SIGNALWAIT
 from hypershell.server import (DEFAULT_BUNDLESIZE, DEFAULT_ATTEMPTS, DEFAULT_SERVER_POLL, DEFAULT_PORT, DEFAULT_EVICT,
                                is_file_input, configured_eager, configured_retries)
@@ -396,7 +396,7 @@ class ClusterApp(ReadingMixin, Application):
             if given_filepath:
                 raise ArgumentError('Cannot combine --from-json with a positional task file')
             validate_json_expansion(self.json_records, self.template)
-            validate_json_groups(self.json_records)
+            validate_json_groups(self.json_records, zones=self.has_database)
         elif self.filepath is None and not self.restart_mode:
             self.filepath = '-'  # NOTE: assume STDIN
         if self.restart_mode and self.in_memory:
@@ -565,8 +565,8 @@ class ClusterApp(ReadingMixin, Application):
             # A named file is checked whole before anything is dispatched, with a database or
             # without one; the server ingests raw lines, so the scan uses DEFAULT_TEMPLATE.
             with open(os.path.abspath(self.filepath), mode='r') as text_stream:
-                scan = scan_task_lines(text_stream, name=os.path.abspath(self.filepath))
-        if self.in_memory or not DATABASE_ENABLED:
+                scan = scan_task_lines(text_stream, name=os.path.abspath(self.filepath), zones=self.has_database)
+        if not self.has_database:
             return stream  # no persistent database to gate against (invariant §4)
         if stream is sys.stdin or not stream.seekable():
             # Explicit <stdin> and non-seekable named inputs (process substitution, FIFOs,
@@ -575,7 +575,7 @@ class ClusterApp(ReadingMixin, Application):
             self.warn_gating_no_effect('<stdin>')
             source_id = Source.reserved(STDIN_SOURCE_ID).id
             name = '<stdin>' if stream is sys.stdin else os.path.abspath(self.filepath)
-            return GatedSource(stream, source_id, name=name, zone_id=self.zone_id)
+            return GatedSource(stream, source_id, name=name, zone_id=self.zone_id, serves=self.serves)
         path = os.path.abspath(self.filepath)
         fingerprint, count = source_fingerprint(path), scan.count
         log.info(f'Found {count} tasks in {path} (md5={fingerprint})')
@@ -588,7 +588,8 @@ class ClusterApp(ReadingMixin, Application):
 
         self.refuse_below_reached_group(scan.groups, gate.skip, fingerprints)
         source_id, skip = gate.commit()
-        return GatedSource(stream, source_id, skip_fingerprints=skip, name=path, zone_id=self.zone_id)
+        return GatedSource(stream, source_id, skip_fingerprints=skip, name=path, zone_id=self.zone_id,
+                           serves=self.serves)
 
     def prepare_json_source(self: ClusterApp) -> Iterable[dict]:
         """Resolve the Source and apply the re-submission gate to a ``--from-json`` source.
@@ -603,20 +604,21 @@ class ClusterApp(ReadingMixin, Application):
         ``--no-db``/non-persistent runs gate nothing (invariant §4).
         """
         records, fingerprint = self.json_source
-        if self.in_memory or not DATABASE_ENABLED:
+        if not self.has_database:
             return records  # no persistent database to gate against (invariant §4)
         key = json_source_key(self.from_json)
         if key is None:
             self.warn_gating_no_effect('<stdin>')
             source_id = Source.reserved(STDIN_SOURCE_ID).id
-            return GatedSource(records, source_id, name='<stdin>', zone_id=self.zone_id)
+            return GatedSource(records, source_id, name='<stdin>', zone_id=self.zone_id, serves=self.serves)
         log.info(f'Found {len(records)} tasks in {key} (md5={fingerprint})')
         gate = decide_source_gate(key, fingerprint, len(records), repeat=self.repeat_mode,
                                   update=self.update_mode, restart=self.restart_mode)
         self.refuse_below_reached_group([record.get('group', DEFAULT_TASK_GROUP) for record in records],
                                         gate.skip, lambda: json_fingerprints(records))
         source_id, skip = gate.commit()
-        return GatedSource(records, source_id, skip_fingerprints=skip, name=key, zone_id=self.zone_id)
+        return GatedSource(records, source_id, skip_fingerprints=skip, name=key, zone_id=self.zone_id,
+                           serves=self.serves)
 
     @staticmethod
     def refuse_below_reached_group(groups: List[Optional[int]], skip: Optional[set],
@@ -632,6 +634,21 @@ class ClusterApp(ReadingMixin, Application):
     def zone_id(self: ClusterApp) -> Optional[str]:
         """Id of the cluster's zone, recorded in the database (None without --zone)."""
         return None if self.zone is None else Zone.ensure(self.zone)
+
+    @property
+    def serves(self: ClusterApp) -> Optional[str]:
+        """Name of the one zone the cluster's clients serve: a task its input places elsewhere is warned of.
+
+        None with ``--autoscaling``, which launches clients for every zone with tasks.
+        """
+        if self.autoscaling_policy is not None:
+            return None
+        return DEFAULT_ZONE_NAME if self.zone is None else self.zone
+
+    @property
+    def has_database(self: ClusterApp) -> bool:
+        """True unless the run has no database (``--no-db``, or none configured): only then does input name a zone."""
+        return not (self.in_memory or not DATABASE_ENABLED)
 
     def warn_gating_no_effect(self: ClusterApp, kind: str) -> None:
         """Note that re-submission gating flags are inert for exempt sources."""

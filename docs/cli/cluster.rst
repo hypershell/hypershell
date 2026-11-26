@@ -123,4 +123,14 @@ Description
    ``-b 0``, a negative ``-R``/``--ratelimit``, and a ``-F``/``--factor`` of 0, below 0, ``nan`` or
    ``inf`` are refused.
 
+.. versionchanged:: 2.9.0
+   An inline directive takes ``KEY=VALUE`` as well as ``KEY:VALUE``, and ``zone`` from a directive
+   or a ``--from-json`` record sets the task's zone, where it was stored as a tag. With ``--no-db``,
+   or no database configured, a zone in the input is refused: a *FILE* or record exits 5 with
+   nothing run, a stream refuses that line. Without ``--autoscaling``, one warning names each zone
+   of the input the cluster's clients do not serve; its tasks wait for a client in that zone.
+   ``cores:none``, ``memory:none`` and ``timeout:none`` are refused, where they cleared the
+   option's value for that task, and so is a field with no value; a bare ``cores`` was stored as
+   empty.
+
 .. include:: ../_include/cluster_help.rst
