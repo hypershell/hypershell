@@ -323,18 +323,6 @@ research.
 (`quote_arg`, `direct_args`), `data/model.py` (`split_argline`)*
 **Seed:** [`issues/submit-args-quote-directive.md`](issues/submit-args-quote-directive.md) · *status: unshaped*
 
-## The tag check stops at the first tag with an empty value
-
-`Task.ensure_valid_tag` returns at the first naked tag, so no tag after it is checked, key or value.
-`hs submit -t naked other:a/b` stores a value that `hs submit -t other:a/b` refuses, and an inline
-`# HYPERSHELL:` list or `hs update` behaves the same. Every tag should be checked whatever its
-position. Pre-existing; found by `update-typed-columns`' research, which works around it in
-`hs update` only.
-
-*Target: 2.9.x · Horizon: near-term, small · Depends on: — · Refs: `data/model.py`
-(`ensure_valid_tag`), `spec/update-typed-columns/PLAN.md` (D11)*
-**Seed:** [`issues/tag-check-stops-at-empty-value.md`](issues/tag-check-stops-at-empty-value.md) · *status: adopted:input-directive-fields*
-
 ## `hs info` and `hs list` show a timestamp's offset differently on each backend
 
 PostgreSQL prints a stored time with an offset, in the server session's time zone; SQLite prints
