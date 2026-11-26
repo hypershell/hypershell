@@ -129,3 +129,6 @@ Draft R-IDs, to be firmed up at promotion.
   credentials would need leases through the queue too).
 - Found by: `hypershell-nextflow` spike, attached-mode design (2026-11-21), on the maintainer's
   request.
+- Placement (maintainer, 2026-11-26): fold into the 2.10.0 series alongside task signing
+  ([`untrusted-server-task-signing`](untrusted-server-task-signing.md)). Open for shaping: whether a
+  lease's owner is the submitter's signing identity, which would give fencing by key.

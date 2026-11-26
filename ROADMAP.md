@@ -624,8 +624,9 @@ patches unless their Target says otherwise.
 Rotation partitions are write-only archives today — `hs list` cannot see them, and SQLite's `ATTACH`
 cap forecloses ever querying a long campaign's history as one thing. Turso holds SQLite's contracts
 from our side of the code and removes that cap; the official dialect already ships, so the work is
-adoption, validation, and the two capabilities it unlocks. Independently, the `[s3]` extra un-maroons
-captured output from the execution host.
+adoption, validation, and the two capabilities it unlocks. Its S3 captured output (R13–R15, built
+on the branch as P5) moves to `task-output-storage`, which extracts it into `core.io` (maintainer,
+2026-11-26); the GOAL drops those requirements when the cycle is next picked up.
 
 *Target: 2.10.0 · Horizon: mid-term · Depends on: the sequencing after zone, cleared (zone shipped
 as `zone-autoscale`, #99; relay, the other half, in #82); R4's per-provider seam in `data/core.py`
@@ -786,7 +787,8 @@ sentinels are not retried)*
 
 Candidates beyond 2.9.0. Each may be taken up, reshaped or declined; an entry here records the idea
 and its open problems, and promises nothing. Its Target says whether a release is planned for it:
-the submitter lease is planned for 2.10.0, and relays brought up by `hs cluster` are unscheduled.
+the submitter lease, the three output-storage cycles and `hs run`'s `srun` semantics are planned for
+2.10.0, and relays brought up by `hs cluster` are unscheduled.
 
 ## `hs cluster` could bring up its own relays
 
@@ -813,10 +815,63 @@ recorded. A returning owner re-claims its key, with fencing so two live claimant
 Tasks without a lease behave as today. The open problems are whose clock judges expiry (SQLite
 stores naive local times), who sweeps, and reaching tasks already running or held by a relay.
 
-*Target: 2.10.0 · Horizon: after 2.9.0, maybe · Depends on: a conditional `Task.cancel_all`
-(`issues/cancel-all-conditional.md`); cancel reach for running tasks (`issues/evicted-client-fencing-and-cancel-reach.md`) · Refs:
-`hypershell/hypershell-nextflow` attached mode*
+*Target: 2.10.0 · Horizon: in the 2.10.0 series, alongside task signing (maintainer, 2026-11-26);
+open whether a lease's owner is the submitter's signing identity · Depends on: a conditional
+`Task.cancel_all` (`issues/cancel-all-conditional.md`); cancel reach for running tasks
+(`issues/evicted-client-fencing-and-cancel-reach.md`) · Refs: `hypershell/hypershell-nextflow`
+attached mode; `issues/untrusted-server-task-signing.md`*
 **Seed:** [`issues/submitter-lease.md`](issues/submitter-lease.md) · *status: unshaped*
+
+## Captured output has no design for millions of tasks
+
+Under `--capture` every task leaves files in one flat site directory that nothing ever cleans up,
+`hs info` guesses the path from its own site instead of reading the row, and a relay's site clients
+do not capture at all. One `core.io` layer with destinations by URL fixes the shape: the task spools
+locally, a client thread pushes the files to `file://` (sharded) or `s3://` (extracted from turso
+P5), records the locator in `outpath`/`errpath`, and cleans the spool by a `keep`-style policy;
+every command that shows output opens the locator through `core.io`. First of three output cycles.
+
+*Target: 2.10.0 · Horizon: the first 2.10.0 alphas · Depends on: — · Refs: `feature/turso` P5
+(`core/s3.py`); `client-io-hygiene`; `docs-and-runtime-surfacing` R2; prerequisite for
+`run-srun-semantics`*
+**Seed:** [`issues/task-output-storage.md`](issues/task-output-storage.md) · *status: shaped*
+
+## Millions of small outputs should land in a few large archives
+
+A `tar://` destination appends each finished task's output to a rolling archive, by a size, count or
+time policy as log rotation does. The locator records the member's offset and length, so a reader
+range-reads one member and never asks whether the archive changed. Optional per-member zstd or gzip.
+Second of three output cycles.
+
+*Target: 2.10.0 · Horizon: 2.10.0 alphas · Depends on: `task-output-storage` · Refs:
+`core/logging.py` rotation and `claim_file_slot`*
+**Seed:** [`issues/task-output-bundles.md`](issues/task-output-bundles.md) · *status: shaped*
+
+## Small tasks' output could live in the database
+
+A `stored://` destination sends output to the server in acknowledged chunks over a request of its
+own, never inside the result bundles, and the server writes an output table (TOAST on PostgreSQL,
+compressed on TimescaleDB). The cap defaults to about 1 MB per stream; the client always keeps its
+spool too, so a stream the cap cuts stays recoverable there, and the row says where. Third of three
+output cycles.
+
+*Target: 2.10.0 · Horizon: 2.10.0 alphas · Depends on: `task-output-storage` · Refs: a 2.10.0 wire
+addition (a new queue request); later live output for `hs run`*
+**Seed:** [`issues/task-output-stored.md`](issues/task-output-stored.md) · *status: shaped*
+
+## `hs run` should behave like `srun`
+
+`hs run -- false` exits 0, an interrupt leaves the task running, a retry is not followed, the
+command's quoting is lost, and output comes back only by SFTP from a client that used `--capture`,
+so `hs run` under `make -j` does not work. It should exit with the task's status (reserved codes for
+HyperShell's own failures, as GNU `timeout` has), cancel its task on a signal, give up at a
+`--timeout`, take `hs submit`'s options, and read output from the row's locator through `core.io`.
+
+*Target: 2.10.0 · Horizon: 2.10.0 alphas, after `task-output-storage` · Depends on:
+`task-output-storage` · Refs: `run-exit-status-failure-aware` (declined for `hs cluster`/`hs server`;
+`hs run` carries the task's status, maintainer 2026-11-26); `client-io-hygiene`;
+`templating-and-remote-env-contract`; `evicted-client-fencing-and-cancel-reach`*
+**Seed:** [`issues/run-srun-semantics.md`](issues/run-srun-semantics.md) · *status: shaped*
 
 ## Retire the forked queue manager
 

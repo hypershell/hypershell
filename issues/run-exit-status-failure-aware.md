@@ -66,3 +66,7 @@ requiring a follow-up `hs list` to find out whether it worked.
   game here.
 - Deliberately excluded: any change to group-gating or the `--forever` scheduler contract.
 - Found by: GNU Parallel comparison review, 2026-08 (H5, L9).
+- 2026-11-26: the maintainer ruled that `hs run` and `hs wait -r` exit with the task's own status
+  (reserved codes for HyperShell's own failures), because `hs run` stands in for a single command as
+  `srun` does. The decline above still holds for `hs cluster` and `hs server`. See
+  [`run-srun-semantics`](run-srun-semantics.md).
