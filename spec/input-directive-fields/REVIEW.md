@@ -82,3 +82,33 @@ Notes (not findings): `.agents/factory/invariants.md:383` still says queue mode 
 
 - None. Every finding is in documentation; no CONFIRMED finding in `data/model.py` or another
   high-blast-radius file, nor a security or DB invariant.
+
+## Review cycle 2 — changes-requested (2026-11-26)
+
+- **Reviewed commit:** 25627e9a · **Mode:** scoped — verify the cycle-1 remediation and look for
+  regressions it introduced (blind; GOAL, the cycle-1 findings and the diff only).
+- **F1 fixed:** every new `hs task submit` sentence driven (22 invocations, plus 11 against develop
+  for the marker's "was" claims): both separators, `-t` over `--zone`, inline over `-t`, the typo and
+  column refusals, `none` and bare fields refused, nothing written on a refused `-t`.
+- **F2 fixed:** an input zone wins over `--zone` with one warning per unserved zone (file and stdin);
+  record keys set fields over the options; non-string zone and `--no-db` refused.
+- **F3 fixed:** the literal examples with `hs submit -` store what they say; no bare pipe into
+  `hs submit` remains in tracked docs.
+- **F4 fixed:** develop cleared the option on `cores:none`/`memory:none`/`timeout:none` and stored a
+  bare field as `''`; the branch refuses each (exit 5 input, 2 for `-t`).
+- **Docs:** `-W` html and man builds clean; committed man pages match a fresh build bar `.TH`.
+- **Tests:** the 10 docs-reading files, serially → all passed.
+
+### Findings
+
+#### [LOW/CONFIRMED] N1 — The sibling markers miss the F4 change
+- **Where:** `docs/cli/cluster.rst:126-131`, `docs/cli/task_run.rst:33-36`, `docs/cli/server.rst:76-80`.
+- **Failure scenario:** `hs cluster c.in -c 4` with `# HYPERSHELL: cores:none` ran with cores cleared
+  on develop and exits 5 on the branch; `hs run -t cores:none` was written on develop and exits 2;
+  the markers do not say so. Not introduced by the remediation.
+- **Evidence:** both commands on develop's export and the branch; `hs server` confirmed by the
+  foreman (`TaskResourceError … given 'none'`, nothing stored).
+
+### Human-gate triggers
+
+- None.
