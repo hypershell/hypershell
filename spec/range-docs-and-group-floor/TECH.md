@@ -3,7 +3,7 @@ slug: range-docs-and-group-floor
 title: Numeric ranges out of the user docs; task groups start at 0
 kind: fix
 appetite: small
-status: blocked
+status: in_review
 branch: fix/range-docs-and-group-floor
 base: develop
 current_phase: done
@@ -168,3 +168,16 @@ resume ground-truth (`uv run python .agents/factory/bin/next_phase.py spec/range
 4. Run the phase's `verify:` — never advance on a checkbox alone.
 5. Amend this file if reality diverges (note it in the commit body). STOP on a `GOAL.md` contradiction.
 6. Mark the phase `done`, advance, `--touch`; one `[fix]` commit; report.
+
+## Remediation — review cycle 1 (2026-11-25)
+
+- [x] F1 (R5): `submit_desc.rst`, the #118 markers on the `hs cluster` and `hs server` pages and the
+      #125 markers on the `hs list` and `hs update` pages say a group is non-negative ("outside 32
+      bits" becomes "outside its range (a group below 0 among them)"). Reopened P2's scope.
+- [x] F3 (triaged by the foreman): `SubmitApp.default_group` never auto-selects a group below
+      `GROUP_MIN`; `tests/test_group_floor.py::test_auto_selected_group_never_below_zero`, red on 9339df34.
+- [x] F2 (R6): the guard matches bound figures with or without separators and more threshold
+      phrasings; `test_guard_catches` pins the cases the review named; probed against develop's docs
+      (22 files flagged, `task_groups_alt.rst` among them). Reopened P3's scope.
+- Targeted gate: group, submit, update-group and docs tests with PostgreSQL (309 passed, 1 skipped);
+  docs HTML `-W` green; man pages rebuilt. The whole suite runs again in CI on the PR.

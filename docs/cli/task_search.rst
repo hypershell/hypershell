@@ -31,6 +31,7 @@ Description
    :pr:`125`: each numeric option has a range. A value outside it, or
    one that is not a number of the option's kind, stops the command before it starts, with one line
    naming the option, the range and the value (exit status 2). ``-l``/``--limit`` below 1 is
-   refused, and so are a ``-g``/``--group`` or ``--part`` outside 32 bits.
+   refused, and so are a ``-g``/``--group`` or ``--part`` outside its range (a group below 0
+   among them).
 
 .. include:: ../_include/task_search_help.rst

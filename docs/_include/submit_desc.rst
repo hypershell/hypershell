@@ -29,7 +29,7 @@ template is applied, so comment, blank and tag-only lines never become tasks.
    releases cut the command at the first ``#``. Under ``--template``, comment, blank and tag-only
    lines are no longer submitted as tasks.
 
-A task's group must be an integer, as ``-g``/``--group`` takes it, whether it comes from
+A task's group must be a non-negative integer, as ``-g``/``--group`` takes it, whether it comes from
 ``-t group:N``, an inline ``group:`` tag or a ``--from-json`` record. A task file, a JSON source,
 the arguments or standard input holding any other group value is refused whole, with nothing
 submitted, naming the value and its line (or record); ``-t group:x`` is refused before any input is

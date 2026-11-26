@@ -79,7 +79,7 @@ Description
    :pr:`125`: each numeric option has a range. A value outside it, or
    one that is not a number of the option's kind, stops the command before it starts, with one line
    naming the option, the range and the value (exit status 2). ``-l``/``--limit`` below 1 is
-   refused, and so is a ``-g``/``--group`` outside 32 bits.
+   refused, and so is a ``-g``/``--group`` outside its range (a group below 0 among them).
 
 .. versionchanged:: 2.9.0
    :pr:`126`: every column ``hs update`` writes is read by its kind, in both forms and on SQLite and

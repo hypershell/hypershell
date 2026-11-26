@@ -1451,7 +1451,7 @@ releases cut the command at the first \fB#\fP\&. Under \fB\-\-template\fP, comme
 lines are no longer submitted as tasks.
 
 .sp
-A task\(aqs group must be an integer, as \fB\-g\fP/\fB\-\-group\fP takes it, whether it comes from
+A task\(aqs group must be a non\-negative integer, as \fB\-g\fP/\fB\-\-group\fP takes it, whether it comes from
 \fB\-t group:N\fP, an inline \fBgroup:\fP tag or a \fB\-\-from\-json\fP record. A task file, a JSON source,
 the arguments or standard input holding any other group value is refused whole, with nothing
 submitted, naming the value and its line (or record); \fB\-t group:x\fP is refused before any input is

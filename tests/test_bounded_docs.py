@@ -39,8 +39,12 @@ PAGES: Final[List[str]] = ['cluster', 'server', 'client', 'relay', 'submit', 'ta
 RANGE_SENTENCE: Final[re.Pattern] = re.compile(r'\bRange:')
 """A range written out, as the documentation gave each one in 2.9.0a10."""
 
-THRESHOLD: Final[re.Pattern] = re.compile(r'\b(?:[Aa]bove|[Bb]elow|past|under|over) \\?-?\d[\d,.]*[^.]*\bwarning')
-"""An advisory threshold written out (`Above 1,024 it runs with a warning`)."""
+THRESHOLD: Final[re.Pattern] = re.compile(r'\b(?:[Aa]bove|[Bb]elow|[Pp]ast|[Uu]nder|[Oo]ver|[Bb]eyond|[Mm]ore than|[Ll]ess than|'
+                                          r'[Ff]ewer than) \\?-?\d[\d,.]*[^.]*\bwarning')
+"""An advisory threshold written out (`Above 1,024 it runs with a warning`, `More than 1,024 … warning`)."""
+
+FIGURE: Final[re.Pattern] = re.compile(r'(?<![\w.])(?<!\d,)\\?-?(\d{1,3}(?:,\d{3})+|\d{4,})(?!\w|,\d)')
+"""A whole number of four or more digits, with or without thousands separators (`65,535`, `65535`)."""
 
 
 def flat(text: str) -> str:
@@ -55,14 +59,19 @@ def user_docs() -> List[Path]:
 
 
 def bound_figures() -> Set[str]:
-    """Each bound of the table of four or more digits, as a refusal writes it (`2,147,483,647`)."""
-    from hypershell.core.config_schema import SETTINGS, figure
+    """Each whole bound of the table of four or more digits, without separators (`2147483647`)."""
+    from hypershell.core.config_schema import SETTINGS
     figures = set()
     for entry in SETTINGS.values():
         for bound in (entry.low, entry.high):
-            if abs(bound) >= 1000:
-                figures.add(figure(abs(bound)))
+            if abs(bound) >= 1000 and float(bound).is_integer():
+                figures.add(str(int(abs(bound))))
     return figures
+
+
+def found_figures(text: str, figures: Set[str]) -> List[str]:
+    """Each figure in `text` that is a bound of the table, written with or without separators."""
+    return [match.group(1) for match in FIGURE.finditer(text) if match.group(1).replace(',', '') in figures]
 
 
 @mark.unit
@@ -80,14 +89,27 @@ def test_docs_give_no_range_sentence() -> None:
 def test_docs_give_no_bound_figure() -> None:
     """No page writes a bound of the table (a storage width) as a figure."""
     figures = bound_figures()
-    assert '2,147,483,647' in figures and '32,767' in figures
+    assert {'2147483647', '32767', '65535'} <= figures
     found = []
     for path in user_docs():
-        text = path.read_text(encoding='utf-8')
-        for number in re.findall(r'\d{1,3}(?:,\d{3})+', text):
-            if number in figures:
-                found.append(f'{path.relative_to(REPO)}: {number}')
+        found += [f'{path.relative_to(REPO)}: {number}' for number in found_figures(path.read_text(encoding='utf-8'), figures)]
     assert not found, found
+
+
+@mark.unit
+@mark.parametrize('text', [
+    'Range: 0 to 32,767.',
+    'A group is an integer from -2147483648 to 2147483647, written as -g takes it.',
+    'A port from 1 to 65535.',
+    'A port from 1 to 65,535.',
+    'More than 1,024 cores runs with a warning.',
+    'Above 3,600 s it runs with a warning.',
+    r'Range: \\-2,147,483,648 to 2,147,483,647.',
+])
+def test_guard_catches(text: str) -> None:
+    """The guard's patterns catch a range, a threshold or a bound however its figures are written."""
+    flagged = bool(RANGE_SENTENCE.search(text) or THRESHOLD.search(text) or found_figures(text, bound_figures()))
+    assert flagged, text
 
 
 @mark.unit

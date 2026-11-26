@@ -60,8 +60,8 @@ Description
    :pr:`118`: a line whose first non-blank character is ``#`` is a comment, and a ``#`` anywhere
    else is part of the command, run as written; earlier releases cut the command at the first ``#``.
    The ``# HYPERSHELL:`` marker is recognised anywhere on a line, so a command that must contain
-   that text breaks it with shell quoting (``echo '#'' HYPERSHELL:'``). A task's group must be an
-   integer: a *FILE* holding any other group value is refused whole, with nothing run, naming the
+   that text breaks it with shell quoting (``echo '#'' HYPERSHELL:'``). A task's group must be a
+   non-negative integer: a *FILE* holding any other group value is refused whole, with nothing run, naming the
    value and its line, while on a stream only the offending line is refused, with an error naming
    it. With a database kept from an earlier run, a *FILE* that would submit a task below its reached
    group is refused before anything runs; tasks still in flight from an interrupted run do not

@@ -160,3 +160,21 @@ def test_group_filter_refuses_below_zero(temp_site: Path, command: List[str]) ->
     rc, _, stderr = bounded(['hs', *command, '-g', '-1'], cwd=site)
     assert rc == 2, stderr[-4000:]
     assert '-g/--group' in stderr and 'from 0' in stderr, stderr[-4000:]
+
+
+# --- A database from an earlier release ----------------------------------------------------------
+
+@mark.integration
+def test_auto_selected_group_never_below_zero(temp_site: Path) -> None:
+    """A submission naming no group is put in group 0, not in a group below 0 an earlier release stored."""
+    from sqlalchemy import text
+    site = Path(str(temp_site))
+    rc, _, stderr = submit('--', 'echo', 'a', cwd=site)
+    assert rc == 0, stderr[-4000:]
+    engine = sqlite_engine()
+    with engine.begin() as conn:
+        conn.execute(text('UPDATE task SET "group" = -5, schedule_time = CURRENT_TIMESTAMP'))
+    rc, _, stderr = submit('--', 'echo', 'b', cwd=site)
+    assert rc == 0, stderr[-4000:]
+    assert stored_groups(engine) == {'echo a': -5, 'echo b': 0}
+    assert 'Auto-selected task group 0' in stderr, stderr[-4000:]
