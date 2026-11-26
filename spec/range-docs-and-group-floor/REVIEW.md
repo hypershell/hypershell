@@ -67,3 +67,21 @@ Unmapped changes: the 64-bit figures in `config_set_desc.rst` and the 68-year ph
 
 - None. No CONFIRMED finding touches the high-blast-radius core or a security/DB invariant
   (`data/model.py` changed in docstrings only).
+
+## Review cycle 2 — approved (2026-11-25)
+
+- **Reviewed commit:** 713544e5 · **Mode:** scoped — verify the cycle-1 remediation and look for
+  regressions it introduced (blind; GOAL, the cycle-1 findings and the diff only).
+- **F1 fixed:** all five pages carry the floor; a fresh man build matches the committed pages bar
+  `.TH`; no "32 bits" left on a group or option.
+- **F2 fixed:** the guard's own patterns over develop's 107 doc and man files flag 476 range
+  sentences, 105 thresholds and 499 bound figures, `task_groups_alt.rst`'s uncommaed range among them;
+  0 on the current tree; a separate search for every `SETTINGS` low–high pair finds none.
+- **F3 fixed:** in a throwaway site with rows at group -5, submissions naming no group are stored at
+  0 ("lowest task group; -5 is below it"); `-g -5` exits 2; `hs cluster --restart` still runs the -5
+  rows first, then group 0.
+- **New findings:** none. Notes (not findings): the `submit_from` API docstring still says "not an
+  integer" (pre-existing; code docstrings are outside the GOAL's docs scope); the cluster, server and
+  list/update floor wording sits inside the #118/#125 2.9.0 markers.
+- **Tests:** 13 group, bounded and update files, serially with PostgreSQL → 1,194 passed, 1 skipped.
+- **R1–R6:** all ✅. **Human gate:** not triggered.
