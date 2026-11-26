@@ -124,7 +124,6 @@ class TaskSubmitApp(ReadingMixin, Application):
         """Ensure valid tags, before the database is opened: a resource tag is read by its `task.*` entry."""
         try:
             self.tags = read_tag_options(self.taglist)
-            Task.ensure_valid_tag(self.tags)
         except (ValueError, TypeError, TaskInputError) as error:
             raise ArgumentError(str(error)) from error
 
@@ -448,10 +447,14 @@ class TaskRunApp(ReadingMixin, Application):
         """Submit task and wait for completion."""
         try:
             tags = read_tag_options(self.taglist)  # Before the database is opened: exit 2 writes nothing
-        except TaskInputError as error:
+        except (ValueError, TypeError, TaskInputError) as error:
             raise ArgumentError(str(error)) from error
-        ensuredb()
         args = ' '.join(self.argv)
+        try:
+            Task.split_argline(args)  # The inline tags too, before the database is opened (exit 5)
+        except TaskInputError as error:
+            raise error.at('arguments') from error
+        ensuredb()
         task = Task.new(args=args, tag=tags or None)
         advise_one_task(args, tags)
         Task.add(task)

@@ -6,7 +6,7 @@ appetite: big
 status: in_progress
 branch: fix/input-directive-fields
 base: develop
-current_phase: P3
+current_phase: P4
 last_updated: '2026-11-25'
 phases:
 - id: P1
@@ -56,7 +56,7 @@ phases:
 - id: P3
   name: Task input reads the declarable fields with either separator (R1 inline and
     -t, R2, R3, R4, R5, R6)
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
@@ -197,11 +197,11 @@ Resume ground-truth: `uv run python .agents/factory/bin/next_phase.py spec/input
 ## Phase P3 — Task input reads the declarable fields
 **Satisfies:** R1 (inline, `-t`), R2, R3, R4, R5, R6 · **Depends on:** P2
 
-- [ ] `model.py`: `DECLARABLE`, `FIELD_READERS`, `read_input_tokens`, `TaskTokenError`; `split_argline`
+- [x] `model.py`: `DECLARABLE`, `FIELD_READERS`, `read_input_tokens`, `TaskTokenError`; `split_argline`
       on it; `Task.new` pops the five first, then checks the rest; `zone` → `zone_id`; `tag_text` retired.
-- [ ] `submit.py`: `read_tag_options`/`check_tags` on `read_input_tokens` (exit 2).
-- [ ] `task.py`: `TaskRunApp` checks `-t` before `ensuredb` (exit 2).
-- [ ] `spec/input-directive-fields/drive/idf_drive.sh` (new, SPDX header): mode `fields`.
+- [x] `submit.py`: `read_tag_options`/`check_tags` on `read_input_tokens` (exit 2).
+- [x] `task.py`: `TaskRunApp` checks `-t` before `ensuredb` (exit 2).
+- [x] `spec/input-directive-fields/drive/idf_drive.sh` (new, SPDX header): mode `fields`.
 
 ## Phase P4 — Zones from input
 **Satisfies:** R1, R6, R7 · **Depends on:** P3

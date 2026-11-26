@@ -39,7 +39,7 @@ from hypershell.core.types import (JSONData, to_json_type, from_json_type, seria
                                    parse_bytes, parse_time, UnitError)
 from hypershell.core.config_schema import SETTINGS, SettingError, Kind
 from hypershell.core.uuid import uuid
-from hypershell.core.tag import Tag, check_tag
+from hypershell.core.tag import check_tag, split_token, read_token
 from hypershell.data.core import schema, Session
 
 # Public interface
@@ -49,7 +49,8 @@ __all__ = [
     'DEFAULT_TASK_GROUP', 'CANCEL_STATUS', 'TASK_TEMPLATE_ERROR', 'TASK_RESOURCE_ERROR', 'NO_RETRY_STATUSES',
     'DIRECT_SOURCE_ID', 'STDIN_SOURCE_ID', 'TaskGroupInfo', 'ResultOutcome',
     'GROUP_MIN', 'GROUP_MAX', 'TaskInputError', 'TaskGroupError', 'TaskResourceError', 'ensure_group', 'parse_group',
-    'ensure_resources', 'read_resources', 'RESOURCE_SETTINGS', 'tag_text',
+    'ensure_resources', 'read_resources', 'RESOURCE_SETTINGS', 'TaskTokenError', 'DECLARABLE', 'FIELD_READERS',
+    'read_input_tokens', 'ensure_zone',
     'DEFAULT_ZONE_ID', 'DEFAULT_ZONE_NAME', 'ZONE_NAMESPACE', 'zone_id', 'zone_name',
 ]
 
@@ -212,18 +213,89 @@ def read_resources(tags: Dict[str, Any]) -> Dict[str, Any]:
     return tags
 
 
-def tag_text(tokens: List[str], name: str) -> Optional[str]:
-    """The value of tag `name` as written among command-line `tokens` (``key:value``), or None if absent.
+class TaskTokenError(TaskInputError):
+    """A token of task input refused by the token or tag rules: a likely typo of a column, a column not
+    set from task input, a tag the tag rules refuse, or a zone that is not a name.
 
-    The last token for `name` wins, as it does when the tokens are parsed; a bare ``key`` has the
-    empty value.
+    The message is the rule's own, then where the token came from once that is known (:meth:`at`).
     """
-    text = None
+
+    def __init__(self: TaskTokenError, message: str, origin: Optional[str] = None) -> None:
+        """Initialize with the rule's refusal `message` and where the token came from."""
+        self.message = message
+        self.origin = origin
+        super().__init__(message if origin is None else f'{message} ({origin})')
+
+    def at(self: TaskTokenError, origin: str) -> TaskTokenError:
+        """The same refusal, naming where the token came from."""
+        return TaskTokenError(self.message, origin)
+
+
+DECLARABLE: Final[Tuple[str, ...]] = ('group', 'zone', 'cores', 'memory', 'timeout')
+"""The task columns task input sets, with `KEY=VALUE` or `KEY:VALUE`, instead of a tag."""
+
+
+def ensure_zone(value: Any) -> str:
+    """The zone named by `value`, read as `--zone` reads it (text as written), else :class:`TaskTokenError`.
+
+    A name is any printable text (``none`` is a zone called none, ``default`` the default zone); a
+    value that is not text (a JSON number, boolean or null) is not a name.
+    """
+    if not isinstance(value, str):
+        shown = json.dumps(value) if isinstance(value, (bool, int, float, type(None))) else repr(value)
+        raise TaskTokenError(f'zone must be a name (text), not {shown}')
+    try:
+        return zone_name(value)
+    except ValueError as error:
+        raise TaskTokenError(f'zone: {error}') from None
+
+
+def _read_field_resource(setting: str) -> Any:
+    """A reader of a resource field's text by the entry `setting`: refused with :class:`TaskResourceError`."""
+    def read(text: str) -> Any:
+        try:
+            return _read_resource(setting, text)
+        except SettingError as error:
+            raise TaskResourceError(str(error)) from None
+    return read
+
+
+FIELD_READERS: Final[Dict[str, Any]] = {
+    'group': parse_group,
+    'zone': ensure_zone,
+    **{name: _read_field_resource(setting) for name, setting in RESOURCE_SETTINGS.items()},
+}
+"""How task input reads each declarable field from its text as written, by the kind and range of its option.
+
+A field with no value, or `none`, is refused (a zone called none aside), so it never unsets the option.
+A whole-number field written with a zero fraction (``cores:4.0``) is that whole number.
+"""
+
+
+def read_input_tokens(tokens: List[str]) -> Dict[str, Any]:
+    """The fields and tags of task input given as `KEY=VALUE`, `KEY:VALUE` or bare `KEY` `tokens`.
+
+    Each token is split at its first ``=`` or ``:`` and read by the shared token reader
+    (:func:`~hypershell.core.tag.read_token`): a declarable field, by either separator, is read from
+    its text by :data:`FIELD_READERS`; any other key is a tag, checked by the tag rules on its own.
+    With ``=``, a key one edit from a task column is refused as a likely typo and a column that is not
+    declarable as not set from task input; with ``:`` both are tags. Fields ride in the result under
+    their names, to be taken out by :meth:`Task.new`. A refusal is a
+    :class:`TaskInputError` with no origin; the caller names it (:meth:`TaskInputError.at`).
+    """
+    read = {}
     for token in tokens:
-        key, _, value = token.strip().partition(':')
-        if key.strip() == name:
-            text = value.strip()
-    return text
+        key, sep, text = split_token(str(token).strip(), naked=True)
+        key, text = key.strip(), text.strip()
+        try:
+            kind, key, value = read_token(key, sep, text, columns=Task.columns, fields=DECLARABLE,
+                                          colon_fields=DECLARABLE, way_out=f'write {key}:VALUE')
+            if kind == 'tag':
+                check_tag(key, value)
+        except (ValueError, TypeError) as error:
+            raise TaskTokenError(str(error)) from None
+        read[key] = FIELD_READERS[key](text) if kind == 'field' else value
+    return read
 
 
 CANCEL_STATUS: Final[int] = -1
@@ -726,15 +798,18 @@ class Task(Entity):
         links the task to its ingested file's ``Source`` record; both columns are NULL only for
         historical/ungated rows. A ``zone`` of `DEFAULT_ZONE_ID` is stored as NULL.
         """
-        cls.ensure_valid_tag(tag, strict=strict_tag)
         if parse_inline:
             args, inline_tags = cls.split_argline(args)
         else:
             args, inline_tags = str(args).strip(), {}
         tag = {**(tag or {}), **inline_tags}
-        # A group from tags is input and must be an integer; the `group` argument is the caller's
-        # (queue mode passes None, and a retry copies its parent's group as stored).
+        # The declarable fields are taken out of the tags before the rest are checked, so a zone
+        # name is not held to the tag characters. A group from tags is input and must be an
+        # integer; the `group` argument is the caller's (queue mode passes None, and a retry
+        # copies its parent's group as stored).
         other['group'] = ensure_group(tag.pop('group')) if 'group' in tag else group
+        if 'zone' in tag:
+            other['zone'] = zone_id(ensure_zone(tag.pop('zone')))
         other['cores'] = tag.pop('cores', other.get('cores', None))
         # A memory value may arrive as a unit-bearing string ('2GB') from an inline
         # `memory:` tag (parsed by smart_coerce, which leaves units alone) — parse it to
@@ -751,6 +826,7 @@ class Task(Entity):
         except UnitError as error:
             raise RuntimeError(f'Failed to parse task timeout ({error})') from error
         other['timeout'] = tag.pop('timeout', other.get('timeout', None))
+        cls.ensure_valid_tag(tag, strict=strict_tag)
         if fingerprint is None:
             if raw_args is None:
                 raw_command = args
@@ -813,24 +889,15 @@ class Task(Entity):
         A line whose first non-blank character is ``#`` is a comment (``''`` and no tags) unless it
         starts with the ``# HYPERSHELL:`` marker. The marker is found anywhere on a line, in quotes
         too: the command is the text before it and the tags are parsed from the text after it. Any
-        other ``#`` is part of the command, left for the shell.
+        other ``#`` is part of the command, left for the shell. The tags are read by
+        :func:`read_input_tokens`: a declarable field by its kind, any other key as a tag; a refusal is
+        a :class:`TaskInputError` for the caller to name its line.
         """
         args = str(args).strip()
         if args.startswith('#') and not TAG_MARKER.match(args):
             return '', {}
         if match := TAG_MARKER.search(args):
-            tokens = args[match.end():].strip().split()
-            try:
-                tags = Tag.parse_cmdline_list(tokens)
-            except (ValueError, TypeError) as error:
-                raise RuntimeError(f'Failed to parse inline tags ({error}, from: "{args}")') from error
-            ensure_resources(tags, {name: tag_text(tokens, name) for name in RESOURCE_SETTINGS if name in tags})
-            try:
-                cls.ensure_valid_tag(tags)
-            except (ValueError, TypeError) as error:
-                raise RuntimeError(f'Failed to parse inline tags ({error}, from: "{args}")') from error
-            if 'group' in tags:
-                tags['group'] = ensure_group(tags['group'], text=tag_text(tokens, 'group'))
+            tags = read_input_tokens(args[match.end():].strip().split())
             return args[:match.start()].strip(), tags
         return args, {}
 

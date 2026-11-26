@@ -75,13 +75,12 @@ from hypershell.core.template import Template, DEFAULT_TEMPLATE
 from hypershell.core.types import JSONData, ranged
 from hypershell.core.config_schema import SETTINGS, figure
 from hypershell.core.pretty_print import format_tag
-from hypershell.core.tag import Tag
 from hypershell.core.exceptions import (handle_exception, handle_disconnect,
                                         handle_address_unknown, HostAddressInfo, get_shared_exception_mapping,
                                         ReadingMixin, reading)
 from hypershell.data.model import (Task, Source, Zone, DIRECT_SOURCE_ID, STDIN_SOURCE_ID, DEFAULT_TASK_GROUP,
                                    TaskGroupInfo, TaskGroupError, TaskInputError, ensure_group, ensure_resources, read_resources,
-                                   RESOURCE_SETTINGS, tag_text,
+                                   RESOURCE_SETTINGS, read_input_tokens,
                                    serialize_tasks, zone_name)
 from hypershell.data import initdb, checkdb, DATABASE_DIALECT, DATABASE_ENABLED
 
@@ -232,14 +231,15 @@ class TagAdvice:
 
 
 def read_tag_options(taglist: Optional[List[str]]) -> Dict[str, JSONData]:
-    """The tags given by `-t` (`key:value` tokens), each resource tag read by its `task.*` entry.
+    """The fields and tags given by `-t` (`KEY=VALUE`, `KEY:VALUE` or `KEY` tokens), as an inline directive reads them.
 
-    A resource tag's text is read as written, as the option of that resource reads it. Raises
-    :class:`~hypershell.data.model.TaskInputError` naming the entry (``task.memory``), for the
-    command to refuse with exit status 2 before anything is written.
+    A declarable field (group, zone, cores, memory, timeout) is read from its text as written, as
+    its option reads it; every other key is a tag checked by the tag rules
+    (:func:`~hypershell.data.model.read_input_tokens`). Raises
+    :class:`~hypershell.data.model.TaskInputError`, for the command to refuse with exit status 2
+    before anything is written.
     """
-    tags = {} if not taglist else Tag.parse_cmdline_list(taglist)
-    return ensure_resources(tags, {name: tag_text(taglist, name) for name in RESOURCE_SETTINGS if name in tags})
+    return read_input_tokens(taglist or [])
 
 
 def advise_one_task(args: str, tags: Optional[Dict[str, JSONData]] = None) -> None:
@@ -596,9 +596,10 @@ class Loader(StateMachine):
     def get_task(self: Loader) -> LoaderState:
         """Get the next item from the source and dispatch by its kind.
 
-        Text lines are numbered from 1, every physical line counted. On a stream, a line whose group
-        is not an integer is refused alone: an ERROR names it and the Loader reads on, and a refused
-        tag-only line sets nothing. Any other error still ends the input.
+        Text lines are numbered from 1, every physical line counted. On a stream, a line refused as
+        task input (a group that is not an integer, a field out of its range, a likely typo of a
+        column, a tag the tag rules refuse) is refused alone: an ERROR names it and the Loader reads
+        on, and a refused tag-only line sets nothing. Any other error still ends the input.
         """
         try:
             item = next(self.source)
@@ -619,8 +620,8 @@ class Loader(StateMachine):
         """Build the next task from a command-line string in the text source.
 
         The raw line is split first (:func:`split_task_line`) and the template expands only its
-        command. A tag-only line sets its tags for the lines after it; group, cores, memory and
-        timeout are carried as tags and taken out again by :meth:`Task.new`.
+        command. A tag-only line sets its tags for the lines after it; the declarable fields (group,
+        zone, cores, memory and timeout) are carried as tags and taken out again by :meth:`Task.new`.
         """
         command, args, inline_tags = split_task_line(line, self.template)
         if args:
@@ -1854,16 +1855,13 @@ class SubmitApp(ReadingMixin, Application):
             checkdb()
 
     def check_tags(self: SubmitApp) -> None:
-        """Ensure valid tags, before any input is read: a group among them must be an integer (else exit 2).
+        """Read `-t` before any input is read, as an inline directive is read (else exit 2).
 
         Tags are checked in both modes, but only a submission to the database applies them: queue
         mode leaves them unset, as it always has.
         """
         try:
             tags = read_tag_options(self.taglist)
-            Task.ensure_valid_tag(tags)
-            if 'group' in tags:
-                tags['group'] = ensure_group(tags['group'], text=tag_text(self.taglist, 'group'))
         except (ValueError, TypeError, TaskInputError) as error:
             raise ArgumentError(str(error)) from error
         if not self.queue_mode:
