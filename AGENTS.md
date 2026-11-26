@@ -281,7 +281,16 @@ its line or record; `hs update group=VALUE` and `hs update ID group VALUE` take 
 through `COLUMN_KINDS` (`task.py`; the ranged ones by `SETTINGS` entries) before counting or writing,
 so a new `Task` column gets its kind there in the same commit (pinned by
 `set(COLUMN_KINDS) == set(Task.columns)`); `Task.new(group=…)` is the caller's and stays unchecked, and a retry
-(`Task.new_retry`) copies its task's stored group, a legacy text group too. Read-in-full input (a named file to `hs submit`, `hs cluster` or `hs server`,
+(`Task.new_retry`) copies its task's stored group, a legacy text group too. Task input (an inline or tag-only directive, `-t` on `hs submit`/`hs run`, a `--from-json` key)
+sets every **declarable field** (`DECLARABLE`: group, zone, cores, memory, timeout), never a tag of
+that name, with `KEY:VALUE` or `KEY=VALUE` read by the one token reader `hs update` uses
+(`core/tag.py`: `split_token`, `read_token`, `check_tag`; `read_input_tokens` and `FIELD_READERS` in
+`model.py`): `=` refuses a key one edit from a task column and a column that is not declarable
+(`TaskTokenError`), `:` keeps any other key a tag, and `Task.new` pops the five before checking the
+remaining tags. A zone from input is stored as `zone_id(name)` and recorded by `Zone.ensure` on the
+writing thread before its first task (`DatabaseCommitter`; `submit_one` and `hs run` before the add);
+with no database (`--queue`, `--no-db`, none configured) it is refused like a bad group, and
+`hs cluster` without `--autoscaling` warns once per input zone its clients do not serve. Read-in-full input (a named file to `hs submit`, `hs cluster` or `hs server`,
 `--from-json`, arguments, and `hs submit` stdin with a database, read by `read_in_full`) is scanned
 whole by `scan_task_lines` before any write, with or without a database; on a stream the `Loader`
 (`refuse_lines`) logs an ERROR for the offending line and reads on, leaving the run's exit status

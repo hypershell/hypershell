@@ -73,6 +73,12 @@ Description
    naming the option, the range and the value (exit status 2). An option with an advisory limit
    takes a value past it and runs, with one warning.
 
+.. versionchanged:: 2.9.0
+   An inline directive takes ``KEY=VALUE`` as well as ``KEY:VALUE``, and ``zone`` sets the task's
+   zone, recorded in the database, where it was stored as a tag. With ``--no-db``, or no database
+   configured, a zone in the input is refused: a *FILE* exits 5 before the server starts, a stream
+   refuses that line.
+
 .. include:: ../_include/server_help.rst
 
 .. _cli_server_sites:

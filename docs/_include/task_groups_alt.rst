@@ -10,6 +10,12 @@ Assign a group at submit time with ``-g``/``--group``, or per task with an inlin
     echo 'stage-one.sh  # HYPERSHELL: group:0' | hs submit
     echo 'stage-two.sh  # HYPERSHELL: group:1' | hs submit
 
+The directive takes ``group=1`` as well as ``group:1``: either separator sets the group, never a tag
+(see ``hs submit``). With ``=``, a likely typo such as ``grop=1`` is refused, naming ``group``.
+
+.. versionchanged:: 2.9.0
+   ``group=N`` sets the group, as ``group:N`` does; it was refused as a malformed tag.
+
 A group is an integer from -2147483648 to 2147483647, written as ``-g``/``--group`` takes it
 (``7``, ``-3``, ``+5`` and ``07`` are accepted). Any other value is refused wherever it arrives: an
 inline ``group:`` tag, ``-t group:...`` or the ``group`` key of a ``--from-json`` record, which must

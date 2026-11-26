@@ -6,7 +6,7 @@ appetite: big
 status: in_progress
 branch: fix/input-directive-fields
 base: develop
-current_phase: P5
+current_phase: P6
 last_updated: '2026-11-25'
 phases:
 - id: P1
@@ -94,7 +94,7 @@ phases:
     900 sh spec/input-directive-fields/drive/idf_drive.sh $m || exit 1; done
 - id: P5
   name: Docs, help and the constitution (R10)
-  status: pending
+  status: done
   satisfies:
   - R10
   depends_on:
@@ -221,9 +221,12 @@ Resume ground-truth: `uv run python .agents/factory/bin/next_phase.py spec/input
 ## Phase P5 — Docs, help and the constitution
 **Satisfies:** R10 · **Depends on:** P4
 
-- [ ] PLAN §2.4 pages and help strings, with `versionchanged:: 2.9.0` markers (no `:pr:` role).
-- [ ] `AGENTS.md` and `invariants.md`: the declarable fields from task input (PLAN §3), in lockstep.
-- [ ] Man pages rebuilt (version unchanged).
+- [x] PLAN §2.4 pages and help strings, with `versionchanged:: 2.9.0` markers (no `:pr:` role).
+- [x] `AGENTS.md` and `invariants.md`: the declarable fields from task input (PLAN §3), in lockstep.
+- [x] Man pages rebuilt (version unchanged).
+- [x] *Amended:* `tests/test_input_fields.py` gains three docs tests (`test_docs_describe_both_separators`,
+      `test_docs_tag_option_takes_fields`, `test_docs_mark_the_change`), since no test there matched the
+      verify's `-k 'doc'`; they are new guards, not in `red.txt`.
 
 ## Phase P6 — Gate
 **Satisfies:** R1–R10 · **Depends on:** P5

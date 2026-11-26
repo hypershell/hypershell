@@ -106,6 +106,20 @@ subsystems.
   fingerprint, source, zone, cores, memory, timeout), with a fresh id and submit stamps; never
   `Task.new`, so the command is not re-parsed and no tag sets a column. A new column belongs to
   exactly one of `retry_columns`, `result_columns` or the fresh set (a test pins it).
+- **Task input sets the declarable fields** (`DECLARABLE` in `data/model.py`: group, zone, cores,
+  memory, timeout) wherever it arrives (an inline or tag-only directive, `-t` on `hs submit` and
+  `hs run`, a `--from-json` key), never a tag of that name. Directives and `-t` take `KEY:VALUE` and
+  `KEY=VALUE` through the one token reader `hs update` uses (`core/tag.py`: `split_token`,
+  `read_token`, `near_names`, `check_tag`; `read_input_tokens` in `model.py`, each field read from its
+  text by `FIELD_READERS`). `=` refuses a key one edit from a task column and a column that is not
+  declarable (`TaskTokenError`, a `TaskInputError`); `:` keeps any other key a tag; every tag is
+  checked whatever its position. `Task.new` pops the five before checking the rest, so precedence
+  stays directive > tag-only line > `-t` > option. A zone from input is stored as `zone_id(name)` and
+  recorded by `Zone.ensure` before its first task is written, on the writing thread
+  (`DatabaseCommitter`, from the Loader's `zone_names`; `submit_one` and `hs run` before the add).
+  With no database (`--queue`, `--no-db`, none configured) a zone in input is refused like a bad
+  group (`zones=False` on the scans and every `LiveSubmitThread` Loader; `-t` exit 2). `hs cluster`
+  without `--autoscaling` warns once per input zone its clients do not serve (`GatedSource.serves`).
 - Group-gating can stall **by design**: `increment_group` won't advance while the group has
   incomplete tasks or failures still awaiting retry, so a permanently-failing task halts the group
   (and, in non-`forever` mode, the server); don't "fix" it without understanding it. Once the

@@ -27,3 +27,9 @@ Options
     groups of tasks. They are defined with both a `key` and `value` (e.g., ``--tag file:a``).
     The default `value` for tags is blank. When searching with tags, not specifying a `value`
     will return any task with that `key` defined regardless of `value` (including blank).
+
+    Each item is ``KEY:VALUE``, ``KEY=VALUE`` or a bare ``KEY``, read as on ``hs submit``: the
+    declarable fields (``group``, ``zone``, ``cores``, ``memory``, ``timeout``) set the task's
+    field with either separator, and with ``=`` a likely typo of a task column, or a column task
+    input does not set, is refused. A refused item exits with status 2 before the database is
+    opened.

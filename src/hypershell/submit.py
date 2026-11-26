@@ -1681,7 +1681,8 @@ APP_HELP: Final[str] = f"""\
   Submit a single command using positional arguments.
   If a filepath is provided, read many tasks from the file instead.
   With --from-json, read tasks from a JSON file and expand named "{{key}}"
-  fields in the template from each task object (keys also become tags).
+  fields in the template from each task object (keys also become tags; group,
+  zone, cores, memory and timeout keys set those fields of the task).
   Submit directly to a live queue with --queue. The key to connect to the server is
   taken from the {AUTH_ENV} environment variable or from server.auth in a
   configuration file, never from the command line.
@@ -1711,7 +1712,7 @@ Options:
   -b, --bundlesize   NUM     Number of lines to buffer (default: {DEFAULT_BUNDLESIZE}).
   -w, --bundlewait   SEC     Wait before flushing tasks; seconds, 30s, 5m or [D-]HH:MM:SS (default: {DEFAULT_BUNDLEWAIT}).
       --initdb               Auto-initialize database.
-  -t, --tag          TAG...  Assign tags as `key:value`.
+  -t, --tag          TAG...  Assign tags and fields as `key:value` or `key=value`.
   -h, --help                 Show this message and exit.\
 """
 

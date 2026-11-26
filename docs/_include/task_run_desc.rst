@@ -9,4 +9,8 @@ ranges as on ``hs submit``: a value outside its range, or not of its kind, is re
 database is opened, with one line naming the tag's key (e.g., ``task.memory``), the range and the
 value (exit status 2). A ``cores`` tag past 1,024 runs, with one warning.
 
+Tags and fields are given with ``-t``/``--tag`` or inline (``# HYPERSHELL: ...``) as ``KEY:VALUE``
+or ``KEY=VALUE``, read as on ``hs submit``. A ``zone`` places the task in that zone and records the
+zone in the database, as ``hs submit --zone`` does; an inline field wins over ``-t``.
+
 See ``info`` and ``wait`` commands.

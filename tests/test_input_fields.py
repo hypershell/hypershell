@@ -449,3 +449,44 @@ def test_update_colon_group_stays_tag(temp_site: Path) -> None:
     row = task_row(sqlite_engine(), 1)
     assert row['tag'] == {'n': 1, 'group': 5}
     assert row['group'] == 0 and row['exit_status'] == 0
+
+
+# --- The documentation -----------------------------------------------------------------------------
+
+DOCS: Final[Path] = Path(__file__).resolve().parent.parent / 'docs'
+"""The documentation sources."""
+
+
+def flat_text(path: Path) -> str:
+    """The text of `path` with every run of white space made one space (an RST paragraph wraps anywhere)."""
+    return ' '.join(path.read_text(encoding='utf-8').split())
+
+
+@mark.unit
+def test_docs_describe_both_separators() -> None:
+    """The `hs submit` description gives both separators, the five declarable fields, the typo rule and the zone."""
+    text = flat_text(DOCS / '_include' / 'submit_desc.rst')
+    assert '``KEY:VALUE`` or ``KEY=VALUE``' in text
+    assert '``group``, ``zone``, ``cores``, ``memory`` and ``timeout``' in text
+    assert 'likely typo' in text and '``grop:2``' in text
+    assert '``exit_status=0``' in text and '``exit_status:0`` is a tag' in text
+    assert 'Zones require the database' in text
+    assert '.. versionchanged:: 2.9.0 A directive and ``-t`` take ``KEY=VALUE``' in text
+
+
+@mark.unit
+@mark.parametrize('page', ['submit_help', 'task_run_help'])
+def test_docs_tag_option_takes_fields(page: str) -> None:
+    """The `-t` entry on the `hs submit` and `hs run` help pages names both separators and the declarable fields."""
+    text = flat_text(DOCS / '_include' / f'{page}.rst')
+    assert '``KEY:VALUE``, ``KEY=VALUE`` or a bare ``KEY``' in text
+    assert '(``group``, ``zone``, ``cores``, ``memory``, ``timeout``)' in text
+
+
+@mark.unit
+@mark.parametrize('page', ['task_run', 'cluster', 'server'])
+def test_docs_mark_the_change(page: str) -> None:
+    """The `hs run`, `hs cluster` and `hs server` pages mark the change, with no pull request number yet."""
+    text = flat_text(DOCS / 'cli' / f'{page}.rst')
+    assert '.. versionchanged:: 2.9.0 ``-t`` and an inline directive take ``KEY=VALUE``' in text or \
+           '.. versionchanged:: 2.9.0 An inline directive takes ``KEY=VALUE``' in text

@@ -79,7 +79,7 @@ Arguments:
   ARGS...                Command-line arguments.
 
 Options:
-  -t, --tag    TAG...    Assign tags as `key:value`.
+  -t, --tag    TAG...    Assign tags and fields as `key:value` or `key=value`.
       --zone   NAME      Zone of the task; only clients of this zone run it.
   -h, --help             Show this message and exit.\
 """
@@ -422,7 +422,7 @@ Arguments:
 
 Options:
   -n, --interval  SEC     Time to wait between polling; seconds, 30s, 5m or [D-]HH:MM:SS (default: {DEFAULT_INTERVAL}).
-  -t, --tag       TAG...  Assign tags as `key:value`.
+  -t, --tag       TAG...  Assign tags and fields as `key:value` or `key=value`.
   -h, --help              Show this message and exit.\
 """
 
