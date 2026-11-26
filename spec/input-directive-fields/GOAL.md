@@ -99,6 +99,13 @@ and `timeout`.
 - **Q:** Fold in `tag-check-stops-at-empty-value`? — **A:** Yes (maintainer, 2026-11-25) → R9.
 - **Q:** Does an inline `zone:` override `--zone`? — **A:** Shaping default: yes, as an inline
   `group:` overrides `-g` today (R2). Not asked separately; the maintainer may overrule at the gate.
+- **Q:** R3's "the parser of its `hs submit` option" against inline `cores:4.0`, which an earlier ruling
+  reads as 4 while `-c 4.0` is refused? — **A:** Keep 4.0 → 4 for task input, both separators; R3 reads
+  as "the same kind and range as the option" (maintainer, plan gate, 2026-11-25).
+- **Q:** `hs cluster` input naming a zone its clients do not serve? — **A:** Warn once per zone and run
+  the rest (maintainer, plan gate, 2026-11-25).
+- **Q:** `quote_arg` mangles a directive given in one quoted argument? — **A:** Out of scope; filed as a
+  2.9.x seed (maintainer, plan gate, 2026-11-25).
 
 ## Related materials
 

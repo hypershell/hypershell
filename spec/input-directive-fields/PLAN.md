@@ -119,12 +119,12 @@ thread (01 §2).
 
 ## 5. Risks & open questions
 
-- **Q1 (maintainer, at the plan gate):** R3 says a field is read "with the parser of its `hs submit`
+- **Q1 — resolved (maintainer, 2026-11-25: keep 4.0 → 4):** R3 says a field is read "with the parser of its `hs submit`
   option", but inline `cores:4.0` is 4 today by your earlier ruling (pinned by
   `tests/test_bounded_tags.py:111`), while `-c 4.0` is refused. Plan: keep the ruling for task input on
   both separators (`cores=4.0` too), and read the R3 clause as "the same kind and range".
-- **Q2:** `hs cluster` and an input zone its clients do not serve — plan warns once per zone; the
-  alternative is to refuse such input up front.
+- **Q2 — resolved (maintainer, 2026-11-25: warn):** `hs cluster` and an input zone its clients do not
+  serve — one WARNING per zone.
 - `quote_arg` wraps an argument holding whitespace in quotes, so `hs submit "echo e # HYPERSHELL:
   zone:4"` reaches the parser as `zone:4"` (01 risk 5; pre-existing, any directive). Out of scope:
   tests use files or split arguments; a separate seed is filed.
