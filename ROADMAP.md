@@ -312,6 +312,18 @@ strict mode that refuses unknown keys would be a 2.10.0 interface change.
 `src/hypershell/core/config_schema.py` (`KEYS`, `TABLES`); `spec/bounded-inputs/` (#125) for values*
 **Seed:** [`issues/config-unknown-key-warning.md`](issues/config-unknown-key-warning.md) · *status: unshaped*
 
+## A `zone:` directive is stored as a tag, and task input has no `KEY=VALUE` form
+
+An inline `# HYPERSHELL: zone:NAME` (and `-t zone:…`) is kept as a tag named `zone`, where `group:`,
+`cores:`, `memory:` and `timeout:` set the task's columns, so the task runs outside the zone it
+names. Task input should set every declarable field as a column, take `KEY=VALUE` as well as
+`KEY:VALUE` through the reader `hs update` uses, and refuse an `=` key one edit from a field name as
+a likely typo. Found by the maintainer testing 2.9.0a10.
+
+*Target: 2.9.0 · Horizon: now · Depends on: — · Refs: `data/model.py` (`Task.new`,
+`split_argline`), `task.py` (`read_changes`), `submit.py` (`read_tag_options`)*
+**Seed:** [`issues/input-directive-fields.md`](issues/input-directive-fields.md) · *status: unshaped*
+
 ## The tag check stops at the first tag with an empty value
 
 `Task.ensure_valid_tag` returns at the first naked tag, so no tag after it is checked, key or value.
