@@ -58,7 +58,7 @@ will manage tasks entirely within memory.
 
         seq 4 | hsx -t 'echo {}'
 
-    .. details:: Output
+    .. collapse:: Output
 
         .. code-block:: none
 
@@ -83,7 +83,7 @@ see additional detail about what is running, where, and when.
 
         hsx tasks.in -N16 --ssh-group=xyz --capture
 
-    .. details:: Logs
+    .. collapse:: Logs
 
         .. code-block:: none
 
@@ -110,7 +110,7 @@ the launch process over one minute.
 
         hsx tasks.in -N128 -b128 --launcher=srun --max-retries=2 --delay-start=-60 >task.out
 
-    .. details:: Logs
+    .. collapse:: Logs
 
         .. code-block:: none
 
@@ -221,7 +221,7 @@ Add arbitrary tags to one or whole collections of tasks to track additional cont
 
         hs submit tasks.in --tag prod instr:B12 site:us-west-1 batch:12
 
-    .. details:: Logs
+    .. collapse:: Logs
 
         .. code-block:: none
 

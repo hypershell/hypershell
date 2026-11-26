@@ -40,7 +40,7 @@ extensions = [
     'sphinx_sitemap',
     'sphinx_inline_tabs',
     'sphinx_copybutton',
-    'sphinxcontrib.details.directive',
+    'sphinx_toolbox.collapse',
     'sphinx_reredirects',
 ]
 
