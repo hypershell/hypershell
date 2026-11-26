@@ -3,7 +3,7 @@ slug: range-docs-and-group-floor
 title: Numeric ranges out of the user docs; task groups start at 0
 kind: fix
 appetite: small
-status: in_review
+status: done
 branch: fix/range-docs-and-group-floor
 base: develop
 current_phase: done
