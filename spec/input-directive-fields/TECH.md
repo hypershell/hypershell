@@ -6,7 +6,7 @@ appetite: big
 status: in_progress
 branch: fix/input-directive-fields
 base: develop
-current_phase: P2
+current_phase: P3
 last_updated: '2026-11-25'
 phases:
 - id: P1
@@ -36,7 +36,7 @@ phases:
 - id: P2
   name: The shared reader in core/tag.py; every tag checked; hs update on it (R4,
     R5, R8, R9)
-  status: pending
+  status: done
   satisfies:
   - R4
   - R5
@@ -189,10 +189,10 @@ Resume ground-truth: `uv run python .agents/factory/bin/next_phase.py spec/input
 ## Phase P2 — The shared reader
 **Satisfies:** R4, R5, R8, R9 · **Depends on:** P1
 
-- [ ] `core/tag.py`: `TagError`, `split_token`, `edit_distance`, `near_names`, `read_token`, `check_tag`
+- [x] `core/tag.py`: `TagError`, `split_token`, `edit_distance`, `near_names`, `read_token`, `check_tag`
       (PLAN §2.1).
-- [ ] `data/model.py`: `Task.ensure_valid_tag` loops over `check_tag` (every tag, R9).
-- [ ] `task.py`: `read_changes`/`read_assignment` on the reader; `TagError` → `ArgumentError`; names kept.
+- [x] `data/model.py`: `Task.ensure_valid_tag` loops over `check_tag` (every tag, R9).
+- [x] `task.py`: `read_changes`/`read_assignment` on the reader; `TagError` → `ArgumentError`; names kept.
 
 ## Phase P3 — Task input reads the declarable fields
 **Satisfies:** R1 (inline, `-t`), R2, R3, R4, R5, R6 · **Depends on:** P2

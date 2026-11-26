@@ -49,7 +49,7 @@ from hypershell.core.signal import exit_status_for_signal
 from hypershell.core.types import smart_coerce, JSONData, to_json_type, ranged
 from hypershell.core.config_schema import parse_setting, SettingError, advise, shown, read_value, Kind, FORMS
 from hypershell.core.pretty_print import format_tag, format_json, format_bytes, format_source
-from hypershell.core.tag import Tag
+from hypershell.core.tag import Tag, TagError, split_token, near_names, read_token, check_tag as check_tag_rules
 from hypershell.data.core import Session
 from hypershell.data.model import (Task, Source, Zone, JSON, CANCEL_STATUS, zone_name, zone_id, DEFAULT_ZONE_NAME,
                                    DEFAULT_ZONE_ID, TaskGroupError, TaskInputError, parse_group)
@@ -1275,28 +1275,15 @@ class Changes(NamedTuple):
     shown: List[Tuple[str, str]]
 
 
-def edit_distance(a: str, b: str) -> int:
-    """The optimal string alignment distance of `a` and `b`: insertions, deletions, substitutions and adjacent swaps."""
-    before, previous = None, list(range(len(b) + 1))
-    for i in range(1, len(a) + 1):
-        row = [i] + [0] * len(b)
-        for j in range(1, len(b) + 1):
-            row[j] = min(previous[j] + 1, row[j - 1] + 1, previous[j - 1] + (a[i - 1] != b[j - 1]))
-            if i > 1 and j > 1 and a[i - 1] == b[j - 2] and a[i - 2] == b[j - 1]:
-                row[j] = min(row[j], before[j - 2] + 1)
-        before, previous = previous, row
-    return previous[-1]
-
-
 def near_columns(key: str) -> List[str]:
     """The task columns within one edit of `key`, ignoring letter case, in the order `hs info` shows them."""
-    return [name for name in Task.columns if edit_distance(key.lower(), name) <= 1]
+    return near_names(key, Task.columns)
 
 
 def check_tag(key: str, value: Any) -> None:
     """Refuse a tag that is not one by the tag rules (exit 2); each is checked alone, so none is skipped."""
     try:
-        Task.ensure_valid_tag({key: value})
+        check_tag_rules(key, value)
     except (ValueError, TypeError) as error:
         raise ArgumentError(str(error)) from error
 
@@ -1308,7 +1295,8 @@ def read_changes(arguments: List[str], single: bool = False) -> Changes:
     `KEY:VALUE`, split at the first of the two. A key that is a column is read by the column's kind; a
     key one edit from a column (case aside) is refused; any other key, and every `KEY:VALUE`, is a tag.
     The first argument refused raises :class:`ArgumentError` (exit 2), so nothing is counted, asked or
-    written.
+    written. The split, the near-column rule and the tag rules are the shared token reader's
+    (:mod:`hypershell.core.tag`), which task input reads by too.
     """
     changes = Changes(columns={}, tags={}, zones=[], advice=[], shown=[])
     if single:
@@ -1324,14 +1312,13 @@ def read_changes(arguments: List[str], single: bool = False) -> Changes:
         if WhereClause.pattern.match(arg):
             raise ArgumentError(f'Positional argument matches conditional ({arg}), '
                                 f'maybe you intended to use -w/--where?')
-        equals, colon = arg.find('='), arg.find(':')
-        if equals < 0 and colon < 0:
-            raise ArgumentError(f'Argument not recognized ({arg}): missing "=" or ":"')
-        if colon >= 0 and (equals < 0 or colon < equals):
-            key, value = arg.split(':', 1)
+        try:
+            key, sep, value = split_token(arg, naked=False)
+        except TagError as error:
+            raise ArgumentError(str(error)) from None
+        if sep == ':':
             add_tag(changes, key, smart_coerce(value), value)
         else:
-            key, value = arg.split('=', 1)
             read_assignment(changes, key, value, f'write {key}:VALUE', lambda: {key: smart_coerce(value)})
     return changes
 
@@ -1339,13 +1326,14 @@ def read_changes(arguments: List[str], single: bool = False) -> Changes:
 def read_assignment(changes: Changes, key: str, text: str, way_out: str,
                     as_tags: Callable[[], Dict[str, Any]]) -> None:
     """Read `key` given `text` into `changes`: a column by its kind, else a tag (`as_tags`), unless one edit from a column."""
-    if key in Task.columns:
+    try:
+        kind, _, _ = read_token(key, '=', text, columns=Task.columns, fields=Task.columns, colon_fields=(),
+                                way_out=way_out)
+    except TagError as error:
+        raise ArgumentError(str(error)) from None
+    if kind == 'field':
         read_column(changes, key, text)
         return
-    near = near_columns(key)
-    if near:
-        raise ArgumentError(f'{key}: not a task column; did you mean {" or ".join(near)}? '
-                            f'To set a tag by that name, {way_out}')
     for tag, value in as_tags().items():
         add_tag(changes, tag, value, text)
 

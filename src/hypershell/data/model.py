@@ -39,7 +39,7 @@ from hypershell.core.types import (JSONData, to_json_type, from_json_type, seria
                                    parse_bytes, parse_time, UnitError)
 from hypershell.core.config_schema import SETTINGS, SettingError, Kind
 from hypershell.core.uuid import uuid
-from hypershell.core.tag import Tag
+from hypershell.core.tag import Tag, check_tag
 from hypershell.data.core import schema, Session
 
 # Public interface
@@ -839,44 +839,17 @@ class Task(Entity):
         """
         Check tag dictionary and raise if invalid.
 
-        With ``strict=False`` (used for JSON-sourced tags) the character-set and
-        length restrictions on keys and values are relaxed; only the structural
-        type checks (key is a non-empty string, value is a scalar) are enforced.
+        Every tag is checked by the tag rules (:func:`~hypershell.core.tag.check_tag`) whatever its
+        position: a tag with no value ends nothing. With ``strict=False`` (used for JSON-sourced
+        tags) the character-set and length restrictions on keys and values are relaxed; only the
+        structural type checks (key is a non-empty string, value is a scalar) are enforced.
         """
         if tag is None:
             return
         if not isinstance(tag, dict):
             raise TypeError('Expected dict for tag data')
         for key, value in tag.items():
-            if not isinstance(key, str):
-                raise TypeError(f'Tag key, {key} ({type(key)}) is not string')
-            if len(key.strip()) == 0:
-                raise ValueError(f'Tag key was empty, "{key}:{value}"')
-            if not isinstance(value, (str, int, float, bool, type(None))):
-                raise TypeError(f'Invalid type for tag value, {type(value)})')
-            if not strict:
-                continue
-            if len(key.strip()) > 120:
-                raise ValueError(f'Tag key size ({len(value)}) exceeds 120 characters ({key}:{value})')
-            if not re.match(r'^[A-Za-z0-9_.+-]+$', key):
-                raise ValueError(f'Tag key must only contain alphanumerics and basic symbols [+._-]: '
-                                 f'"{key}:{value}"')
-            if isinstance(value, str):
-                if not value.strip():
-                    return  # Empty value is a naked tag (no value).
-                # A memory size or a timeout is checked by its own grammar instead of the tag
-                # character set, so a Slurm time (1:30:00) is taken.
-                if key == 'memory':
-                    parse_bytes(value)
-                    continue
-                if key == 'timeout':
-                    parse_time(value)
-                    continue
-                if len(value) > 120:
-                    raise ValueError(f'Tag value size ({len(value)}) exceeds 120 characters ({key}:{value})')
-                if not re.match(r'^[A-Za-z0-9_.+-]+$', value):
-                    raise ValueError(f'Tag value must only contain alphanumerics and basic symbols [+._-]: '
-                                     f'"{key}:{value}"')
+            check_tag(key, value, strict=strict)
 
     @classmethod
     def current_group(cls: Type[Task]) -> TaskGroupInfo:
