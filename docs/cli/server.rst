@@ -74,12 +74,12 @@ Description
    takes a value past it and runs, with one warning.
 
 .. versionchanged:: 2.9.0
-   An inline directive takes ``KEY=VALUE`` as well as ``KEY:VALUE``, and ``zone`` sets the task's
-   zone, recorded in the database, where it was stored as a tag. With ``--no-db``, or no database
-   configured, a zone in the input is refused: a *FILE* exits 5 before the server starts, a stream
-   refuses that line. ``cores:none``, ``memory:none`` and ``timeout:none`` are refused, where they
-   cleared the option's value for that task, and so is a field with no value; a bare ``cores`` was
-   stored as empty.
+   :pr:`128`: an inline directive takes ``KEY=VALUE`` as well as ``KEY:VALUE``, and ``zone`` sets
+   the task's zone, recorded in the database, where it was stored as a tag. With ``--no-db``, or no
+   database configured, a zone in the input is refused: a *FILE* exits 5 before the server starts, a
+   stream refuses that line. ``cores:none``, ``memory:none`` and ``timeout:none`` are refused, where
+   they cleared the option's value for that task, and so is a field with no value; a bare ``cores``
+   was stored as empty.
 
 .. include:: ../_include/server_help.rst
 

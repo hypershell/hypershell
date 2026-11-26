@@ -31,9 +31,9 @@ Description
    error from the database.
 
 .. versionchanged:: 2.9.0
-   ``-t`` and an inline directive take ``KEY=VALUE`` as well as ``KEY:VALUE``; ``zone`` sets the
-   task's zone, recorded in the database, where it was stored as a tag; with ``=`` a likely typo of
-   a task column is refused (exit status 2 for ``-t``). ``cores:none``, ``memory:none`` and
+   :pr:`128`: ``-t`` and an inline directive take ``KEY=VALUE`` as well as ``KEY:VALUE``; ``zone``
+   sets the task's zone, recorded in the database, where it was stored as a tag; with ``=`` a likely
+   typo of a task column is refused (exit status 2 for ``-t``). ``cores:none``, ``memory:none`` and
    ``timeout:none`` are refused, where they cleared the option's value for that task, and so is a
    field with no value; a bare ``cores`` was stored as empty.
 

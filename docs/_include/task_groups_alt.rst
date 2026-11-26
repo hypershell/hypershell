@@ -14,7 +14,7 @@ The directive takes ``group=1`` as well as ``group:1``: either separator sets th
 (see ``hs submit``). With ``=``, a likely typo such as ``grop=1`` is refused, naming ``group``.
 
 .. versionchanged:: 2.9.0
-   ``group=N`` sets the group, as ``group:N`` does; it was refused as a malformed tag.
+   :pr:`128`: ``group=N`` sets the group, as ``group:N`` does; it was refused as a malformed tag.
 
 A group is a non-negative integer, written as ``-g``/``--group`` takes it (``7``, ``+5`` and
 ``07`` are accepted). Any other value, including a group below 0, is refused wherever it arrives: an
@@ -32,8 +32,8 @@ tag-only line sets nothing. ``-t group:x`` exits with status 2 before any input 
    given on SQLite and ran them in an undocumented order, and ``group:nan`` hung the run.
 
 .. versionchanged:: 2.9.0
-   A group below 0 is refused, as any other value outside the range is. Earlier releases accepted
-   a negative group; a database that already holds one still runs it first.
+   :pr:`127`: a group below 0 is refused, as any other value outside the range is. Earlier releases
+   accepted a negative group; a database that already holds one still runs it first.
 
 The server advances through groups automatically as each one completes. If a group cannot be
 completed because it still holds failed tasks (after any ``--max-retries`` attempts are

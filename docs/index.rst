@@ -61,11 +61,12 @@ Design elements include but are not limited to:
       2.9 process upgrades a 2.8 database in place. On PostgreSQL a task can now ask for more than
       2 GB of memory.
     * **Task files and checked values:** submit tasks from JSON, submit the same file again safely,
-      and pin each task to its own core or GPU. Every numeric option and setting has a range,
-      checked before a command starts, and ``hs update`` reads each value by its column's kind.
+      and pin each task to its own core or GPU. A task file can set each task's group, zone, cores,
+      memory and timeout inline, as ``KEY:VALUE`` or ``KEY=VALUE``. Every numeric option and setting
+      is checked before a command starts, and ``hs update`` reads each value by its column's kind.
     * **Installing 2.9:** it is a pre-release, so use ``pip install --pre hypershell``. Upgrade the
-      server and every client together, and back up the database first: 2.9.0a10 cannot connect to
-      2.9.0a9 or earlier.
+      server and every client together, and back up the database first: 2.9.0a10 and later cannot
+      connect to 2.9.0a9 or earlier.
     * **2.8.1 to 2.8.7:** fixes for cancelled tasks, retries, and stranded task groups, and the run
       key kept off command lines. If you run 2.8, upgrade to 2.8.7.
 

@@ -1484,11 +1484,11 @@ whole, with nothing submitted, exit status 5 and an error naming the value and i
 on a stream only that line is refused, with an error naming it, and a refused tag\-only line sets
 nothing; \fB\-t\fP is refused before any input is read, with exit status 2.
 .sp
-Changed in version 2.9.0: A directive and \fB\-t\fP take \fBKEY=VALUE\fP as well as \fBKEY:VALUE\fP, with a likely typo of a field
-refused. \fBzone\fP from a directive, \fB\-t\fP or a \fB\-\-from\-json\fP record sets the task\(aqs zone; it
-was stored as a tag. A tag after one with no value is checked. On a stream, a directive the tag
-rules refuse refuses its line alone; it ended the input. \fBcores:none\fP, \fBmemory:none\fP and
-\fBtimeout:none\fP are refused; they cleared the option\(aqs value for that task. A field with no
+Changed in version 2.9.0: \X'tty: link https://github.com/hypershell/hypershell/pull/128'\fI\%#128\fP\X'tty: link': a directive and \fB\-t\fP take \fBKEY=VALUE\fP as well as \fBKEY:VALUE\fP, with a likely typo
+of a field refused. \fBzone\fP from a directive, \fB\-t\fP or a \fB\-\-from\-json\fP record sets the task\(aqs
+zone; it was stored as a tag. A tag after one with no value is checked. On a stream, a directive
+the tag rules refuse refuses its line alone; it ended the input. \fBcores:none\fP, \fBmemory:none\fP
+and \fBtimeout:none\fP are refused; they cleared the option\(aqs value for that task. A field with no
 value is refused; a bare \fBcores\fP was stored as empty.
 
 .sp
@@ -1522,7 +1522,8 @@ Changed in version 2.9.0: \X'tty: link https://github.com/hypershell/hypershell/
 with the database, standard input is read in full before anything is submitted.
 
 .sp
-Changed in version 2.9.0: A group below 0 is refused, as a group that is not an integer is; earlier releases accepted it.
+Changed in version 2.9.0: \X'tty: link https://github.com/hypershell/hypershell/pull/127'\fI\%#127\fP\X'tty: link': a group below 0 is refused, as a group that is not an integer is; earlier releases
+accepted it.
 
 .sp
 The resource tags \fBcores\fP, \fBmemory\fP and \fBtimeout\fP take the ranges of the \fB\-c\fP, \fB\-m\fP and
@@ -2768,7 +2769,7 @@ echo \(aqstage\-two.sh  # HYPERSHELL: group:1\(aq | hs submit \-
 The directive takes \fBgroup=1\fP as well as \fBgroup:1\fP: either separator sets the group, never a tag
 (see \fBhs submit\fP). With \fB=\fP, a likely typo such as \fBgrop=1\fP is refused, naming \fBgroup\fP\&.
 .sp
-Changed in version 2.9.0: \fBgroup=N\fP sets the group, as \fBgroup:N\fP does; it was refused as a malformed tag.
+Changed in version 2.9.0: \X'tty: link https://github.com/hypershell/hypershell/pull/128'\fI\%#128\fP\X'tty: link': \fBgroup=N\fP sets the group, as \fBgroup:N\fP does; it was refused as a malformed tag.
 
 .sp
 A group is a non\-negative integer, written as \fB\-g\fP/\fB\-\-group\fP takes it (\fB7\fP, \fB+5\fP and
@@ -2786,8 +2787,8 @@ Changed in version 2.9.0: \X'tty: link https://github.com/hypershell/hypershell/
 given on SQLite and ran them in an undocumented order, and \fBgroup:nan\fP hung the run.
 
 .sp
-Changed in version 2.9.0: A group below 0 is refused, as any other value outside the range is. Earlier releases accepted
-a negative group; a database that already holds one still runs it first.
+Changed in version 2.9.0: \X'tty: link https://github.com/hypershell/hypershell/pull/127'\fI\%#127\fP\X'tty: link': a group below 0 is refused, as any other value outside the range is. Earlier releases
+accepted a negative group; a database that already holds one still runs it first.
 
 .sp
 The server advances through groups automatically as each one completes. If a group cannot be

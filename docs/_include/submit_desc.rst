@@ -53,11 +53,11 @@ on a stream only that line is refused, with an error naming it, and a refused ta
 nothing; ``-t`` is refused before any input is read, with exit status 2.
 
 .. versionchanged:: 2.9.0
-   A directive and ``-t`` take ``KEY=VALUE`` as well as ``KEY:VALUE``, with a likely typo of a field
-   refused. ``zone`` from a directive, ``-t`` or a ``--from-json`` record sets the task's zone; it
-   was stored as a tag. A tag after one with no value is checked. On a stream, a directive the tag
-   rules refuse refuses its line alone; it ended the input. ``cores:none``, ``memory:none`` and
-   ``timeout:none`` are refused; they cleared the option's value for that task. A field with no
+   :pr:`128`: a directive and ``-t`` take ``KEY=VALUE`` as well as ``KEY:VALUE``, with a likely typo
+   of a field refused. ``zone`` from a directive, ``-t`` or a ``--from-json`` record sets the task's
+   zone; it was stored as a tag. A tag after one with no value is checked. On a stream, a directive
+   the tag rules refuse refuses its line alone; it ended the input. ``cores:none``, ``memory:none``
+   and ``timeout:none`` are refused; they cleared the option's value for that task. A field with no
    value is refused; a bare ``cores`` was stored as empty.
 
 A line whose first non-blank character is ``#`` is a comment. A ``#`` anywhere else is part of the
@@ -91,7 +91,8 @@ recently scheduled group is below it, so it is never refused.
    with the database, standard input is read in full before anything is submitted.
 
 .. versionchanged:: 2.9.0
-   A group below 0 is refused, as a group that is not an integer is; earlier releases accepted it.
+   :pr:`127`: a group below 0 is refused, as a group that is not an integer is; earlier releases
+   accepted it.
 
 The resource tags ``cores``, ``memory`` and ``timeout`` take the ranges of the ``-c``, ``-m`` and
 ``-W`` options, and are refused as a group is, wherever they come from (an inline tag, ``-t`` or a
