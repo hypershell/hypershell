@@ -324,6 +324,17 @@ a likely typo. Found by the maintainer testing 2.9.0a10.
 `split_argline`), `task.py` (`read_changes`), `submit.py` (`read_tag_options`)*
 **Seed:** [`issues/input-directive-fields.md`](issues/input-directive-fields.md) · *status: unshaped*
 
+## A directive in a single quoted command argument is refused
+
+`hs submit "echo e # HYPERSHELL: group:4"` exits 5: the arguments are joined with `quote_arg`, which
+wraps the whole command in quotes, and the closing quote is read as part of the last tag. A directive
+given that way should be read as from a task file. Pre-existing; found by `input-directive-fields`'
+research.
+
+*Target: 2.9.x · Horizon: near-term, small · Depends on: `input-directive-fields` · Refs: `submit.py`
+(`quote_arg`, `direct_args`), `data/model.py` (`split_argline`)*
+**Seed:** [`issues/submit-args-quote-directive.md`](issues/submit-args-quote-directive.md) · *status: unshaped*
+
 ## The tag check stops at the first tag with an empty value
 
 `Task.ensure_valid_tag` returns at the first naked tag, so no tag after it is checked, key or value.
