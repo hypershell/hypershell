@@ -329,11 +329,8 @@ def test_tags_advised_once_per_submission(db_site: Tuple[Path, Engine]) -> None:
 
 @mark.unit
 def test_tag_docs_give_ranges() -> None:
-    """The task-input page gives each resource tag's range and advisory limit, and how a tag out of range is refused."""
-    from hypershell.core.config_schema import SETTINGS
+    """The task-input page says the resource tags take their options' ranges, and how a tag out of range is refused."""
     from tests.test_bounded_docs import DOCS, flat
     text = flat((DOCS / '_include' / 'submit_desc.rst').read_text())
-    for tag in ('cores', 'memory', 'timeout'):
-        assert SETTINGS[f'task.{tag}'].text in text, tag
-    assert SETTINGS['task.cores'].advice_text in text
+    assert 'The resource tags ``cores``, ``memory`` and ``timeout`` take the ranges of' in text
     assert '``cores:4.0``' in text and '``timeout:90.5`` is 91 seconds' in text

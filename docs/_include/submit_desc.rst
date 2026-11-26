@@ -56,10 +56,6 @@ The resource tags ``cores``, ``memory`` and ``timeout`` take the ranges of the `
 value and its line (or record); on a stream only that line is refused, with an error; ``-t`` is
 refused before any input is read (exit status 2), here and on ``hs run``.
 
-- ``cores``: Range: 0 (unconstrained) to 32,767. Above 1,024 it runs with a warning.
-- ``memory``: Range: 0 bytes (unconstrained) to 9,223,372,036,854,775,807 bytes.
-- ``timeout``: Range: 0 s to 2,147,483,647 s.
-
 A tag is read as its option reads it, with one difference: ``cores`` written as a decimal with a
 zero fraction (``cores:4.0``) is that whole number, while a non-zero fraction (``cores:4.5``) is
 refused. A ``timeout`` with a fraction of a second is rounded up to whole seconds, as ``-W`` rounds

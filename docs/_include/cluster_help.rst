@@ -33,8 +33,6 @@ Options
 ``-N``, ``--num-threads`` *NUM*
     Number of executor threads per client (default: 1).
 
-    Range: 0 (all cores) to 4,194,304. Above 1,024 it runs with a warning.
-
     Set to 0 to auto-detect based on available CPU cores on each client.
 
     For example, ``-N4`` would create four workers, but ``-N4 --ssh 'cluster-a[00-01].xyz'``
@@ -84,15 +82,11 @@ Options
 ``-p``, ``--port`` *PORT*
     Port number (default: 50001).
 
-    Range: 1 to 65,535.
-
     This is an arbitrary choice and simply must be an available port. The default option chosen
     here is typically available on most platforms and is not expected by any known major software.
 
 ``-b``, ``--bundlesize`` *SIZE*
     Size of task bundle (default: 1).
-
-    Range: 1 to 2,147,483,647.
 
     The default value allows for greater concurrency and responsiveness on small scales. This is
     used by the `submit` thread to accumulate bundles for either database commits and/or publishing
@@ -106,8 +100,6 @@ Options
 
 ``-w``, ``--bundlewait`` *SEC*
     Time to wait before flushing tasks (default: 5).
-
-    Range: 0 s to 2,147,483,647 s.
 
     Specify a number of seconds, units ``d``, ``h``, ``m`` and ``s`` in that order, whole or
     fractional (e.g., ``30s``, ``5m``, ``1h30m``, ``1.5h``), or a Slurm time ``MM:SS``,
@@ -126,8 +118,6 @@ Options
 ``-Q``, ``--poll`` *SEC*
     Polling interval between database queries if no tasks are available (default: 30).
 
-    Range: 0 s to 2,147,483,647 s.
-
     Specify a number of seconds, units ``d``, ``h``, ``m`` and ``s`` in that order, whole or
     fractional (e.g., ``30s``, ``5m``, ``1h30m``, ``1.5h``), or a Slurm time ``MM:SS``,
     ``HH:MM:SS``, ``D-HH``, ``D-HH:MM`` or ``D-HH:MM:SS`` (e.g., ``1:30``). A fraction of a
@@ -141,8 +131,6 @@ Options
 
 ``-r``, ``--max-retries`` *NUM*
     Auto-retry failed tasks (default: 0).
-
-    Range: 0 to 32,766. Above 99 it runs with a warning.
 
     If a database is in use, then there is an opportunity to automatically retry failed tasks. A
     task is considered to have failed if it has a non-zero exit status. Setting this value greater
@@ -264,8 +252,6 @@ Options
 ``-d``, ``--delay-start`` *SEC*
     Delay time for launching clients (default: 0).
 
-    Range: -2,147,483,647 s to 2,147,483,647 s.
-
     Specify a number of seconds, units ``d``, ``h``, ``m`` and ``s`` in that order, whole or
     fractional (e.g., ``30s``, ``10m``, ``1h30m``, ``1.5h``), or a Slurm time ``MM:SS``,
     ``HH:MM:SS``, ``D-HH``, ``D-HH:MM`` or ``D-HH:MM:SS`` (e.g., ``1:30``). Fractions of a second
@@ -316,8 +302,6 @@ Options
 ``-T``, ``--timeout`` *SEC*
     Timeout in seconds for clients. Automatically shutdown if no tasks received (default: never).
 
-    Range: 0 s to 2,147,483,647 s.
-
     This feature allows for gracefully scaling down a cluster when task throughput subsides.
 
     Specify a number of seconds, units ``d``, ``h``, ``m`` and ``s`` in that order, whole or
@@ -326,8 +310,6 @@ Options
 
 ``-W``, ``--task-timeout`` *SEC*
     Task-level walltime limit (default: none).
-
-    Range: 0 s to 2,147,483,647 s.
 
     Executors will send a progression of SIGINT, SIGTERM, and SIGKILL.
     If the process still persists the executor itself will shutdown.
@@ -341,15 +323,11 @@ Options
 ``-c``, ``--cores`` *NUM*
     Number of CPU cores required per task (default: none).
 
-    Range: 0 (unconstrained) to 32,767. Above 1,024 it runs with a warning.
-
     When specified, tasks will only be executed when the required number of cores
     is available. Used with resource-aware scheduling and backfill.
 
 ``-m``, ``--memory`` *MEM*
     Amount of memory required per task (default: none).
-
-    Range: 0 bytes (unconstrained) to 9,223,372,036,854,775,807 bytes.
 
     Specify memory size in bytes or with a unit ``K``, ``M``, ``G`` or ``T``, alone or followed
     by ``B`` or ``iB``, in any case (e.g., '4GB', '512M'). Each unit is a power of 1024, so
@@ -361,8 +339,6 @@ Options
 ``-C``, ``--client-cores`` *NUM*
     Limit available cores per client (default: all cores).
 
-    Range: 0 (unconstrained) to 32,767. Above 1,024 it runs with a warning.
-
     Sets an upper bound on the number of CPU cores that each client can use.
     This allows running multiple clients on the same node by partitioning resources.
     Clients will not execute tasks if doing so would exceed this limit.
@@ -371,8 +347,6 @@ Options
 
 ``-M``, ``--client-memory`` *MEM*
     Limit available memory per client (default: all memory).
-
-    Range: 0 bytes (unconstrained) to 9,223,372,036,854,775,807 bytes.
 
     Sets an upper bound on the amount of memory that each client can use.
     Specify memory size in bytes or with a unit ``K``, ``M``, ``G`` or ``T``, alone or followed
@@ -393,12 +367,8 @@ Options
     Maximum allowed tasks per second per client; a number, e.g. 0.5 (default: none).
     Individual tasks are throttled if exceeding this average limit.
 
-    Range: 0.000001 to 1,000,000,000 tasks per second, or 0 (no limit). Below 0.001 tasks per second, other than 0, it runs with a warning.
-
 ``-S``, ``--signalwait`` *SEC*
     Task-level signal escalation wait period (default: 10).
-
-    Range: 0 s to 2,147,483,647 s.
 
     Specify a number of seconds, units ``d``, ``h``, ``m`` and ``s`` in that order, whole or
     fractional (e.g., ``30s``, ``5m``, ``1h30m``, ``1.5h``), or a Slurm time ``MM:SS``,
@@ -460,8 +430,6 @@ Options
 ``-F``, ``--factor`` *VALUE*
     Scaling factor (default: 1).
 
-    Range: 0.000001 to 1,000,000,000. Above 100 it runs with a warning.
-
     A configurable, dimensionless quantity used by the ``--autoscaling=dynamic`` policy.
     This value expresses some multiple of the average task duration in seconds.
 
@@ -485,8 +453,6 @@ Options
 ``-P``, ``--period`` *SEC*
     Scaling period, greater than zero (default: 60).
 
-    Range: 0 s (exclusive) to 2,147,483,647 s. Above 3,600 s it runs with a warning.
-
     Specify a number of seconds, units ``d``, ``h``, ``m`` and ``s`` in that order, whole or
     fractional (e.g., ``30s``, ``5m``, ``1h30m``, ``1.5h``), or a Slurm time ``MM:SS``,
     ``HH:MM:SS``, ``D-HH``, ``D-HH:MM`` or ``D-HH:MM:SS`` (e.g., ``1:30``). A fraction of a
@@ -502,8 +468,6 @@ Options
 ``-I``, ``--init-size`` *SIZE*
     Initial size of cluster (default: 1).
 
-    Range: 0 to 2,147,483,647.
-
     When the cluster starts, this number of clients will be launched.
     For a *fixed* policy cluster, this should be given with a ``--min-size``, and likely
     the same value.
@@ -513,8 +477,6 @@ Options
 ``-X``, ``--min-size`` *SIZE*
     Minimum size of cluster (default: 0).
 
-    Range: 0 to 2,147,483,647.
-
     Regardless of autoscaling policy, if the number of launched clients drops below this
     value we will scale up by one. Allowing ``--min-size=0`` is an important feature for
     efficient use of computing resources in the absence of tasks.
@@ -523,8 +485,6 @@ Options
 
 ``-Y``, ``--max-size`` *SIZE*
     Maximum size of cluster (default: 1).
-
-    Range: 0 to 2,147,483,647.
 
     For a *dynamic* autoscaling policy, this sets an upper limit on the number of launched
     clients. When this number is reached, scaling stops regardless of task pressure.

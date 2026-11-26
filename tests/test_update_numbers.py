@@ -181,9 +181,9 @@ def test_new_rows() -> None:
     for name, rng in rows.items():
         assert setting_for(f'column.{name}') is None, name
         assert rng.advise is None and rng.why, name
-    assert rows['exit_status'].text == 'Range: -32,768 to 32,767.'
-    assert rows['cores_max'].text == 'Range: 0 to 32,767.'
-    assert rows['memory_max'].text == 'Range: 0 to 9,223,372,036,854,775,807 bytes.'
+    assert rows['exit_status'].bounds == '-32,768 to 32,767'
+    assert rows['cores_max'].bounds == '0 to 32,767'
+    assert rows['memory_max'].bounds == '0 to 9,223,372,036,854,775,807 bytes'
 
 
 DESC: Final[Path] = Path(__file__).parent.parent / 'docs' / '_include' / 'task_update_desc.rst'
@@ -191,12 +191,11 @@ DESC: Final[Path] = Path(__file__).parent.parent / 'docs' / '_include' / 'task_u
 
 
 @mark.unit
-def test_desc_lists_ranges() -> None:
-    """The description lists each ranged column with its entry's range, as the documentation gives it."""
+def test_desc_lists_ranged_columns() -> None:
+    """The description lists each ranged column by its form; the range's figures stay in the table."""
     lines = DESC.read_text(encoding='utf-8').splitlines()
-    for column, setting in SETTING.items():
-        text = entry(setting).text
-        assert any(f'``{column}``' in line and text in line for line in lines), (column, text)
+    for column in SETTING:
+        assert any(line.startswith(f'- ``{column}``') for line in lines), column
 
 
 # Layer 2: each column through the command line, in both forms, on both backends

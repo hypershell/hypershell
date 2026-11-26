@@ -6,7 +6,7 @@ appetite: small
 status: in_progress
 branch: fix/range-docs-and-group-floor
 base: develop
-current_phase: P3
+current_phase: P4
 last_updated: '2026-11-25'
 phases:
 - id: P1
@@ -43,7 +43,7 @@ phases:
     run hs list -g 0 -c) -eq 1 || exit 15"
 - id: P3
   name: Figures out of the docs and man pages; the guard (R1, R2, R3, R6)
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
@@ -140,12 +140,14 @@ resume ground-truth (`uv run python .agents/factory/bin/next_phase.py spec/range
 ## Phase P3 — Figures out of the docs and man pages; the guard
 **Satisfies:** R1, R2, R3, R6 · **Depends on:** P2
 
-- [ ] Remove every `Range:` and figure-bearing advisory sentence (PLAN §2.3 file list).
-- [ ] Reword the markers and passages that point at the removed lines (PLAN §2.3).
-- [ ] `config_schema.py`: delete `Range.text` and `Range.advice_text`; `test_update_numbers.py`
+- [x] Remove every `Range:` and figure-bearing advisory sentence (PLAN §2.3 file list).
+- [x] Reword the markers and passages that point at the removed lines (PLAN §2.3).
+- [x] `config_schema.py`: delete `Range.text` and `Range.advice_text`; `test_update_numbers.py`
       reads `.bounds`.
-- [ ] `tests/test_bounded_docs.py`: the guard (PLAN §2.4); figure-free tests kept.
-- [ ] Rebuild the man pages (PLAN §2.5), version unchanged.
+- [x] `tests/test_bounded_docs.py`: the guard (PLAN §2.4); figure-free tests kept.
+- [x] Rebuild the man pages (PLAN §2.5), version unchanged.
+- [x] `tests/test_bounded_tags.py` and `tests/test_update_numbers.py` drop their `Range.text` checks for
+      figure-free ones (amendment: both read the removed renderers).
 
 ## Phase P4 — Gate
 **Satisfies:** R1–R6 · **Depends on:** P3

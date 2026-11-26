@@ -81,8 +81,6 @@ Options
 ``-g``, ``--group`` *GROUP*
     Filter matches to a single task group.
 
-    Range: -2,147,483,648 to 2,147,483,647.
-
 ``-s``, ``--order-by`` *FIELD* ``[--desc]``
     Order results by field. Optionally, in descending order.
 
@@ -92,8 +90,6 @@ Options
 
 ``-l``, ``--limit`` *NUM*
     Limit the number of results.
-
-    Range: 1 to 2,147,483,647.
 
 ``-F``, ``--failed``
     Alias for ``-w 'exit_status != 0'``.

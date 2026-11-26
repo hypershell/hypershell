@@ -77,7 +77,7 @@ Description
    :pr:`117`: ``-R``/``--ratelimit`` takes a number (e.g., ``-R 0.5``), and defaults to
    ``client.ratelimit`` in every mode; the undocumented ``task.ratelimit`` is no longer read. A
    fractional rate is passed to launched clients, which must be of this release or later. A rate
-   other than ``0`` under ``0.000001`` is refused before anything starts.
+   other than ``0`` below the range is refused before anything starts.
 
 .. versionchanged:: 2.9.0
    :pr:`112`: ``--no-db`` leaves the configured database alone: it is not opened, created or
@@ -116,7 +116,7 @@ Description
    present are not checked. A stream's late lower group still runs, with a warning.
 
 .. versionchanged:: 2.9.0
-   :pr:`125`: each numeric option has a range, given with the option below. A value outside it, or
+   :pr:`125`: each numeric option has a range. A value outside it, or
    one that is not a number of the option's kind, stops the command before it starts, with one line
    naming the option, the range and the value (exit status 2). An option with an advisory limit
    takes a value past it and runs, with one warning. ``-N 0`` still runs one thread per core;
