@@ -1,57 +1,90 @@
 ---
 slug: range-docs-and-group-floor
-title: "Numeric ranges out of the user docs; task groups start at 0"
+title: Numeric ranges out of the user docs; task groups start at 0
 kind: fix
 appetite: small
 status: in_progress
 branch: fix/range-docs-and-group-floor
 base: develop
-current_phase: P1
-last_updated: "2026-11-25"
+current_phase: P2
+last_updated: '2026-11-25'
 phases:
-  - id: P1
-    name: "Tests first: a group below 0 is refused on every path (red on 42e2112f)"
-    status: pending
-    satisfies: [R4]
-    depends_on: []
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "test -z \"$(git diff --name-only 42e2112f -- . ':!spec' ':!tests')\" && ! uv run pytest -q -p no:cacheprovider tests/test_group_floor.py && test \"$(uv run pytest -q -p no:cacheprovider tests/test_group_floor.py 2>&1 | grep -cE '^(FAILED|ERROR) ')\" -ge 6"
-  - id: P2
-    name: "The floor: GROUP starts at 0; group docs say non-negative (R4, R5)"
-    status: pending
-    satisfies: [R4, R5]
-    depends_on: [P1]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "uv run pytest -q -p no:cacheprovider tests/test_group_floor.py tests/test_bounded_table.py tests/test_bounded_parsers.py tests/test_bounded_options.py tests/test_update_group.py tests/test_group_integer.py tests/test_group_order.py && ! grep -rn '32-bit range' docs/_include docs/cli AGENTS.md .agents/factory/invariants.md && grep -q 'non-negative' docs/_include/submit_help.rst && .agents/factory/bin/temp_site.sh sh -c \"uv run hs submit -g -1 echo a; test \\$? -eq 2 && uv run hs submit -g 0 echo a && uv run hs list -g -1; test \\$? -eq 2\""
-  - id: P3
-    name: "Figures out of the docs and man pages; the guard (R1, R2, R3, R6)"
-    status: pending
-    satisfies: [R1, R2, R3, R6]
-    depends_on: [P2]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "! grep -rln 'Range:' docs/_include docs/cli docs/api docs/*.rst share/man/man1 && ! grep -rn 'advice_text\\|def text' src/hypershell/core/config_schema.py && uv run pytest -q -p no:cacheprovider tests/test_bounded_docs.py tests/test_update_numbers.py tests/test_config_schema.py && UV_PROJECT_ENVIRONMENT=\"${TMPDIR:-/tmp}/docs-venv-rdg\" sh spec/update-client-retry/drive/bound.sh 900 uv run --python 3.12 --group docs sphinx-build -W --keep-going -q -E -b html docs \"${TMPDIR:-/tmp}/docs-html-rdg\""
-  - id: P4
-    name: "Gate: the whole suite serially, the PostgreSQL group and update files, the docs"
-    status: pending
-    satisfies: [R1, R2, R3, R4, R5, R6]
-    depends_on: [P3]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "test -n \"$HS_TEST_POSTGRES\" && env -u HS_TEST_POSTGRES sh spec/update-client-retry/drive/bound.sh 5400 uv run pytest -q -p no:cacheprovider && sh spec/update-client-retry/drive/bound.sh 3600 uv run pytest -q -p no:cacheprovider tests/test_group_floor.py tests/test_update_group.py tests/test_group_integer.py tests/test_update_numbers.py tests/test_bounded_table.py"
+- id: P1
+  name: 'Tests first: a group below 0 is refused on every path (red on 42e2112f)'
+  status: done
+  satisfies:
+  - R4
+  depends_on: []
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: test -z "$(git diff --name-only 42e2112f -- . ':!spec' ':!tests')" && !
+    uv run pytest -q -p no:cacheprovider tests/test_group_floor.py && test "$(uv run
+    pytest -q -p no:cacheprovider tests/test_group_floor.py 2>&1 | grep -cE '^(FAILED|ERROR)
+    ')" -ge 6
+- id: P2
+  name: 'The floor: GROUP starts at 0; group docs say non-negative (R4, R5)'
+  status: pending
+  satisfies:
+  - R4
+  - R5
+  depends_on:
+  - P1
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: uv run pytest -q -p no:cacheprovider tests/test_group_floor.py tests/test_bounded_table.py
+    tests/test_bounded_parsers.py tests/test_bounded_options.py tests/test_update_group.py
+    tests/test_group_integer.py tests/test_group_order.py && ! grep -rn '32-bit range'
+    docs/_include docs/cli AGENTS.md .agents/factory/invariants.md && grep -q 'non-negative'
+    docs/_include/submit_help.rst && .agents/factory/bin/temp_site.sh sh -c "uv run
+    hs submit -g -1 echo a; test \$? -eq 2 && uv run hs submit -g 0 echo a && uv run
+    hs list -g -1; test \$? -eq 2"
+- id: P3
+  name: Figures out of the docs and man pages; the guard (R1, R2, R3, R6)
+  status: pending
+  satisfies:
+  - R1
+  - R2
+  - R3
+  - R6
+  depends_on:
+  - P2
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: '! grep -rln ''Range:'' docs/_include docs/cli docs/api docs/*.rst share/man/man1
+    && ! grep -rn ''advice_text\|def text'' src/hypershell/core/config_schema.py &&
+    uv run pytest -q -p no:cacheprovider tests/test_bounded_docs.py tests/test_update_numbers.py
+    tests/test_config_schema.py && UV_PROJECT_ENVIRONMENT="${TMPDIR:-/tmp}/docs-venv-rdg"
+    sh spec/update-client-retry/drive/bound.sh 900 uv run --python 3.12 --group docs
+    sphinx-build -W --keep-going -q -E -b html docs "${TMPDIR:-/tmp}/docs-html-rdg"'
+- id: P4
+  name: 'Gate: the whole suite serially, the PostgreSQL group and update files, the
+    docs'
+  status: pending
+  satisfies:
+  - R1
+  - R2
+  - R3
+  - R4
+  - R5
+  - R6
+  depends_on:
+  - P3
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: test -n "$HS_TEST_POSTGRES" && env -u HS_TEST_POSTGRES sh spec/update-client-retry/drive/bound.sh
+    5400 uv run pytest -q -p no:cacheprovider && sh spec/update-client-retry/drive/bound.sh
+    3600 uv run pytest -q -p no:cacheprovider tests/test_group_floor.py tests/test_update_group.py
+    tests/test_group_integer.py tests/test_update_numbers.py tests/test_bounded_table.py
 review:
-  last_reviewed_commit: ""
+  last_reviewed_commit: ''
   verdict: none
-  blocked_reason: ""
+  blocked_reason: ''
   cycle: 0
 ---
-
 # TECH.md — Numeric ranges out of the user docs; task groups start at 0
 
 The **context engine and finite-state machine** for this cycle. The YAML frontmatter above is the
@@ -78,7 +111,7 @@ resume ground-truth (`uv run python .agents/factory/bin/next_phase.py spec/range
 ## Phase P1 — Tests first: a group below 0 is refused on every path
 **Satisfies:** R4 · **Depends on:** —
 
-- [ ] `tests/test_group_floor.py` (new, SPDX header): `-1` (and `-2147483648`) refused, with the
+- [x] `tests/test_group_floor.py` (new, SPDX header): `-1` (and `-2147483648`) refused, with the
       message naming the range `from 0` and exit status as today's out-of-range group, by
       - `hs submit -g -1` (exit 2);
       - an inline `# HYPERSHELL: group:-1` line in a submitted file (exit 5, nothing submitted);
@@ -88,7 +121,7 @@ resume ground-truth (`uv run python .agents/factory/bin/next_phase.py spec/range
       - `hs list -g -1` (exit 2);
       - `parse_group('-1')` and `ensure_group(-1)` raising `TaskGroupError` with `out_of_range`.
       Plus guards (green on base): `0` accepted on each path; the default is 0.
-- [ ] Nothing outside `tests/` and `spec/` changes.
+- [x] Nothing outside `tests/` and `spec/` changes.
 - **Touches:** `tests/test_group_floor.py`.
 
 ## Phase P2 — The floor
