@@ -35,6 +35,6 @@ Description
    task's zone, recorded in the database, where it was stored as a tag; with ``=`` a likely typo of
    a task column is refused (exit status 2 for ``-t``). ``cores:none``, ``memory:none`` and
    ``timeout:none`` are refused, where they cleared the option's value for that task, and so is a
-   field with no value, where it was stored as empty.
+   field with no value; a bare ``cores`` was stored as empty.
 
 .. include:: ../_include/task_run_help.rst

@@ -78,8 +78,8 @@ Description
    zone, recorded in the database, where it was stored as a tag. With ``--no-db``, or no database
    configured, a zone in the input is refused: a *FILE* exits 5 before the server starts, a stream
    refuses that line. ``cores:none``, ``memory:none`` and ``timeout:none`` are refused, where they
-   cleared the option's value for that task, and so is a field with no value, where it was stored
-   as empty.
+   cleared the option's value for that task, and so is a field with no value; a bare ``cores`` was
+   stored as empty.
 
 .. include:: ../_include/server_help.rst
 

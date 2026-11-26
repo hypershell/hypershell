@@ -1489,7 +1489,7 @@ refused. \fBzone\fP from a directive, \fB\-t\fP or a \fB\-\-from\-json\fP record
 was stored as a tag. A tag after one with no value is checked. On a stream, a directive the tag
 rules refuse refuses its line alone; it ended the input. \fBcores:none\fP, \fBmemory:none\fP and
 \fBtimeout:none\fP are refused; they cleared the option\(aqs value for that task. A field with no
-value (a bare \fBcores\fP) is refused; it was stored as empty.
+value is refused; a bare \fBcores\fP was stored as empty.
 
 .sp
 A line whose first non\-blank character is \fB#\fP is a comment. A \fB#\fP anywhere else is part of the

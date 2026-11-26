@@ -58,7 +58,7 @@ nothing; ``-t`` is refused before any input is read, with exit status 2.
    was stored as a tag. A tag after one with no value is checked. On a stream, a directive the tag
    rules refuse refuses its line alone; it ended the input. ``cores:none``, ``memory:none`` and
    ``timeout:none`` are refused; they cleared the option's value for that task. A field with no
-   value (a bare ``cores``) is refused; it was stored as empty.
+   value is refused; a bare ``cores`` was stored as empty.
 
 A line whose first non-blank character is ``#`` is a comment. A ``#`` anywhere else is part of the
 command and is submitted and run as written, whether in quotes, in a URL fragment or in ``$#``; a

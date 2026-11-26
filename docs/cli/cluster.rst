@@ -130,6 +130,7 @@ Description
    nothing run, a stream refuses that line. Without ``--autoscaling``, one warning names each zone
    of the input the cluster's clients do not serve; its tasks wait for a client in that zone.
    ``cores:none``, ``memory:none`` and ``timeout:none`` are refused, where they cleared the
-   option's value for that task, and so is a field with no value, where it was stored as empty.
+   option's value for that task, and so is a field with no value; a bare ``cores`` was stored as
+   empty.
 
 .. include:: ../_include/cluster_help.rst
