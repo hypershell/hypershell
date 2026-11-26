@@ -138,3 +138,11 @@ branch (pre-existing, outside R3).
 ### Human-gate triggers
 
 - None. The review bound (3 cycles) is reached; escalated to the maintainer.
+
+## Maintainer override — publish (2026-11-26)
+
+The 3-cycle bound was reached on a docs wording finding (cycle 3 F1). The foreman narrowed the
+sentence in 08c1630a ("a field with no value is refused; a bare ``cores`` was stored as empty", on
+the `hs submit`, `hs cluster`, `hs server` and `hs run` markers), rebuilt the man pages, and ran the
+docs build with `-W` and the docs tests (32 passed). The maintainer chose to publish without a
+fourth review cycle; the post-review docs commit is disclosed in the PR body.
