@@ -3,10 +3,10 @@ slug: range-docs-and-group-floor
 title: Numeric ranges out of the user docs; task groups start at 0
 kind: fix
 appetite: small
-status: in_progress
+status: in_review
 branch: fix/range-docs-and-group-floor
 base: develop
-current_phase: P4
+current_phase: done
 last_updated: '2026-11-25'
 phases:
 - id: P1
@@ -63,7 +63,7 @@ phases:
 - id: P4
   name: 'Gate: the whole suite serially, the PostgreSQL group and update files, the
     docs'
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
@@ -152,7 +152,7 @@ resume ground-truth (`uv run python .agents/factory/bin/next_phase.py spec/range
 ## Phase P4 — Gate
 **Satisfies:** R1–R6 · **Depends on:** P3
 
-- [ ] Run the frontmatter verify (sandbox off, `HS_TEST_POSTGRES` exported). Expected environment
+- [x] Run the frontmatter verify (sandbox off, `HS_TEST_POSTGRES` exported). Expected environment
       failures on this host (upgrade templates, TimescaleDB) are listed in the commit body, as in
       prior cycles. Record counts and time.
 - **Touches:** `spec/range-docs-and-group-floor/TECH.md` only.
