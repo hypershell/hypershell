@@ -3,11 +3,11 @@ slug: input-directive-fields
 title: Task input sets every declarable field, with KEY=VALUE or KEY:VALUE
 kind: fix
 appetite: big
-status: in_progress
+status: in_review
 branch: fix/input-directive-fields
 base: develop
-current_phase: P6
-last_updated: '2026-11-25'
+current_phase: done
+last_updated: '2026-11-26'
 phases:
 - id: P1
   name: 'Tests first: the red list on 8dcbe126 (tests and spec only)'
@@ -111,7 +111,7 @@ phases:
 - id: P6
   name: 'Gate: the whole suite serially, PostgreSQL, the red list, every drive mode,
     the docs'
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
@@ -231,4 +231,7 @@ Resume ground-truth: `uv run python .agents/factory/bin/next_phase.py spec/input
 ## Phase P6 — Gate
 **Satisfies:** R1–R10 · **Depends on:** P5
 
-- [ ] Run the frontmatter verify (sandbox off, `HS_TEST_POSTGRES` exported). Record counts and time.
+- [x] Run the frontmatter verify (sandbox off, `HS_TEST_POSTGRES` exported). Record counts and time.
+      2026-11-26, on the develop merge 9978da5e: whole suite 5,861 passed, 443 skipped (45 min);
+      PostgreSQL-aware files 443 passed (6 min); red list 191 of 191 red on 8dcbe126; drive modes
+      `fields`, `zones`, `nodb` all ok; docs `-W` exit 0. Total 58 min.
