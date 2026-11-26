@@ -39,6 +39,7 @@ joining reaches either. A command that needs its argument quoted for the shell s
 
 - `quote_arg` exists so an argument with spaces survives the join as one shell word; the fix must keep
   that for the command part (e.g. `hs submit python -c "print(1)"`).
-- Shape against `input-directive-fields` (2.9.0), which rewrites how directive tokens are read.
+- `input-directive-fields` (#128) moved directive token reading into `core/tag.py` (`split_token`,
+  `read_token`) and `data/model.py` (`read_input_tokens`); shape against that reader.
 - Related: `direct_args` and `scan_source`'s argument check (`submit.py`), `Task.split_argline`
   (`data/model.py`).
