@@ -7,7 +7,8 @@ given. The command-line tasks are pulled in and either directly published to a d
 (see ``--no-db``) or committed to a database first before being scheduled later.
 
 Alternatively, use ``--from-json`` to read tasks from a JSON file (``FILE[@path]``); each task
-object's keys become named ``{key}`` fields in the ``--template`` (and task tags). In this mode the
+object's keys become named ``{key}`` fields in the ``--template`` (and task tags, but for the
+``group``, ``zone``, ``cores``, ``memory`` and ``timeout`` keys, which set those fields). In this mode the
 template is expanded when tasks are ingested rather than by the clients. A JSON source participates
 in the same re-submission gating as a plain *FILE* — ``--restart`` (idempotent requeue),
 ``--repeat``, and ``--update --restart`` all apply — keyed by the file's absolute path together

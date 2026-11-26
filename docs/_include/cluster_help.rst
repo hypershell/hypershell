@@ -57,6 +57,9 @@ Options
     task tags. In this mode the template is expanded when tasks are ingested (submit-side),
     not by the clients.
 
+    A record's ``group``, ``zone``, ``cores``, ``memory`` and ``timeout`` keys set those fields of
+    its task, over the options, and are not stored as tags; a ``zone`` must be a JSON string.
+
 ``-H``, ``--bind`` *ADDR*
     Bind address (default: localhost, or 0.0.0.0 for remote clients).
 
@@ -161,7 +164,9 @@ Options
     ``--autoscaling`` (default: none).
 
     The tasks read from *FILE* (or ``--from-json``) are placed in this zone, and each client is
-    launched with the same ``--zone``, so it runs them. Zones are recorded in the database, so
+    launched with the same ``--zone``, so it runs them. A zone named in the input (``zone:NAME``
+    or ``zone=NAME`` inline, or a record's ``zone``) wins over ``--zone`` for its tasks; without
+    ``--autoscaling``, one warning names each such zone the clients do not serve. Zones are recorded in the database, so
     ``--zone`` cannot be used with ``--no-db``.
 
     With ``--autoscaling``, this is the cluster's own zone: the one that ``--init-size`` and

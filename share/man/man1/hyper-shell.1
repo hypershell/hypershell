@@ -28,7 +28,7 @@ level margin: \\n[rst2man-indent\\n[rst2man-indent-level]]
 .\" new: \\n[rst2man-indent\\n[rst2man-indent-level]]
 .in \\n[rst2man-indent\\n[rst2man-indent-level]]u
 ..
-.TH "HYPER-SHELL" "1" "Nov 25, 2026" "2.9.0a10" "hypershell"
+.TH "HYPER-SHELL" "1" "Nov 26, 2026" "2.9.0a10" "hypershell"
 .SH NAME
 hyper-shell \- Process shell commands over a distributed, asynchronous queue
 .SH SYNOPSIS
@@ -110,7 +110,8 @@ given. The command\-line tasks are pulled in and either directly published to a 
 (see \fB\-\-no\-db\fP) or committed to a database first before being scheduled later.
 .sp
 Alternatively, use \fB\-\-from\-json\fP to read tasks from a JSON file (\fBFILE[@path]\fP); each task
-object\(aqs keys become named \fB{key}\fP fields in the \fB\-\-template\fP (and task tags). In this mode the
+object\(aqs keys become named \fB{key}\fP fields in the \fB\-\-template\fP (and task tags, but for the
+\fBgroup\fP, \fBzone\fP, \fBcores\fP, \fBmemory\fP and \fBtimeout\fP keys, which set those fields). In this mode the
 template is expanded when tasks are ingested rather than by the clients. A JSON source participates
 in the same re\-submission gating as a plain \fIFILE\fP — \fB\-\-restart\fP (idempotent requeue),
 \fB\-\-repeat\fP, and \fB\-\-update \-\-restart\fP all apply — keyed by the file\(aqs absolute path together
@@ -212,6 +213,9 @@ document (e.g. \fBplan.json@chunks\fP); with no \fB@\fP the file\(aqs top level 
 list. Each task object\(aqs keys become named \fB{key}\fP fields in the \fB\-\-template\fP and
 task tags. In this mode the template is expanded when tasks are ingested (submit\-side),
 not by the clients.
+.sp
+A record\(aqs \fBgroup\fP, \fBzone\fP, \fBcores\fP, \fBmemory\fP and \fBtimeout\fP keys set those fields of
+its task, over the options, and are not stored as tags; a \fBzone\fP must be a JSON string.
 .TP
 .B \fB\-H\fP, \fB\-\-bind\fP \fIADDR\fP
 Bind address (default: localhost, or 0.0.0.0 for remote clients).
@@ -317,7 +321,9 @@ Zone of the submitted tasks and of every client the cluster launches; the own zo
 \fB\-\-autoscaling\fP (default: none).
 .sp
 The tasks read from \fIFILE\fP (or \fB\-\-from\-json\fP) are placed in this zone, and each client is
-launched with the same \fB\-\-zone\fP, so it runs them. Zones are recorded in the database, so
+launched with the same \fB\-\-zone\fP, so it runs them. A zone named in the input (\fBzone:NAME\fP
+or \fBzone=NAME\fP inline, or a record\(aqs \fBzone\fP) wins over \fB\-\-zone\fP for its tasks; without
+\fB\-\-autoscaling\fP, one warning names each such zone the clients do not serve. Zones are recorded in the database, so
 \fB\-\-zone\fP cannot be used with \fB\-\-no\-db\fP\&.
 .sp
 With \fB\-\-autoscaling\fP, this is the cluster\(aqs own zone: the one that \fB\-\-init\-size\fP and
@@ -1450,7 +1456,7 @@ field but \fBzone\fP\&. Any other key is a tag.
 .sp
 .EX
 hs submit \-t site=lab \-\- stage.sh
-echo \(aqtrain.sh  # HYPERSHELL: zone=gpu cores=8 timeout:2h model:resnet\(aq | hs submit
+echo \(aqtrain.sh  # HYPERSHELL: zone=gpu cores=8 timeout:2h model:resnet\(aq | hs submit \-
 .EE
 .UNINDENT
 .UNINDENT
@@ -1481,7 +1487,9 @@ nothing; \fB\-t\fP is refused before any input is read, with exit status 2.
 Changed in version 2.9.0: A directive and \fB\-t\fP take \fBKEY=VALUE\fP as well as \fBKEY:VALUE\fP, with a likely typo of a field
 refused. \fBzone\fP from a directive, \fB\-t\fP or a \fB\-\-from\-json\fP record sets the task\(aqs zone; it
 was stored as a tag. A tag after one with no value is checked. On a stream, a directive the tag
-rules refuse refuses its line alone; it ended the input.
+rules refuse refuses its line alone; it ended the input. \fBcores:none\fP, \fBmemory:none\fP and
+\fBtimeout:none\fP are refused; they cleared the option\(aqs value for that task. A field with no
+value (a bare \fBcores\fP) is refused; it was stored as empty.
 
 .sp
 A line whose first non\-blank character is \fB#\fP is a comment. A \fB#\fP anywhere else is part of the
@@ -2751,8 +2759,8 @@ Assign a group at submit time with \fB\-g\fP/\fB\-\-group\fP, or per task with a
 .INDENT 3.5
 .sp
 .EX
-echo \(aqstage\-one.sh  # HYPERSHELL: group:0\(aq | hs submit
-echo \(aqstage\-two.sh  # HYPERSHELL: group:1\(aq | hs submit
+echo \(aqstage\-one.sh  # HYPERSHELL: group:0\(aq | hs submit \-
+echo \(aqstage\-two.sh  # HYPERSHELL: group:1\(aq | hs submit \-
 .EE
 .UNINDENT
 .UNINDENT

@@ -380,7 +380,8 @@ subsystems.
   `relay.remote_exe`, else the relay's own program), and
   every launch passes `fence_site` (no upstream key on a site argv or in a site environment). Nothing
   in a relay dials its own relay-local server in-process.
-- `submit.py` queue-mode silently ignores `-t/--tag` (asymmetric vs DB mode).
+- `submit.py` queue-mode silently ignores `-t/--tag` tags (asymmetric vs DB mode); a `zone` given
+  with `-t` is refused there (exit 2), since zones require the database.
 
 ## 12. Project conventions (same-commit rules)
 

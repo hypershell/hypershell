@@ -27,7 +27,7 @@ field but ``zone``. Any other key is a tag.
 .. code-block:: shell
 
     hs submit -t site=lab -- stage.sh
-    echo 'train.sh  # HYPERSHELL: zone=gpu cores=8 timeout:2h model:resnet' | hs submit
+    echo 'train.sh  # HYPERSHELL: zone=gpu cores=8 timeout:2h model:resnet' | hs submit -
 
 ``KEY=VALUE`` says that the key names a field, so the key is checked against the task's columns: a
 key one edit from a column name, letter case aside (``grop=2``, ``Cores=4``), is refused as a likely
@@ -56,7 +56,9 @@ nothing; ``-t`` is refused before any input is read, with exit status 2.
    A directive and ``-t`` take ``KEY=VALUE`` as well as ``KEY:VALUE``, with a likely typo of a field
    refused. ``zone`` from a directive, ``-t`` or a ``--from-json`` record sets the task's zone; it
    was stored as a tag. A tag after one with no value is checked. On a stream, a directive the tag
-   rules refuse refuses its line alone; it ended the input.
+   rules refuse refuses its line alone; it ended the input. ``cores:none``, ``memory:none`` and
+   ``timeout:none`` are refused; they cleared the option's value for that task. A field with no
+   value (a bare ``cores``) is refused; it was stored as empty.
 
 A line whose first non-blank character is ``#`` is a comment. A ``#`` anywhere else is part of the
 command and is submitted and run as written, whether in quotes, in a URL fragment or in ``$#``; a

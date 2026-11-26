@@ -3,7 +3,7 @@ slug: input-directive-fields
 title: Task input sets every declarable field, with KEY=VALUE or KEY:VALUE
 kind: fix
 appetite: big
-status: blocked
+status: in_review
 branch: fix/input-directive-fields
 base: develop
 current_phase: done
