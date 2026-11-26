@@ -112,3 +112,29 @@ Notes (not findings): `.agents/factory/invariants.md:383` still says queue mode 
 ### Human-gate triggers
 
 - None.
+
+## Review cycle 3 — changes-requested (2026-11-26)
+
+- **Reviewed commit:** 2b633541 · **Mode:** scoped — verify N1 and look for regressions (blind).
+- **N1 fixed:** the `hs cluster`, `hs server` and `hs run` markers say the `none` forms and a field
+  with no value are refused; refused on the branch for every field and separator (exit 5 input, 2
+  for `-t`, one line on a stream); develop cleared the option on each `:none` form.
+- **Docs:** `-W` clean. **Tests:** `test_bounded_docs` 26 passed; `test_input_fields` 124 passed,
+  14 skipped.
+
+### Findings
+
+#### [LOW/CONFIRMED] F1 — "a field with no value … was stored as empty" holds for `cores` only
+- **Where:** `docs/cli/cluster.rst:133`, `docs/cli/server.rst:81-82`, `docs/cli/task_run.rst:37-38`.
+- **Failure scenario:** on develop a bare `memory`, `timeout` or `group` was already refused (exit 5);
+  only a bare `cores` was stored as `""` (and a bare `zone` as an empty tag). The marker tells an
+  upgrading reader all three were accepted.
+- **Evidence:** the bare forms on develop's export and the branch, through `hs cluster`, `hs server`
+  and `hs run`.
+
+Dropped: `--from-json` records with `""`/`null` field values behave the same on develop and the
+branch (pre-existing, outside R3).
+
+### Human-gate triggers
+
+- None. The review bound (3 cycles) is reached; escalated to the maintainer.

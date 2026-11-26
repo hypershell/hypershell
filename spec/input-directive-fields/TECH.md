@@ -3,7 +3,7 @@ slug: input-directive-fields
 title: Task input sets every declarable field, with KEY=VALUE or KEY:VALUE
 kind: fix
 appetite: big
-status: in_review
+status: blocked
 branch: fix/input-directive-fields
 base: develop
 current_phase: done
@@ -137,11 +137,11 @@ phases:
     && for m in fields zones nodb; do sh spec/update-client-retry/drive/bound.sh 900
     sh spec/input-directive-fields/drive/idf_drive.sh $m || exit 1; done
 review:
-  last_reviewed_commit: 25627e9a
+  last_reviewed_commit: 2b633541
   verdict: changes-requested
-  blocked_reason: 'docs: none/bare-field refusal missing from cluster, server, run
-    markers (review cycle 2)'
-  cycle: 2
+  blocked_reason: 'docs wording: bare-field ''was stored as empty'' is cores-only
+    (review cycle 3; bound reached)'
+  cycle: 3
 ---
 # TECH.md — Task input sets every declarable field, with `KEY=VALUE` or `KEY:VALUE`
 
