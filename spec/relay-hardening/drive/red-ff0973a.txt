@@ -1,0 +1,16 @@
+# Regression tests that must fail on ff0973a, this branch's head before review cycle 2.
+# Run with
+#   RED_BASE_REV=ff0973a RED_LIST="$PWD/spec/relay-hardening/drive/red-ff0973a.txt" sh spec/relay-hardening/drive/red_check.sh
+#
+# A zone with no site client took a task at an upstream shutdown while the topology gave it a client at
+# the relay; a newer topology then gave it none before one started. The zone held the task and never
+# asked again whether a client was coming, so pulling never ended. (On 2ffb5cc the zone took nothing.)
+tests/test_relay_connector.py::test_a_zone_that_took_a_task_at_a_shutdown_hands_it_back_once_no_client_is_planned_here
+tests/test_relay_connector.py::test_a_zone_that_cannot_hand_back_what_it_took_leaves_it_to_eviction_and_ends[no-call]
+tests/test_relay_connector.py::test_a_zone_that_cannot_hand_back_what_it_took_leaves_it_to_eviction_and_ends[no-database]
+tests/test_relay_connector.py::test_a_zone_hands_back_only_what_no_site_client_has_received[staged]
+
+# A relay with TLS on reached a cleartext upstream server whose first bytes took more than a second to
+# arrive: the cleartext check gave up and the relay retried as for a lost connection. (On 2ffb5cc the
+# relay had no first-connection check at all, so the test fails there on the missing call.)
+tests/test_relay_link.py::test_tls_link_against_a_cleartext_upstream_on_a_slow_path_fails_at_once

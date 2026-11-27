@@ -6,10 +6,11 @@
 
 # Type annotations
 from __future__ import annotations
-from typing import Dict, IO, Optional, Iterable, Callable, Type
+from typing import Dict, IO, List, Optional, Iterable, Callable, Type, Tuple
 from types import TracebackType
 
 # Standard libs
+import os
 import sys
 import shlex
 from functools import cached_property
@@ -19,19 +20,26 @@ from cmdkit.app import Application
 from cmdkit.cli import Interface, ArgumentError
 
 # Internal libs
-from hypershell.core.config import config, blame, find_available_ports
-from hypershell.core.tls import TLSConfig, from_namespace as tls_from_namespace
-from hypershell.core.types import parse_bytes, parse_time
+from hypershell.core.config import config, blame, find_available_ports, config_seconds, PARAM_UNSET
+from hypershell.core.tls import (TLSConfig, TLSError, DEFAULT_HANDSHAKE, handshake_seconds,
+                                 from_namespace as tls_from_namespace)
+from hypershell.core.types import parse_period, ranged
 from hypershell.core.logging import Logger
 from hypershell.core.template import DEFAULT_TEMPLATE
-from hypershell.core.exceptions import get_shared_exception_mapping
-from hypershell.data import initdb, checkdb, DATABASE_DIALECT
+from hypershell.core.exceptions import get_shared_exception_mapping, ReadingMixin, reading
+from hypershell.data import initdb, checkdb, DATABASE_DIALECT, DATABASE_ENABLED
+from hypershell.data.model import Task, Source, Zone, STDIN_SOURCE_ID, DEFAULT_TASK_GROUP, DEFAULT_ZONE_NAME, zone_name
 from hypershell.client import DEFAULT_NUM_THREADS, DEFAULT_DELAY, DEFAULT_SIGNALWAIT
-from hypershell.server import DEFAULT_BUNDLESIZE, DEFAULT_ATTEMPTS, DEFAULT_SERVER_POLL, DEFAULT_PORT
-from hypershell.submit import DEFAULT_BUNDLEWAIT
+from hypershell.server import (DEFAULT_BUNDLESIZE, DEFAULT_ATTEMPTS, DEFAULT_SERVER_POLL, DEFAULT_PORT, DEFAULT_EVICT,
+                               is_file_input, configured_eager, configured_retries)
+from hypershell.submit import (DEFAULT_BUNDLEWAIT, load_json_source, json_source_key, validate_json_expansion,
+                               validate_json_groups, scan_task_lines, source_fingerprint, GatedSource,
+                               decide_source_gate, refuse_below_reached_group, task_fingerprints,
+                               json_fingerprints)
 from hypershell.cluster.ssh import run_ssh, SSHCluster, NodeList, DEFAULT_REMOTE_EXE
 from hypershell.cluster.local import run_local, LocalCluster
-from hypershell.cluster.remote import (run_cluster, RemoteCluster, AutoScalingCluster,
+from hypershell.cluster.watch import ClusterLaunchError
+from hypershell.cluster.remote import (run_cluster, RemoteCluster, AutoScalingCluster, configured_failed_launches,
                                        DEFAULT_AUTOSCALE_FACTOR, DEFAULT_AUTOSCALE_PERIOD,
                                        DEFAULT_AUTOSCALE_MIN_SIZE, DEFAULT_AUTOSCALE_MAX_SIZE,
                                        DEFAULT_AUTOSCALE_INIT_SIZE)
@@ -50,9 +58,9 @@ log = Logger.with_name(__name__)
 APP_NAME = 'hs cluster'
 APP_USAGE = """\
 Usage:
-  hs cluster [-h] [FILE | --restart | --forever] [-N NUM] [-t CMD] [-b SIZE] [-w SEC] [-c NUM] [-m MEM] [-W SEC]  
-             [--initdb | --no-db [--no-confirm]] [-d SEC] [-T SEC] [-C NUM] [-M MEM] [-S SEC] [-R NUM] [-Q NUM]
-             [-H ADDR] [-p PORT] [-r NUM [--eager]] [-f PATH] [--capture | [-o PATH] [-e PATH]] [--monitor]
+  hs cluster [-h] [FILE | --from-json SPEC | --restart | --forever] [--repeat | --update] [-N NUM] [-t CMD] [-b SIZE] [-w SEC]
+             [-c NUM] [-m MEM] [-W SEC] [--initdb | --no-db [--no-confirm]] [-d SEC] [-T SEC] [-C NUM] [-M MEM] [-S SEC] [-R NUM] [-Q SEC]
+             [-H ADDR] [--advertise ADDR] [-p PORT] [-r NUM [--eager]] [-f PATH] [--capture | [-o PATH] [-e PATH]] [--monitor] [--zone NAME]
              [--ssh [HOST... | --ssh-group NAME] [--env] | --mpi | --launcher=ARGS...]
              [--autoscaling [MODE] [-P SEC] [-F VALUE] [-I NUM] [-X NUM] [-Y NUM]]
              [--no-tls | [--tls-ca PATH] [--tls-cert PATH] [--tls-key PATH]]
@@ -69,27 +77,34 @@ Arguments:
 Modes:
   --ssh                HOST...  Launch directly with SSH host(s).
   --mpi                         Same as --launcher=mpirun.
-  --launcher           ARGS...  Use specific launch interface.
+  --launcher           ARGS...  Use specific launch interface ({{zone}} and HYPERSHELL_ZONE name each autoscaled zone).
 
 Options:
   -N, --num-threads    NUM      Number of executor threads per client, 0=auto (default: {DEFAULT_NUM_THREADS}).
   -t, --template       CMD      Command-line template pattern (default: "{DEFAULT_TEMPLATE}").
-  -H, --bind           ADDR     Special bind address (default: "localhost" or "0.0.0.0" remote).
+      --from-json      SPEC     Read tasks from a JSON file ("FILE[@path]").
+  -H, --bind           ADDR     Bind address; remote clients dial it, or this host by name for 0.0.0.0 (default: "localhost" or "0.0.0.0" remote).
+      --advertise      ADDR     Address remote clients dial instead (default: by -H).
   -p, --port           PORT     Port number (default: {DEFAULT_PORT}).
   -b, --bundlesize     SIZE     Size of task bundle (default: {DEFAULT_BUNDLESIZE}).
-  -w, --bundlewait     SEC      Seconds to wait before flushing tasks (default: {DEFAULT_BUNDLEWAIT}).
+  -w, --bundlewait     SEC      Wait before flushing tasks, none for an idle client; seconds, 30s, 5m or [D-]HH:MM:SS (default: {DEFAULT_BUNDLEWAIT}).
+      --zone           NAME     Zone of the submitted tasks and every client; own zone if autoscaling (default: none).
   -r, --max-retries    NUM      Auto-retry failed tasks (default: {DEFAULT_ATTEMPTS - 1}).
+                                A task that did not run (-1001, -1002) is never retried;
+                                a retry keeps its task's cores, memory and walltime.
       --eager                   Schedule failed tasks before new tasks.
       --no-db                   Disable database (submit directly to clients).
       --initdb                  Auto-initialize database.
       --no-confirm              Disable client confirmation of task bundle received.
       --forever                 Schedule forever.
       --restart                 Start scheduling from last completed task.
+      --repeat                  Re-submit a known file's tasks again as a new source.
+      --update                  Submit only tasks not already present from a known file.
       --ssh-args       ARGS     Command-line arguments for SSH.
       --ssh-group      NAME     SSH nodelist group in config.
   -E, --env                     Send environment variables.
       --remote-exe     PATH     Path to executable on remote hosts.
-  -d, --delay-start    SEC      Delay time for launching clients (default: {DEFAULT_DELAY}).
+  -d, --delay-start    SEC      Client start-up delay; seconds, 30s, 1h30m or [D-]HH:MM:SS; --delay-start=-10m is random up to 10m (default: {DEFAULT_DELAY}).
       --capture                 Capture individual task <stdout> and <stderr>.
       --monitor                 Capture cores and memory used by tasks.
   -c, --cores          NUM      Required cores per task (default: none).
@@ -101,12 +116,12 @@ Options:
   -f, --failures       PATH     File path to write failed task args (default: <none>).
   -T, --timeout        SEC      Shutdown clients if no tasks received; seconds, 1h30m, 1.5h or [D-]HH:MM:SS (default: never).
   -W, --task-timeout   SEC      Task-level walltime limit; seconds, 1h30m, 1.5h or [D-]HH:MM:SS (default: none).
-  -R, --ratelimit      NUM      Maximum allowed tasks per second per client (default: none).
-  -S, --signalwait     SEC      Task-level signal escalation wait period (default: {DEFAULT_SIGNALWAIT}).
-  -Q, --poll           NUM      Polling interval between database queries if no tasks (default: {DEFAULT_SERVER_POLL}).
-  -A, --autoscaling   [MODE]    Enable autoscaling (default: disabled). Used with --launcher.
+  -R, --ratelimit      NUM      Maximum allowed tasks per second per client; a number, e.g. 0.5 (default: none).
+  -S, --signalwait     SEC      Task-level signal escalation wait period; seconds, 30s, 5m or [D-]HH:MM:SS (default: {DEFAULT_SIGNALWAIT}).
+  -Q, --poll           SEC      Polling interval between database queries if no tasks; seconds, 30s, 5m or [D-]HH:MM:SS (default: {DEFAULT_SERVER_POLL}).
+  -A, --autoscaling   [MODE]    Enable autoscaling per zone (default: disabled). Used with --launcher.
   -F, --factor         VALUE    Scaling factor (default: 1).
-  -P, --period         SEC      Scaling period in seconds (default: {DEFAULT_AUTOSCALE_PERIOD}).
+  -P, --period         SEC      Scaling period, greater than zero; seconds, 30s, 5m or [D-]HH:MM:SS (default: {DEFAULT_AUTOSCALE_PERIOD}).
   -I, --init-size      SIZE     Initial size of cluster (default: {DEFAULT_AUTOSCALE_INIT_SIZE}).
   -X, --min-size       SIZE     Minimum size of cluster (default: {DEFAULT_AUTOSCALE_MIN_SIZE}).
   -Y, --max-size       SIZE     Maximum size of cluster (default: {DEFAULT_AUTOSCALE_MAX_SIZE}).
@@ -118,7 +133,7 @@ Options:
 """
 
 
-class ClusterApp(Application):
+class ClusterApp(ReadingMixin, Application):
     """Run managed cluster."""
 
     name = APP_NAME
@@ -127,26 +142,33 @@ class ClusterApp(Application):
     filepath: str
     interface.add_argument('filepath', nargs='?', default=None)
 
+    from_json: str = None
+    interface.add_argument('--from-json', default=from_json, dest='from_json')
+
     num_threads: int = DEFAULT_NUM_THREADS
-    interface.add_argument('-N', '--num-threads', '--num-tasks', type=int, default=num_threads, dest='num_threads')
+    ranged(interface, '-N', '--num-threads', '--num-tasks', setting='relay.num_threads', hidden=('--num-tasks', ),
+           default=num_threads, dest='num_threads')
     # NOTE: --num-tasks maintained for backwards compatibility
 
     template: str = DEFAULT_TEMPLATE
     interface.add_argument('-t', '--template', default=template)
 
     bundlesize: int = config.server.bundlesize
-    interface.add_argument('-b', '--bundlesize', type=int, default=bundlesize)
+    ranged(interface, '-b', '--bundlesize', setting='server.bundlesize', default=bundlesize)
 
     bundlewait: int = config.submit.bundlewait
-    interface.add_argument('-w', '--bundlewait', type=int, default=bundlewait)
+    ranged(interface, '-w', '--bundlewait', setting='submit.bundlewait', default=bundlewait)
 
     delay_start: float = DEFAULT_DELAY
-    interface.add_argument('-d', '--delay-start', type=float, default=delay_start)
+    ranged(interface, '-d', '--delay-start', setting='option.delay', default=delay_start)
+
+    zone: Optional[str] = None
+    interface.add_argument('--zone', default=None)
 
     eager_mode: bool = config.server.eager
-    max_retries: int = DEFAULT_ATTEMPTS - 1
-    interface.add_argument('-r', '--max-retries', type=int, default=max_retries)
-    interface.add_argument('--eager', action='store_true', dest='eager_mode')
+    max_retries: int = configured_retries()
+    ranged(interface, '-r', '--max-retries', setting='option.max_retries', default=max_retries)
+    interface.add_argument('--eager', action='store_true', dest='eager_mode', default=eager_mode)
 
     in_memory: bool = False
     auto_initdb: bool = False
@@ -158,13 +180,19 @@ class ClusterApp(Application):
     interface.add_argument('--no-confirm', action='store_true')
 
     poll: int = config.server.poll
-    interface.add_argument('-Q', '--poll', type=int, default=poll)
+    ranged(interface, '-Q', '--poll', setting='server.poll', default=poll)
 
     forever_mode: bool = False
     interface.add_argument('--forever', action='store_true', dest='forever_mode')
 
     restart_mode: bool = False
     interface.add_argument('--restart', action='store_true', dest='restart_mode')
+
+    repeat_mode: bool = False
+    interface.add_argument('--repeat', action='store_true', dest='repeat_mode')
+
+    update_mode: bool = False
+    interface.add_argument('--update', action='store_true', dest='update_mode')
 
     ssh_mode: str = None
     mpi_mode: bool = False
@@ -189,8 +217,11 @@ class ClusterApp(Application):
     host: str = config.server.bind
     interface.add_argument('-H', '--bind', default=host, dest='host')
 
+    advertise: Optional[str] = None
+    interface.add_argument('--advertise', default=None)
+
     port: int = config.server.port
-    interface.add_argument('-p', '--port', default=port, type=int)
+    ranged(interface, '-p', '--port', setting='server.port', default=port)
 
     capture: bool = False
     output_path: str = None
@@ -204,27 +235,27 @@ class ClusterApp(Application):
 
     cores: Optional[int] = config.task.cores or None
     memory: Optional[int] = config.task.memory or None
-    interface.add_argument('-c', '--cores', type=int, default=cores)
-    interface.add_argument('-m', '--memory', type=parse_bytes, default=memory)
+    ranged(interface, '-c', '--cores', setting='task.cores', default=cores)
+    ranged(interface, '-m', '--memory', setting='task.memory', default=memory)
 
     client_cores: Optional[int] = config.client.cores or None
     client_memory: Optional[int] = config.client.memory or None
-    interface.add_argument('-C', '--client-cores', type=int, default=client_cores)
-    interface.add_argument('-M', '--client-memory', type=parse_bytes, default=client_memory)
+    ranged(interface, '-C', '--client-cores', setting='client.cores', default=client_cores)
+    ranged(interface, '-M', '--client-memory', setting='client.memory', default=client_memory)
 
-    ratelimit: int = config.task.get('ratelimit', None)
-    interface.add_argument('-R', '--ratelimit', type=int, default=ratelimit)
+    ratelimit: Optional[float] = config.client.ratelimit or None
+    ranged(interface, '-R', '--ratelimit', setting='client.ratelimit', default=ratelimit)
 
     failure_path: str = None
     interface.add_argument('-f', '--failures', default=None, dest='failure_path')
 
     task_timeout: Optional[int] = config.task.timeout or None
     client_timeout: Optional[int] = config.client.timeout or None
-    interface.add_argument('-W', '--task-timeout', type=parse_time, default=task_timeout, dest='task_timeout')
-    interface.add_argument('-T', '--timeout', type=parse_time, default=client_timeout, dest='client_timeout')
+    ranged(interface, '-W', '--task-timeout', setting='task.timeout', default=task_timeout, dest='task_timeout')
+    ranged(interface, '-T', '--timeout', setting='client.timeout', default=client_timeout, dest='client_timeout')
 
     task_signalwait: int = config.task.signalwait
-    interface.add_argument('-S', '--signalwait', type=int, default=task_signalwait, dest='task_signalwait')
+    ranged(interface, '-S', '--signalwait', setting='task.signalwait', default=task_signalwait, dest='task_signalwait')
 
     autoscaling_policy: str = None
     autoscaling_factor: float = config.autoscale.factor
@@ -234,11 +265,16 @@ class ClusterApp(Application):
     autoscaling_initial: int = config.autoscale.size.init
     interface.add_argument('-A', '--autoscaling', nargs='?', default=None,
                            const=config.autoscale.policy, dest='autoscaling_policy',)
-    interface.add_argument('-F', '--factor', type=float, default=autoscaling_factor, dest='autoscaling_factor')
-    interface.add_argument('-P', '--period', type=int, default=autoscaling_period, dest='autoscaling_period')
-    interface.add_argument('-X', '--min-size', type=int, default=autoscaling_minimum, dest='autoscaling_minimum')
-    interface.add_argument('-Y', '--max-size', type=int, default=autoscaling_maximum, dest='autoscaling_maximum')
-    interface.add_argument('-I', '--init-size', type=int, default=autoscaling_initial, dest='autoscaling_initial')
+    ranged(interface, '-F', '--factor', setting='autoscale.factor', default=autoscaling_factor,
+           dest='autoscaling_factor')
+    ranged(interface, '-P', '--period', setting='autoscale.period', default=autoscaling_period,
+           dest='autoscaling_period')
+    ranged(interface, '-X', '--min-size', setting='autoscale.size.min', default=autoscaling_minimum,
+           dest='autoscaling_minimum')
+    ranged(interface, '-Y', '--max-size', setting='autoscale.size.max', default=autoscaling_maximum,
+           dest='autoscaling_maximum')
+    ranged(interface, '-I', '--init-size', setting='autoscale.size.init', default=autoscaling_initial,
+           dest='autoscaling_initial')
 
     tls: Optional[TLSConfig] = None
     tls_enabled: bool = True
@@ -249,6 +285,9 @@ class ClusterApp(Application):
     interface.add_argument('--tls-key', default=tls_key)
     interface.add_argument('--tls-cert', default=tls_cert)
     interface.add_argument('--tls-ca', default=tls_ca)
+
+    # Seconds from `server.evict` (any duration form), read when the arguments are checked.
+    evict_after: int | float = DEFAULT_EVICT
 
     exceptions = {
         **get_shared_exception_mapping(__name__)
@@ -266,7 +305,8 @@ class ClusterApp(Application):
                  capture=self.capture, monitor=self.monitor, client_timeout=self.client_timeout,
                  task_timeout=self.task_timeout, task_signalwait=self.task_signalwait,
                  cores=self.cores, memory=self.memory, client_cores=self.client_cores,
-                 client_memory=self.client_memory, ratelimit=self.ratelimit, tls=self.tls)
+                 client_memory=self.client_memory, ratelimit=self.ratelimit,
+                 from_json=bool(self.from_json), tls=self.tls, zone=self.zone, evict_after=self.evict_after)
 
     def run_local(self: ClusterApp, **options) -> None:
         """Run local cluster."""
@@ -278,13 +318,14 @@ class ClusterApp(Application):
     def run_launch(self: ClusterApp, **options) -> None:
         """Run remote cluster with custom launcher."""
         bind = self.host if self.host not in ('0.0.0.0', 'localhost') else '0.0.0.0'
-        run_cluster(**options,  launcher=self.launch_mode, remote_exe=self.remote_exe, bind=(bind, self.port))
+        run_cluster(**options,  launcher=self.launch_mode, remote_exe=self.remote_exe, bind=(bind, self.port),
+                    advertise=self.advertise_host)
 
     def run_mpi(self: ClusterApp, **options) -> None:
         """Run remote cluster with 'mpirun'."""
         bind = self.host if self.host not in ('0.0.0.0', 'localhost') else '0.0.0.0'
         run_cluster(**options, launcher='mpirun',
-                    remote_exe=self.remote_exe, bind=(bind, self.port))
+                    remote_exe=self.remote_exe, bind=(bind, self.port), advertise=self.advertise_host)
 
     def run_ssh(self: ClusterApp, **options) -> None:
         """Run remote cluster with SSH."""
@@ -294,7 +335,8 @@ class ClusterApp(Application):
             nodelist = NodeList.from_cmdline(self.ssh_mode if self.ssh_mode != '<default>' else None)
         bind = self.host if self.host not in ('0.0.0.0', 'localhost') else '0.0.0.0'
         run_ssh(**options, launcher='ssh', launcher_args=shlex.split(self.ssh_args), nodelist=nodelist,
-                remote_exe=self.remote_exe, bind=(bind, self.port), export_env=self.export_env)
+                remote_exe=self.remote_exe, bind=(bind, self.port), export_env=self.export_env,
+                advertise=self.advertise_host)
 
     def run_autoscaling(self: ClusterApp, **options) -> None:
         """Run remote cluster with custom launcher and autoscaling."""
@@ -303,7 +345,23 @@ class ClusterApp(Application):
                     policy=self.autoscaling_policy, factor=self.autoscaling_factor,
                     period=self.autoscaling_period, init_size=self.autoscaling_initial,
                     min_size=self.autoscaling_minimum, max_size=self.autoscaling_maximum,
-                    remote_exe=self.remote_exe, bind=(bind, self.port))
+                    remote_exe=self.remote_exe, bind=(bind, self.port), advertise=self.advertise_host,
+                    failed_launches=self.failed_launches)
+
+    @cached_property
+    def failed_launches(self: ClusterApp) -> int:
+        """Launched clients in a row that may fail with none registered before autoscaling stops (`autoscale.failed_launches`)."""
+        return configured_failed_launches()
+
+    @cached_property
+    def advertise_host(self: ClusterApp) -> Optional[str]:
+        """Address remote clients are told to dial: --advertise, else server.advertise, else None (the bind rule)."""
+        if self.advertise is not None:
+            return self.advertise
+        value = config.server.get('advertise', None)
+        if value is None or value == '' or value == PARAM_UNSET:
+            return None
+        return str(value)
 
     @cached_property
     def launchers(self: ClusterApp) -> Dict[str, Callable]:
@@ -329,11 +387,31 @@ class ClusterApp(Application):
 
     def check_arguments(self: ClusterApp) -> None:
         """Various checks on input arguments."""
+        # A number from the configuration (checked as it loaded) is not parsed by the option: under one second is one.
+        self.autoscaling_period = parse_period(self.autoscaling_period)
+        self.evict_after = config_seconds('server', 'evict')
+        self.eager_mode = configured_eager(self.eager_mode)
         given_filepath = self.filepath is not None
-        if self.filepath is None and not self.restart_mode:
+        if self.from_json:
+            if given_filepath:
+                raise ArgumentError('Cannot combine --from-json with a positional task file')
+            validate_json_expansion(self.json_records, self.template)
+            validate_json_groups(self.json_records, zones=self.has_database)
+        elif self.filepath is None and not self.restart_mode:
             self.filepath = '-'  # NOTE: assume STDIN
         if self.restart_mode and self.in_memory:
             raise ArgumentError('Cannot restart without database (given --no-db)')
+        if self.zone is not None:
+            if self.in_memory:
+                raise ArgumentError('Cannot use --zone without database (given --no-db)')
+            try:
+                self.zone = zone_name(self.zone)
+            except ValueError as error:
+                raise ArgumentError(str(error)) from error
+        if self.advertise is not None and self.mode == 'local':
+            raise ArgumentError('Cannot use --advertise with a local cluster (no launched clients)')
+        if self.advertise is not None and not self.advertise.strip():
+            raise ArgumentError('Expected an address for --advertise (given an empty value)')
         if self.output_path and self.mode != 'local':
             raise ArgumentError('Cannot specify -o/--output PATH with remote clients')
         if self.errors_path and self.mode != 'local':
@@ -348,6 +426,14 @@ class ClusterApp(Application):
             raise ArgumentError('Using --restart with --no-db is invalid')
         if self.forever_mode and self.restart_mode:
             raise ArgumentError('Using --forever with --restart is invalid')
+        if self.update_mode and self.repeat_mode:
+            raise ArgumentError('Cannot combine --update with --repeat')
+        if self.restart_mode and self.repeat_mode:
+            raise ArgumentError('Cannot combine --restart with --repeat')  # resume vs. fresh full run
+        if self.update_mode and self.in_memory:
+            raise ArgumentError('Using --update with --no-db is invalid')
+        if self.update_mode and not (self.restart_mode or self.repeat_mode):
+            raise ArgumentError('Using --update requires --restart')  # --update alone is ambiguous.
         if self.ssh_args and not self.ssh_mode:
             raise ArgumentError('Unexpected --ssh-args when not in --ssh mode')
         if self.ssh_group and self.ssh_mode != '<default>':
@@ -358,6 +444,8 @@ class ClusterApp(Application):
             raise ArgumentError('Cannot use --autoscaling with --mpi mode')
         if self.autoscaling_policy is not None and self.in_memory:
             raise ArgumentError('Cannot use --autoscaling without database (given --no-db)')
+        if self.autoscaling_policy is not None:
+            _ = self.failed_launches  # NOTE: a bad setting is refused before anything starts
         if self.autoscaling_policy is not None and self.restart_mode:
             log.warning('Using --restart is redundant with --autoscaling (implies --forever)')
         if self.autoscaling_policy is not None and self.forever_mode:
@@ -383,8 +471,17 @@ class ClusterApp(Application):
                             f'for scaling down after task pressure subsides')
 
     def enable_tls(self: ClusterApp) -> None:
-        """Configure TLS if enabled."""
+        """Configure TLS if enabled; refuse a handshake deadline that is not valid before anything else.
+
+        The server uses TLS unless ``--no-tls`` is given or ``server.tls.enabled`` is false (the switch
+        :func:`~hypershell.core.tls.from_namespace` reads); a plain server never reads the deadline.
+        """
         if self.tls_enabled:
+            if bool(config.server.tls.get('enabled', False)):
+                try:
+                    handshake_seconds(config.server.tls.get('handshake', DEFAULT_HANDSHAKE))
+                except TLSError as error:
+                    raise ArgumentError(str(error)) from error
             self.tls = tls_from_namespace({
                 **config.server.tls,
                 'cert': self.tls_cert,
@@ -409,25 +506,165 @@ class ClusterApp(Application):
 
     @cached_property
     def input_stream(self: ClusterApp) -> Optional[IO]:
-        """IO stream to read task command-line args."""
-        if self.restart_mode:
+        """IO stream to read task command-line args.
+
+        ``None`` for ``--from-json`` (records are read separately) and for a bare
+        ``--restart`` with no file (a pure database resume). A named file is opened here
+        even under ``--restart``/``--repeat``/``--update`` — the file becomes the gated task
+        source (see :meth:`source`).
+        """
+        if self.from_json or self.filepath is None:
             return None
-        else:
-            return sys.stdin if self.filepath == '-' else open(self.filepath, mode='r')
+        return sys.stdin if self.filepath == '-' else open(self.filepath, mode='r')
 
     @cached_property
-    def source(self: ClusterApp) -> Iterable[str]:
-        """Input source for task command-line args."""
-        return [] if self.restart_mode else self.input_stream
+    def json_source(self: ClusterApp) -> Tuple[list, Optional[str]]:
+        """Task records and content md5 from the --from-json spec (file read once)."""
+        return load_json_source(self.from_json)
+
+    @cached_property
+    def json_records(self: ClusterApp) -> list:
+        """Task records loaded from the --from-json spec (read once)."""
+        return self.json_source[0]
+
+    @cached_property
+    def source(self: ClusterApp) -> Iterable[str | dict]:
+        """Input source for task command-line args (or JSON records with --from-json).
+
+        A bare ``--restart`` (no file) yields an empty source — a pure database resume
+        driven by the server's revert-interrupted flow. A named file or ``--from-json``
+        source (with or without ``--restart``/``--repeat``/``--update``) is run through the
+        re-submission gate and wrapped as a :class:`~hypershell.submit.GatedSource`.
+        """
+        if self.from_json:
+            return self.prepare_json_source()
+        if self.filepath is None:
+            return []  # bare --restart: resume scheduling from the database
+        return self.prepare_source(self.input_stream)
+
+    def prepare_source(self: ClusterApp, stream: IO) -> Iterable[str | dict]:
+        """Resolve the task Source, apply the re-submission gate, and wrap the stream.
+
+        Mirrors :meth:`hypershell.submit.SubmitApp.prepare_source` for the cluster entry
+        point. A named file passes through :func:`~hypershell.submit.decide_source_gate`:
+        a duplicate or changed-content re-submission is refused unless
+        ``--restart``/``--repeat``/``--update`` relaxes it. A file that would insert a task
+        below the database's reached group is then refused (exit 2); tasks the gate skips are
+        not checked. Only then does the resolved :class:`Source` record the upfront-counted
+        expectation, *before* any task is scheduled.
+        Explicit ``<stdin>`` and non-seekable inputs carry the reserved ``<stdin>`` source and
+        are exempt; ``--no-db``/non-persistent runs gate nothing (invariant §4).
+
+        The upfront count uses ``DEFAULT_TEMPLATE`` (not ``--template``): the cluster expands
+        the user template client-side, so the server ingests raw lines verbatim and the
+        count must mirror that split (see :class:`~hypershell.server.ServerThread`). The
+        stable per-task fingerprint is template-independent by construction, so the
+        de-dup set matches whether tasks were first ingested by ``hs submit`` or ``hsx``.
+        """
+        if is_file_input(stream):
+            # A named file is checked whole before anything is dispatched, with a database or
+            # without one; the server ingests raw lines, so the scan uses DEFAULT_TEMPLATE.
+            with open(os.path.abspath(self.filepath), mode='r') as text_stream:
+                scan = scan_task_lines(text_stream, name=os.path.abspath(self.filepath), zones=self.has_database)
+        if not self.has_database:
+            return stream  # no persistent database to gate against (invariant §4)
+        if stream is sys.stdin or not stream.seekable():
+            # Explicit <stdin> and non-seekable named inputs (process substitution, FIFOs,
+            # a piped /dev/stdin) cannot be re-read for an upfront count — stream them under
+            # the reserved <stdin> source, exempt from gating. A re-read would drain them.
+            self.warn_gating_no_effect('<stdin>')
+            source_id = Source.reserved(STDIN_SOURCE_ID).id
+            name = '<stdin>' if stream is sys.stdin else os.path.abspath(self.filepath)
+            return GatedSource(stream, source_id, name=name, zone_id=self.zone_id, serves=self.serves)
+        path = os.path.abspath(self.filepath)
+        fingerprint, count = source_fingerprint(path), scan.count
+        log.info(f'Found {count} tasks in {path} (md5={fingerprint})')
+        gate = decide_source_gate(path, fingerprint, count, repeat=self.repeat_mode,
+                                  update=self.update_mode, restart=self.restart_mode)
+
+        def fingerprints() -> List[str]:
+            with open(path, mode='r') as text_stream:
+                return task_fingerprints(text_stream)
+
+        self.refuse_below_reached_group(scan.groups, gate.skip, fingerprints)
+        source_id, skip = gate.commit()
+        return GatedSource(stream, source_id, skip_fingerprints=skip, name=path, zone_id=self.zone_id,
+                           serves=self.serves)
+
+    def prepare_json_source(self: ClusterApp) -> Iterable[dict]:
+        """Resolve the Source and apply the re-submission gate to a ``--from-json`` source.
+
+        The JSON analogue of :meth:`prepare_source`: the file's content md5
+        and record count feed :func:`~hypershell.submit.decide_source_gate`, keyed by
+        ``abspath(FILE)[@node]`` so distinct node selections are distinct sources, and a record
+        below the database's reached group refuses the file before anything is recorded. The
+        per-task fingerprint keys off the pre-template ``args``/tags, so de-dup matches
+        whether the tasks were first ingested by ``hs submit`` or ``hsx``. ``--from-json -``
+        (stdin JSON) carries the reserved ``<stdin>`` source and is exempt;
+        ``--no-db``/non-persistent runs gate nothing (invariant §4).
+        """
+        records, fingerprint = self.json_source
+        if not self.has_database:
+            return records  # no persistent database to gate against (invariant §4)
+        key = json_source_key(self.from_json)
+        if key is None:
+            self.warn_gating_no_effect('<stdin>')
+            source_id = Source.reserved(STDIN_SOURCE_ID).id
+            return GatedSource(records, source_id, name='<stdin>', zone_id=self.zone_id, serves=self.serves)
+        log.info(f'Found {len(records)} tasks in {key} (md5={fingerprint})')
+        gate = decide_source_gate(key, fingerprint, len(records), repeat=self.repeat_mode,
+                                  update=self.update_mode, restart=self.restart_mode)
+        self.refuse_below_reached_group([record.get('group', DEFAULT_TASK_GROUP) for record in records],
+                                        gate.skip, lambda: json_fingerprints(records))
+        source_id, skip = gate.commit()
+        return GatedSource(records, source_id, skip_fingerprints=skip, name=key, zone_id=self.zone_id,
+                           serves=self.serves)
+
+    @staticmethod
+    def refuse_below_reached_group(groups: List[Optional[int]], skip: Optional[set],
+                                   fingerprints: Callable[[], List[str]]) -> None:
+        """Refuse a named file (exit 2) holding a task below the reached group that the gate does not skip.
+
+        Tasks in flight do not count toward the reached group: the server reverts them when it
+        starts, before anything is scheduled.
+        """
+        refuse_below_reached_group(groups, Task.reached_group(in_flight=False), skip=skip, fingerprints=fingerprints)
+
+    @cached_property
+    def zone_id(self: ClusterApp) -> Optional[str]:
+        """Id of the cluster's zone, recorded in the database (None without --zone)."""
+        return None if self.zone is None else Zone.ensure(self.zone)
+
+    @property
+    def serves(self: ClusterApp) -> Optional[str]:
+        """Name of the one zone the cluster's clients serve: a task its input places elsewhere is warned of.
+
+        None with ``--autoscaling``, which launches clients for every zone with tasks.
+        """
+        if self.autoscaling_policy is not None:
+            return None
+        return DEFAULT_ZONE_NAME if self.zone is None else self.zone
+
+    @property
+    def has_database(self: ClusterApp) -> bool:
+        """True unless the run has no database (``--no-db``, or none configured): only then does input name a zone."""
+        return not (self.in_memory or not DATABASE_ENABLED)
+
+    def warn_gating_no_effect(self: ClusterApp, kind: str) -> None:
+        """Note that re-submission gating flags are inert for exempt sources."""
+        if self.repeat_mode or self.update_mode:
+            log.warning(f'--repeat/--update have no effect for {kind} submissions')
 
     def __enter__(self: ClusterApp) -> ClusterApp:
         """Set up resources and attributes."""
-        self.check_arguments()
+        with reading('configuration'):
+            self.check_arguments()
         self.enable_tls()
-        if DATABASE_DIALECT == 'sqlite' or self.auto_initdb:
-            initdb()  # Auto-initialize if local sqlite provider
-        elif not self.in_memory:
-            checkdb()
+        if not self.in_memory:  # With --no-db the configured database is never opened.
+            if DATABASE_DIALECT == 'sqlite' or self.auto_initdb:
+                initdb()  # Auto-initialize if local sqlite provider
+            else:
+                checkdb()
         if self.port == DEFAULT_PORT:
             self.port = next(find_available_ports(bind=self.host))
         return self
@@ -436,9 +673,16 @@ class ClusterApp(Application):
                  exc_type: Optional[Type[Exception]],
                  exc_val: Optional[Exception],
                  exc_tb: Optional[TracebackType]) -> None:
-        """Close IO streams if not standard streams."""
+        """Close IO streams if not standard streams.
+
+        After a failure stop (:class:`~hypershell.cluster.watch.ClusterLaunchError`) an input stream
+        (a FIFO or process substitution) is left open: the submit loader left blocked reading it holds
+        it until its producer writes or closes, and the process exit closes it.
+        """
         if self.input_stream and self.input_stream is not sys.stdin:
-            self.input_stream.close()
+            if not (exc_type is not None and issubclass(exc_type, ClusterLaunchError)
+                    and not is_file_input(self.input_stream)):
+                self.input_stream.close()
         if self.output_stream is not sys.stdout:
             self.output_stream.close()
         if self.errors_stream is not sys.stderr:

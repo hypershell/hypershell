@@ -12,12 +12,13 @@ from typing import Iterable, IO, Optional
 import secrets
 
 # Internal libs
-from hypershell.core.thread import Thread
+from hypershell.core.thread import Thread, join_waking
 from hypershell.core.logging import Logger
 from hypershell.core.template import DEFAULT_TEMPLATE
 from hypershell.core.tls import TLSConfig
 from hypershell.submit import DEFAULT_BUNDLEWAIT
-from hypershell.server import ServerThread, DEFAULT_BUNDLESIZE, DEFAULT_ATTEMPTS, DEFAULT_SERVER_POLL, DEFAULT_PORT
+from hypershell.server import (ServerThread, DEFAULT_BUNDLESIZE, DEFAULT_SERVER_POLL, DEFAULT_PORT,
+                               DEFAULT_EVICT)
 from hypershell.client import ClientThread, DEFAULT_DELAY, DEFAULT_SIGNALWAIT, set_client_standalone
 
 # Public interface
@@ -44,7 +45,7 @@ def run_local(*args, **kwargs) -> None:
     """
     thread = LocalCluster.new(*args, **kwargs)
     try:
-        thread.join()
+        join_waking(thread)
     except Exception:
         thread.stop()
         raise
@@ -115,7 +116,7 @@ class LocalCluster(Thread):
 
         max_retries (int, optional):
             Number of allowed task retries.
-            See :const:`~hypershell.server.DEFAULT_ATTEMPTS`.
+            Default: ``server.attempts`` - 1, read when called.
 
         eager (bool, optional):
             When enabled tasks are retried immediately ahead scheduling new tasks.
@@ -151,7 +152,7 @@ class LocalCluster(Thread):
             Signal escalation waiting period in seconds on task timeout.
             See :const:`~hypershell.client.DEFAULT_SIGNALWAIT`.
 
-        ratelimit (int, optional):
+        ratelimit (float, optional):
             Maximum allowed tasks per second (default: none).
             There is no limit on task throughput unless specified.
 
@@ -159,6 +160,14 @@ class LocalCluster(Thread):
             TLS configuration for queue interface.
             Clients must connect with compatible configuration.
             See :ref:`security <security>` documentation for details.
+
+        zone (str, optional):
+            Zone whose tasks the clients run (default: the default zone).
+            Tasks this cluster submits are placed in the same zone.
+
+        evict_after (int, optional):
+            Period in seconds the server waits on a client's heartbeat before evicting it.
+            See :const:`~hypershell.server.DEFAULT_EVICT`.
 
     Example:
         >>> from hypershell.cluster import LocalCluster
@@ -193,7 +202,7 @@ class LocalCluster(Thread):
                  poll: int = DEFAULT_SERVER_POLL,
                  forever_mode: bool = False,
                  restart_mode: bool = False,
-                 max_retries: int = DEFAULT_ATTEMPTS,
+                 max_retries: Optional[int] = None,
                  eager: bool = False,
                  redirect_failures: IO = None,
                  redirect_output: IO = None,
@@ -204,10 +213,16 @@ class LocalCluster(Thread):
                  client_timeout: int = None,
                  task_timeout: int = None,
                  task_signalwait: int = DEFAULT_SIGNALWAIT,
-                 ratelimit: int = None,
-                 tls: Optional[TLSConfig] = None) -> None:
+                 ratelimit: float = None,
+                 from_json: bool = False,
+                 tls: Optional[TLSConfig] = None,
+                 zone: Optional[str] = None,
+                 evict_after: int = DEFAULT_EVICT) -> None:
         """Initialize with server and single client thread."""
         auth = secrets.token_hex(64)
+        # In JSON mode the server expands the template submit-side; the client
+        # runs the fully resolved commands verbatim (avoids double expansion).
+        client_template = DEFAULT_TEMPLATE if from_json else template
         self.server = ServerThread(source=source,
                                    task_cores=cores,
                                    task_memory=memory,
@@ -224,9 +239,12 @@ class LocalCluster(Thread):
                                    forever_mode=forever_mode,
                                    restart_mode=restart_mode,
                                    redirect_failures=redirect_failures,
+                                   template=template,
+                                   from_json=from_json,
+                                   evict_after=evict_after,
                                    tls=tls)
         self.client = ClientThread(num_threads=num_threads,
-                                   template=template,
+                                   template=client_template,
                                    bundlesize=bundlesize,
                                    bundlewait=bundlewait,
                                    auth=auth,
@@ -243,7 +261,8 @@ class LocalCluster(Thread):
                                    task_timeout=task_timeout,
                                    task_signalwait=task_signalwait,
                                    ratelimit=ratelimit,
-                                   tls=tls)
+                                   tls=tls,
+                                   zone=zone)
         super().__init__(name='hypershell-cluster')
 
     def run_with_exceptions(self: LocalCluster) -> None:

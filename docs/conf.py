@@ -11,6 +11,7 @@
 # documentation root, use os.path.abspath to make it absolute, like shown here.
 
 import datetime
+
 import hypershell
 
 # -- Project information -----------------------------------------------------
@@ -39,8 +40,43 @@ extensions = [
     'sphinx_sitemap',
     'sphinx_inline_tabs',
     'sphinx_copybutton',
-    'sphinxcontrib.details.directive'
+    'sphinx_toolbox.collapse',
+    'sphinx_reredirects',
 ]
+
+# :pr:`82` links pull request #82. Version markers (versionadded/versionchanged) carry one, so a
+# reader can see the change that shipped the behaviour. :commit:`961fb22` links a commit, for the
+# few changes that reached develop without a pull request.
+extlinks = {
+    'pr': ('https://github.com/hypershell/hypershell/pull/%s', '#%s'),
+    'commit': ('https://github.com/hypershell/hypershell/commit/%s', '%s'),
+}
+
+# The Tutorial, blog, and roadmap pages moved to the hypershell.org site. sphinx-reredirects emits a
+# meta-refresh stub at each old path so previously-published ReadTheDocs URLs redirect there instead
+# of 404ing. Keys must be explicit (non-wildcard): the source docs are deleted, and a wildcard would
+# match only pages that still exist. The durable native RTD dashboard redirects are documented in
+# spec/docs-trim-migrated-sections/redirect-runbook.md.
+redirects = {
+    'tutorial/basic': 'https://www.hypershell.org/tutorials/basic',
+    'tutorial/distributed': 'https://www.hypershell.org/tutorials/distributed',
+    'tutorial/hybrid': 'https://www.hypershell.org/tutorials/hybrid',
+    'tutorial/advanced': 'https://www.hypershell.org/tutorials/advanced',
+    'blog/index': 'https://www.hypershell.org/blog',
+    'blog/20230329_2_2_0_release': 'https://www.hypershell.org/blog/hypershell-2-2-0',
+    'blog/20230413_2_3_0_release': 'https://www.hypershell.org/blog/hypershell-2-3-0',
+    'blog/20230602_2_4_0_release': 'https://www.hypershell.org/blog/hypershell-2-4-0',
+    'blog/20240518_2_5_0_release': 'https://www.hypershell.org/blog/hypershell-2-5-0',
+    'blog/20240706_2_5_2_release': 'https://www.hypershell.org/blog/hypershell-2-5-2',
+    'blog/20241115_2_6_0_release': 'https://www.hypershell.org/blog/hypershell-2-6-0',
+    'blog/20241115_announce_logo': 'https://www.hypershell.org/blog/new-logo-and-discord',
+    'blog/20241231_2_6_1_release': 'https://www.hypershell.org/blog/hypershell-2-6-1',
+    'blog/20250215_2_6_5_release': 'https://www.hypershell.org/blog/hypershell-2-6-5',
+    'blog/20250405_2_6_6_release': 'https://www.hypershell.org/blog/hypershell-2-6-6',
+    'blog/20250504_2_7_0_release': 'https://www.hypershell.org/blog/hypershell-2-7-0',
+    'blog/20260705_2_8_0_release': 'https://www.hypershell.org/blog/hypershell-2-8-0',
+    'roadmap': 'https://www.hypershell.org/about',
+}
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ['_templates']
@@ -52,7 +88,9 @@ master_doc = 'index'
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
 # This pattern also affects html_static_path and html_extra_path.
-exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
+# The _include/ fragments are read by `.. include::` only; built as pages of their own they would
+# duplicate every label they define.
+exclude_patterns = ['_build', '_include', 'Thumbs.db', '.DS_Store']
 
 # The name of the Pygments (syntax highlighting) style to use.
 pygments_style = 'dracula'
@@ -74,7 +112,6 @@ html_css_files = [
 ]
 html_favicon = '_static/logo-dark-mode.png'
 html_theme_options = {
-    # 'announcement': 'See Installation page for not on PyPI package name issue!',
     'sidebar_hide_name': True,
     'light_logo': 'logo-light-mode.png',
     'dark_logo': 'logo-dark-mode.png',
@@ -88,7 +125,6 @@ html_theme_options = {
         'color-background-primary': '#161B23',
         'color-sidebar-background': '#11151b',
         'color-sidebar-search-background': '#11151b',
-        'color-announcement-background': '#ee0d7e;',
     },
     'footer_icons': [
         {

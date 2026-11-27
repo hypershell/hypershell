@@ -1,0 +1,168 @@
+# Red run of the new handshake-deadline tests against the base commit (develop 6da633d)
+
+Base src exported with `git archive 6da633d src | tar -x -C "$TMPDIR/lhd-develop"` and put first on
+PYTHONPATH (checked: `hypershell.core.queue` loads from "$TMPDIR/lhd-develop/src" and has no
+`SecureListener.accept_pending`). Python 3.14.6 / OpenSSL 3.5.7 9 Jun 2026, Darwin arm64, 2026-11-14.
+
+    PYTHONPATH="$TMPDIR/lhd-develop/src" uv run pytest -q -p no:cacheprovider tests/test_queue_tls.py -rA -k "<the 7 new tests>"
+
+Expected on the base: the five responsiveness/deadline/stop/reserve tests fail within their bounds;
+test_plain_server_has_no_handshake_deadline and test_burst_of_clients_with_default_deadline pass
+(they guard behaviour that must not change). Observed: exactly that (5 failed, 2 passed).
+
+---
+
+FFFFF..                                                                  [100%]
+=================================== FAILURES ===================================
+___________ test_client_served_while_connections_stall_in_handshake ____________
+
+server_tls = TLSConfig(enabled=True, cert='<pytest-tmp>/tls0/server.crt', key='/private/t...4860/tls0/server.crt', fingerprint=None, insecure=False, min_version='TLSv1.2', ciphers=None, servername=None, sans=[])
+
+    @mark.integration
+    def test_client_served_while_connections_stall_in_handshake(server_tls) -> None:
+        """With 8 connections open that never send a byte, another client connects and makes its first
+        queue call within 5 s."""
+        with_handshake(server_tls, 300)
+        stalled, caller = [], None
+        with QueueServer(queue_config(server_tls)) as server:
+            port = server.address[1]
+            try:
+                for _ in range(8):
+                    stalled.append(socket.create_connection(('127.0.0.1', port), timeout=5))
+                time.sleep(0.25)
+                result = {}
+                caller = threading.Thread(target=first_call, args=(port, server_tls, result), daemon=True)
+                caller.start()
+                caller.join(5)
+                assert 'error' not in result, result
+>               assert result.get('seconds') is not None and result['seconds'] <= 5, \
+                    f'no connect and first call within 5 s with 8 connections stalled ({result})'
+E                   AssertionError: no connect and first call within 5 s with 8 connections stalled ({})
+E                   assert (None is not None)
+E                    +  where None = <built-in method get of dict object at 0x10a2ffe40>('seconds')
+E                    +    where <built-in method get of dict object at 0x10a2ffe40> = {}.get
+
+tests/test_queue_tls.py:710: AssertionError
+_____________ test_handshake_deadline_closes_and_releases[silent] ______________
+
+server_tls = TLSConfig(enabled=True, cert='<pytest-tmp>/tls0/server.crt', key='/private/t...4860/tls0/server.crt', fingerprint=None, insecure=False, min_version='TLSv1.2', ciphers=None, servername=None, sans=[])
+peer = 'silent'
+
+    @mark.integration
+    @mark.skipif(not os.path.isdir('/dev/fd'), reason='needs /dev/fd to count descriptors')
+    @mark.parametrize('peer', ['silent', 'slow'])
+    def test_handshake_deadline_closes_and_releases(server_tls, peer: str) -> None:
+        """With a 2 s deadline, a connection that sends nothing and one that sends a real ClientHello a byte
+        every 0.25 s are each closed 2 to 5 s after connecting, and their thread and descriptor are released
+        within 1 s of the close. The bytes the slow peer keeps sending do not extend the deadline."""
+        with_handshake(server_tls, 2)
+        with QueueServer(queue_config(server_tls)) as server:
+            port = server.address[1]
+            time.sleep(0.25)
+            threads, fds = handlers(), descriptors()
+            sock = socket.create_connection(('127.0.0.1', port), timeout=5)
+            opened = time.monotonic()
+            hello = client_hello()
+            assert len(hello) > 40  # More than 10 s of bytes at this rate
+            trickle = Trickle(sock, hello) if peer == 'slow' else None
+            try:
+                after = closed_after(sock, opened, 6)
+            finally:
+                if trickle is not None:
+                    trickle.stop()
+                sock.close()
+>           assert after is not None and 2 <= after <= 5, f'{peer} connection closed after {after} s (expected 2 to 5 s)'
+E           AssertionError: silent connection closed after None s (expected 2 to 5 s)
+E           assert (None is not None)
+
+tests/test_queue_tls.py:742: AssertionError
+______________ test_handshake_deadline_closes_and_releases[slow] _______________
+
+server_tls = TLSConfig(enabled=True, cert='<pytest-tmp>/tls0/server.crt', key='/private/t...4860/tls0/server.crt', fingerprint=None, insecure=False, min_version='TLSv1.2', ciphers=None, servername=None, sans=[])
+peer = 'slow'
+
+    @mark.integration
+    @mark.skipif(not os.path.isdir('/dev/fd'), reason='needs /dev/fd to count descriptors')
+    @mark.parametrize('peer', ['silent', 'slow'])
+    def test_handshake_deadline_closes_and_releases(server_tls, peer: str) -> None:
+        """With a 2 s deadline, a connection that sends nothing and one that sends a real ClientHello a byte
+        every 0.25 s are each closed 2 to 5 s after connecting, and their thread and descriptor are released
+        within 1 s of the close. The bytes the slow peer keeps sending do not extend the deadline."""
+        with_handshake(server_tls, 2)
+        with QueueServer(queue_config(server_tls)) as server:
+            port = server.address[1]
+            time.sleep(0.25)
+            threads, fds = handlers(), descriptors()
+            sock = socket.create_connection(('127.0.0.1', port), timeout=5)
+            opened = time.monotonic()
+            hello = client_hello()
+            assert len(hello) > 40  # More than 10 s of bytes at this rate
+            trickle = Trickle(sock, hello) if peer == 'slow' else None
+            try:
+                after = closed_after(sock, opened, 6)
+            finally:
+                if trickle is not None:
+                    trickle.stop()
+                sock.close()
+>           assert after is not None and 2 <= after <= 5, f'{peer} connection closed after {after} s (expected 2 to 5 s)'
+E           AssertionError: slow connection closed after None s (expected 2 to 5 s)
+E           assert (None is not None)
+
+tests/test_queue_tls.py:742: AssertionError
+____________________ test_stop_releases_a_pending_handshake ____________________
+
+server_tls = TLSConfig(enabled=True, cert='<pytest-tmp>/tls0/server.crt', key='/private/t...4860/tls0/server.crt', fingerprint=None, insecure=False, min_version='TLSv1.2', ciphers=None, servername=None, sans=[])
+
+    @mark.integration
+    def test_stop_releases_a_pending_handshake(server_tls) -> None:
+        """Stopping the server closes a connection still in its handshake and ends its thread within 1 s."""
+        with_handshake(server_tls, 300)
+        server = QueueServer(queue_config(server_tls))
+        server.start()
+        sock = None
+        try:
+            time.sleep(0.25)
+            threads = handlers()
+            sock = socket.create_connection(('127.0.0.1', server.address[1]), timeout=5)
+            time.sleep(0.5)
+            server.shutdown()
+            stopped = time.monotonic()
+            after = closed_after(sock, stopped, 1)
+>           assert after is not None, 'connection still open 1 s after the server stopped'
+E           AssertionError: connection still open 1 s after the server stopped
+E           assert None is not None
+
+tests/test_queue_tls.py:762: AssertionError
+______________ test_reserve_refuses_a_pending_connection_at_once _______________
+
+server_tls = TLSConfig(enabled=True, cert='<pytest-tmp>/tls0/server.crt', key='/private/t...4860/tls0/server.crt', fingerprint=None, insecure=False, min_version='TLSv1.2', ciphers=None, servername=None, sans=[])
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10a2e28b0>
+
+    @mark.integration
+    def test_reserve_refuses_a_pending_connection_at_once(server_tls, monkeypatch) -> None:
+        """A connection that would use a reserved descriptor is closed at once, before any handshake."""
+        limit = {'value': None}
+        monkeypatch.setattr(hypershell.core.queue, '_open_file_limit', lambda: limit['value'])
+        with_handshake(server_tls, 300)
+        with QueueServer(queue_config(server_tls)) as server:
+            limit['value'] = 0
+            sock = socket.create_connection(('127.0.0.1', server.address[1]), timeout=5)
+            try:
+                after = closed_after(sock, time.monotonic(), 2)
+            finally:
+                sock.close()
+>           assert after is not None and after <= 1, f'refused connection closed after {after} s (expected at once)'
+E           AssertionError: refused connection closed after None s (expected at once)
+E           assert (None is not None)
+
+tests/test_queue_tls.py:783: AssertionError
+==================================== PASSES ====================================
+=========================== short test summary info ============================
+PASSED tests/test_queue_tls.py::test_plain_server_has_no_handshake_deadline
+PASSED tests/test_queue_tls.py::test_burst_of_clients_with_default_deadline
+FAILED tests/test_queue_tls.py::test_client_served_while_connections_stall_in_handshake
+FAILED tests/test_queue_tls.py::test_handshake_deadline_closes_and_releases[silent]
+FAILED tests/test_queue_tls.py::test_handshake_deadline_closes_and_releases[slow]
+FAILED tests/test_queue_tls.py::test_stop_releases_a_pending_handshake - Asse...
+FAILED tests/test_queue_tls.py::test_reserve_refuses_a_pending_connection_at_once
+5 failed, 2 passed, 39 deselected in 26.87s

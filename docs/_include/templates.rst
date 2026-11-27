@@ -15,6 +15,71 @@ These are expanded `prior` to scheduling as the actual `args` for the task.
 
 -------------------
 
+.. _templates_named_fields:
+
+Named Fields
+^^^^^^^^^^^^
+
+|
+
+.. versionadded:: 2.9.0
+   :pr:`48`
+
+When tasks are submitted from a JSON file with ``--from-json`` (see the ``submit``
+command), each task object's keys become available as named template fields. A
+``{key}`` pattern expands to that key's value for the given task, and the keys also
+become task tags.
+
+For a task object ``{"seqid": "Chr1", "start": 1, "end": 5000000}`` the template
+
+``process --region {seqid}:{start}-{end}``
+
+expands to
+
+``process --region Chr1:1-5000000``.
+
+Values are stringified: booleans render as ``true``/``false``, ``null`` as an empty
+string, and nested objects/arrays as compact JSON. A built-in pattern (below) takes
+precedence over a task key of the same name. Named fields are resolved at submit time,
+and every ``{key}`` must be present in each task object or the submission is rejected.
+
+-------------------
+
+.. _templates_slot:
+
+Execution Slot
+^^^^^^^^^^^^^^
+
+|
+
+.. versionadded:: 2.9.0
+   :pr:`52`
+
+Each client runs ``N`` task executors (set with ``-N``/``--num-threads``); every executor owns
+a fixed **slot** for its lifetime, a zero-based index in ``0 .. N-1``. Two patterns expose it so a
+task can claim a non-overlapping share of the node's cores, memory, or GPUs without colliding with
+its siblings.
+
+``{slot}``
+    The executor's zero-based slot index (``0 .. N-1``).
+
+``{slot_count}``
+    The number of executors on this client (``N``).
+
+``taskset -c {slot} ./sim {}``
+    Pin each task to a distinct CPU core.
+
+``CUDA_VISIBLE_DEVICES={slot} python train.py {}``
+    Assign a distinct GPU per task.
+
+These fields are resolved at execution time, when the ``client`` expands the template — the normal
+line-input path, whether database-backed or ``--no-db``. They are *not* available when the template
+is instead expanded at submit time (JSON mode via ``--from-json``, or the ``submit`` command); use
+the equivalent ``TASK_SLOT`` and ``TASK_SLOT_COUNT`` environment variables there, which are always
+defined.
+
+-------------------
+
 Filepath Operations
 ^^^^^^^^^^^^^^^^^^^
 
@@ -145,8 +210,12 @@ through a launcher or over SSH, it includes ``HYPERSHELL_SERVER_AUTH``
 (see :doc:`/security`). Under the default local mode, whose client runs inside
 the ``hs cluster`` process, it includes the variable only if the environment
 that starts ``hs cluster`` already sets it: the key that run mints is never put
-in that process's environment. A client started by hand with ``-k`` has it there
-only if its own environment sets it.
+in that process's environment. A client started by hand has it there only if
+its key comes from that variable rather than from ``server.auth``.
+
+.. versionchanged:: 2.9.0
+   :pr:`104`: a client started by hand takes its key from the environment or a configuration file,
+   never from the command line.
 
 Incoming arguments are intelligently coerced into the expected type.
 E.g., ``2`` will be an integer, ``4.67`` a float, ``null`` and ``none``

@@ -16,7 +16,7 @@ from cmdkit.app import exit_status
 from tests import main
 from hypershell import (
     APP_VERSION, APP_USAGE, APP_HELP, __citation__,
-    ClientApp, InitDBApp, ConfigApp, TaskGroupApp,
+    ClientApp, InitDBApp, ConfigApp, TaskGroupApp, RelayApp,
 )
 
 
@@ -75,6 +75,16 @@ def test_client_help(opt: str) -> None:
     rc, stdout, stderr = main(['hs', 'client', opt, ])
     assert rc == exit_status.success
     assert stdout == ClientApp.interface.help_text
+    assert stderr == ''
+
+
+@mark.integration
+@mark.parametrize('opt', ['-h', '--help'])
+def test_relay_help(opt: str) -> None:
+    """The 'hs relay' command prints help statement with -h, --help option."""
+    rc, stdout, stderr = main(['hs', 'relay', opt, ])
+    assert rc == exit_status.success
+    assert stdout == RelayApp.interface.help_text
     assert stderr == ''
 
 

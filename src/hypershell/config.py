@@ -27,11 +27,12 @@ from rich.syntax import Syntax
 
 # Internal libs
 from hypershell.core.platform import path
-from hypershell.core.types import smart_coerce
 from hypershell.core.logging import Logger
-from hypershell.core.exceptions import get_shared_exception_mapping
-from hypershell.core.config import (load_file, update, ACTIVE_CONFIG_VARS, AUTH_SECTIONS, resolve_auth,
-                                    default as default_config, config as full_config)
+from hypershell.core.config_schema import (match_path, read_value, setting_for, advise, shown, SETTINGS,
+                                           SettingError, Kind, INT_FORM, INT64_MAX)
+from hypershell.core.exceptions import get_shared_exception_mapping, ReadingMixin
+from hypershell.core.config import (load_file, update, ACTIVE_CONFIG_VARS, AUTH_SECTIONS, resolve_auth, env_variable,
+                                    is_key_variable, default as default_config, unchecked_config as full_config)
 
 # Public interface
 __all__ = ['ConfigApp', ]
@@ -61,7 +62,7 @@ Options:
 """
 
 
-class ConfigEditApp(Application):
+class ConfigEditApp(ReadingMixin, Application):
     """Edit configuration with default editor."""
 
     interface = Interface(EDIT_PROGRAM, EDIT_USAGE, EDIT_HELP)
@@ -122,7 +123,7 @@ Options:
 """
 
 
-class ConfigGetApp(Application):
+class ConfigGetApp(ReadingMixin, Application):
     """Get configuration option."""
 
     interface = Interface(GET_PROGRAM, GET_USAGE, GET_HELP)
@@ -147,7 +148,7 @@ class ConfigGetApp(Application):
     list_available: bool = False
     list_console_themes: bool = False
     completion_interface = interface.add_mutually_exclusive_group()
-    completion_interface.add_argument('--list-available', action='version', version=' '.join(ACTIVE_CONFIG_VARS))
+    completion_interface.add_argument('--list-available', action='version', version='\n'.join(ACTIVE_CONFIG_VARS))
     completion_interface.add_argument('--list-console-themes', action='version',
                                       version=' '.join(list(CONSOLE_THEMES)))
 
@@ -262,7 +263,7 @@ SET_HELP = f"""\
 
 Arguments:
   SECTION[...].VAR        Path to variable.
-  VALUE                   Value to be set.
+  VALUE                   Value to be set, written by the key's type.
 
 Options:
       --system            Apply to system configuration.
@@ -272,7 +273,16 @@ Options:
 """
 
 
-class ConfigSetApp(Application):
+def is_utf8(text: str) -> bool:
+    """True if `text` can be written as UTF-8 (a byte that is not UTF-8 arrives as a lone surrogate)."""
+    try:
+        text.encode('utf-8')
+    except UnicodeEncodeError:
+        return False
+    return True
+
+
+class ConfigSetApp(ReadingMixin, Application):
     """Set configuration option."""
 
     interface = Interface(SET_PROGRAM, SET_USAGE, SET_HELP)
@@ -281,7 +291,7 @@ class ConfigSetApp(Application):
     interface.add_argument('varpath', metavar='VAR')
 
     value: str = None
-    interface.add_argument('value', type=smart_coerce)
+    interface.add_argument('value')
 
     site_name: str = 'user'
     site_interface = interface.add_mutually_exclusive_group()
@@ -299,6 +309,18 @@ class ConfigSetApp(Application):
         if '.' not in self.varpath:
             raise ArgumentError('Missing section in variable path')
 
+        # The file is written as UTF-8: a path or value that cannot be is refused before anything is written.
+        if not is_utf8(self.varpath):
+            raise ArgumentError(f'Variable path {self.varpath!r} cannot be written as UTF-8')
+
+        # A refusal names the key.
+        given = '' if is_key_variable(env_variable(*self.varpath.split('.'))) else f', given {self.value!r}'
+        if not is_utf8(self.value):
+            raise ArgumentError(f'{self.varpath}: expected text that can be written as UTF-8{given}')
+
+        # The value is read by the key's kind (a numeric key by its range), and refused before anything is written.
+        value = self.checked_value(given)
+
         section, *subsections, variable = self.varpath.split('.')
 
         config = {section: {}}
@@ -308,8 +330,36 @@ class ConfigSetApp(Application):
                 config_section[subsection] = dict()
             config_section = config_section[subsection]
 
-        config_section[variable] = self.value
+        config_section[variable] = value
         update(self.site_name, config)
+
+    def checked_value(self: ConfigSetApp, given: str) -> Any:
+        """The value to write, read by the key's kind; refused (exit 2, naming the key) if the key cannot hold it.
+
+        A numeric key's value goes through its entry in the table, range and kind, and is written as a
+        number, or a duration or size as given. Any other key's integer must fit TOML's 64 bits.
+        """
+        kind = match_path(self.varpath)
+        setting = setting_for(self.varpath)
+        if setting is not None:
+            entry = SETTINGS[setting]
+            try:
+                checked = entry.parse(self.value, self.varpath, whole=False)
+            except SettingError as error:
+                raise ArgumentError(str(error)) from None
+            value = checked if kind in (Kind.INT, Kind.NUMBER, Kind.INT_OR_NONE) else read_value(kind, self.value)
+            advise(setting, checked, self.varpath, given=value)
+            return value
+        text = self.value.strip()
+        if kind is Kind.UNTYPED and INT_FORM.fullmatch(text):
+            digits = text.lstrip('+-').replace('_', '').lstrip('0')
+            if len(digits) > 20 or not -INT64_MAX - 1 <= int(text) <= INT64_MAX:
+                raise ArgumentError(f'{self.varpath}: expected an integer from {-INT64_MAX - 1:,} to {INT64_MAX:,}, '
+                                    f'given {shown(self.value)}')
+        try:
+            return read_value(kind, self.value)
+        except ValueError as error:
+            raise ArgumentError(f'{self.varpath}: expected {error}{given}') from None
 
 
 WHICH_PROGRAM = 'hs config which'
@@ -332,7 +382,7 @@ Options:
 """
 
 
-class ConfigWhichApp(Application):
+class ConfigWhichApp(ReadingMixin, Application):
     """Show origin of configuration option."""
 
     interface = Interface(WHICH_PROGRAM, WHICH_USAGE, WHICH_HELP)
@@ -380,12 +430,7 @@ class ConfigWhichApp(Application):
         if site in ('default', 'preload', 'logging', ):
             print(f'{value} ({site})')
         elif site == 'env':
-            env_varname = 'HYPERSHELL_' + self.varpath.upper().replace('.', '_')
-            if value == '[...]':
-                for name in full_config.namespaces.env.to_env().flatten(prefix='HYPERSHELL'):
-                    if name.startswith(env_varname):
-                        env_varname = name
-            print(f'{value} (env: {env_varname} | default: {default_value})')
+            print(f'{value} (env: {env_variable(*self.varpath.split("."))} | default: {default_value})')
         else:
             print(f'{value} ({site}: {path[site].config} | default: {default_value})')
 

@@ -58,7 +58,7 @@ will manage tasks entirely within memory.
 
         seq 4 | hsx -t 'echo {}'
 
-    .. details:: Output
+    .. collapse:: Output
 
         .. code-block:: none
 
@@ -83,7 +83,7 @@ see additional detail about what is running, where, and when.
 
         hsx tasks.in -N16 --ssh-group=xyz --capture
 
-    .. details:: Logs
+    .. collapse:: Logs
 
         .. code-block:: none
 
@@ -99,8 +99,9 @@ Use the provided launcher on HPC clusters to bring up workers within your job al
 Specify which program to use with the ``--launcher`` option. Achieve higher throughput by
 aggregating tasks in bundles with ``-b``, ``--bundlesize``. Add a database configuration to
 allow for retries with ``-r``, ``--max-retries``. Using a negative value for ``--delay-start``
-causes the remote clients to sleep some random interval in seconds up to that value. In this
-example we stagger the launch process over one minute.
+causes the remote clients to sleep some random interval up to that value, given in seconds or
+with units (e.g., ``--delay-start=-60`` or ``--delay-start=-1m``). In this example we stagger
+the launch process over one minute.
 
 .. admonition:: Distributed Cluster over Slurm
     :class: note
@@ -109,7 +110,7 @@ example we stagger the launch process over one minute.
 
         hsx tasks.in -N128 -b128 --launcher=srun --max-retries=2 --delay-start=-60 >task.out
 
-    .. details:: Logs
+    .. collapse:: Logs
 
         .. code-block:: none
 
@@ -129,15 +130,22 @@ stand up the *server* on one machine and then connect to that server using a *cl
 a different environment.
 
 Start the server with a bind address of ``0.0.0.0`` to allow remote connections.
-The server schedules tasks on a distributed queue. It is recommended that you protect your instance
-with a private *key* (``-k/--auth``).
+The server schedules tasks on a distributed queue, protected by a private *key* that every client
+must hold. Give the key in the ``HYPERSHELL_SERVER_AUTH`` environment variable, as below, or as
+``server.auth`` in a configuration file. ``export`` is a shell builtin, so the key is on no process's
+command line, where every user on the host could see it.
+
+.. versionchanged:: 2.9.0
+   :pr:`104`: a key on the command line is refused; the server and its clients take it from the
+   environment or a configuration file.
 
 .. admonition:: Server
     :class: note
 
     .. code-block:: shell
 
-        hs server --forever --bind '0.0.0.0' --auth '<AUTHKEY>'
+        export HYPERSHELL_SERVER_AUTH='<AUTHKEY>'
+        hs server --forever --bind '0.0.0.0'
 
 
 Connect to the running server from a different host (even from a different platform, e.g., Windows).
@@ -149,7 +157,8 @@ will each pull tasks off the queue asynchronously, balancing the load.
 
     .. code-block:: shell
 
-        hs client --host '<HOSTNAME>' --auth '<AUTHKEY>' --capture
+        export HYPERSHELL_SERVER_AUTH='<AUTHKEY>'
+        hs client --host '<HOSTNAME>' --capture
 
 |
 
@@ -157,6 +166,9 @@ will each pull tasks off the queue asynchronously, balancing the load.
 
 Individual task metadata is exposed to tasks as environment variables. For example, ``TASK_ID`` provides
 the UUID for the task, and ``TASK_SUBMIT_TIME`` records the date and time the task was submitted.
+For resource-sensitive workloads, ``TASK_SLOT`` is the task's zero-based execution slot (``0 .. N-1``
+for a client running ``N`` tasks in parallel) and ``TASK_SLOT_COUNT`` is that total ``N`` — enough to
+pin each task to a non-colliding share of the node's cores or GPUs.
 
 Any environment variable defined with the ``HYPERSHELL_EXPORT_`` prefix will be injected into
 the environment of each task, *sans prefix*.
@@ -169,6 +181,7 @@ expansion. Many meta-patterns are supported (see full overview of :ref:`template
 * Slicing on whitespace (e.g., first ``'{[0]}'``, first three ``'{[:3]}'``, every other ``'{[::2]}'``)
 * Sub-commands (e.g., ``'{% dirname @ %}'``)
 * Lambda expressions in *x* (e.g., ``'{= x + 1 =}'``)
+* Execution slot for resource pinning (e.g., ``'{slot}'``, ``'{slot_count}'``)
 
 .. admonition:: Templates
     :class: note
@@ -176,6 +189,25 @@ expansion. Many meta-patterns are supported (see full overview of :ref:`template
     .. code-block:: shell
 
         hsx tasks.in -N12 -t './some_program.py {} >outputs/{/-}.out'
+
+.. admonition:: Pin resources per task slot
+    :class: note
+
+    Give each concurrent task a distinct slice of the node — a CPU core:
+
+    .. code-block:: shell
+
+        hsx tasks.in -N4 -t 'taskset -c {slot} ./simulate {}'
+
+    ...or a GPU for accelerator workloads:
+
+    .. code-block:: shell
+
+        hsx tasks.in -N4 -t 'CUDA_VISIBLE_DEVICES={slot} python train.py {}'
+
+.. versionadded:: 2.9.0
+   ``TASK_SLOT``, ``TASK_SLOT_COUNT`` and the ``{slot}`` and ``{slot_count}`` patterns
+   (:pr:`52`).
 
 Capturing `stdout` and `stderr` is supported directly in fact with the ``--capture`` option.
 See the full documentation for environment variables under :ref:`configuration <config>`.
@@ -189,10 +221,29 @@ Add arbitrary tags to one or whole collections of tasks to track additional cont
 
         hs submit tasks.in --tag prod instr:B12 site:us-west-1 batch:12
 
-    .. details:: Logs
+    .. collapse:: Logs
 
         .. code-block:: none
 
             INFO [hypershell.submit] Submitted 20 tasks
+
+Tasks can also come from a structured JSON plan. With ``--from-json`` each task object's
+keys become named ``{key}`` template fields (and task tags), so a plan produced by another
+tool can be executed directly without an intermediate flat task file.
+
+.. admonition:: Submit from a JSON plan
+    :class: note
+
+    .. code-block:: shell
+
+        hsx --from-json plan.json@chunks -N8 \
+            -t 'process_data --region {seqid}:{start}-{end} --id {chunk_id} -o out/{chunk_id}.tsv'
+
+    Where ``plan.json`` contains a ``chunks`` list of task objects, e.g.
+    ``{"chunk_id": "chunk_001", "seqid": "Chr1", "start": 1, "end": 5000000}``. The value is
+    ``FILE[@path]``; the optional dotted ``path`` locates the list within the document.
+
+.. versionadded:: 2.9.0
+   ``--from-json`` (:pr:`48`).
 
 |

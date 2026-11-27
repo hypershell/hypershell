@@ -1,0 +1,228 @@
+# SPDX-FileCopyrightText: 2026 Geoffrey Lentner
+# SPDX-License-Identifier: Apache-2.0
+
+"""
+Watching the client processes a cluster launched, while its server runs.
+
+A cluster in launcher, `--mpi` or `--ssh` mode starts its clients as processes and serves them
+from a server it runs in-process. Every launched process is polled while the server runs; each
+one that exits non-zero is warned about when it exits, while the others still run.
+
+Each cluster mints its key for one run and hands it only to the processes it launches, so once
+they have all exited no client can ever connect again. If at least one of them failed and the
+server still holds work it would otherwise wait on forever (:func:`work_remains`), the cluster
+stops its server and raises :class:`ClusterLaunchError`, naming every process, how it exited and
+the address the clients were told to dial. When every process exited 0 (a launcher that hands its
+clients to a scheduler and returns), or the server ends on its own, nothing is raised.
+
+With a database, the work is read from it; without one, from the count of results the server has
+written, compared with the tasks submitted once the input has ended, which is exact once every
+result already returned is written (:func:`results_written`). A read of the database that fails
+because another connection holds it locked (:func:`database_locked`) is warned about and read again
+at the next poll; it never ends the run.
+"""
+
+
+# Type annotations
+from __future__ import annotations
+from typing import List, Optional, Sequence, Tuple, Final
+
+# Standard libs
+import time
+import signal
+import sqlite3
+from queue import Full as QueueFull
+from subprocess import Popen
+
+# External libs
+from sqlalchemy.exc import OperationalError
+
+# Internal libs
+from hypershell.core.logging import Logger
+from hypershell.data.model import Task, serialize_tasks
+from hypershell.server import ServerThread
+
+# Public interface
+__all__ = ['ClusterLaunchError', 'exit_text', 'database_locked', 'work_remains', 'watch_launched',
+           'WATCH_INTERVAL', 'RESULTS_TIMEOUT', 'SCHEDULE_SETTLE']
+
+# Initialize logger
+log = Logger.with_name('hypershell.cluster')
+
+
+WATCH_INTERVAL: Final[float] = 1.0
+"""Seconds between polls of the launched processes."""
+
+RESULTS_TIMEOUT: Final[float] = 3.0
+"""Seconds to wait for the server to write every result already returned to it."""
+
+SCHEDULE_SETTLE: Final[float] = 2.0
+"""Seconds between the two reads of the database that must both find work remaining."""
+
+
+class ClusterLaunchError(RuntimeError):
+    """Every client a cluster launched has exited, at least one failed, and the server still holds work."""
+
+
+def exit_text(code: int) -> str:
+    """
+    How a process exited, from its return code: `status N`, or `signal N (SIGNAME)` when a signal ended it.
+
+    Example:
+        >>> exit_text(1)
+        'status 1'
+        >>> exit_text(-9)
+        'signal 9 (SIGKILL)'
+    """
+    if code >= 0:
+        return f'status {code}'
+    try:
+        return f'signal {-code} ({signal.Signals(-code).name})'
+    except ValueError:
+        return f'signal {-code}'
+
+
+def database_locked(error: BaseException) -> bool:
+    """
+    True if `error` is SQLite reporting the database, or a table in it, locked by another connection.
+
+    Only a SQLAlchemy :class:`~sqlalchemy.exc.OperationalError` raised for a
+    :class:`sqlite3.OperationalError` counts. SQLite's result code decides: `SQLITE_BUSY` or
+    `SQLITE_LOCKED`, after masking off the extended bits, so an extended code such as 262 (a table
+    locked through a shared cache) counts as the primary code it extends. An error that carries no
+    code (one not raised by SQLite itself) counts only if its message is SQLite's own, `database is
+    locked` or `database table is locked`. Every other error, from any other database or driver,
+    and every other SQLite error, is not a lock.
+    """
+    if not isinstance(error, OperationalError) or not isinstance(error.orig, sqlite3.OperationalError):
+        return False
+    code = getattr(error.orig, 'sqlite_errorcode', None)
+    if code is not None:
+        return (code & 0xFF) in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED)
+    return str(error.orig) in ('database is locked', 'database table is locked')
+
+
+def results_written(server: ServerThread, timeout: float = RESULTS_TIMEOUT) -> bool:
+    """
+    Wait until the server has written every result already returned to it; False if it has not within `timeout`.
+
+    Returned results wait on the server's completed queue for its one receiver, which takes bundles
+    in order and writes each before it takes the next. An empty bundle put behind them is therefore
+    taken only once every result before it is written; a result whose write is held for retry
+    stays in the receiver's `held` list until it lands. A receiver that has ended has nothing left
+    to write.
+    """
+    if not server.receiver.is_alive():
+        return True
+    deadline = time.monotonic() + timeout
+    try:
+        # The same encoding as a client's bundle of results, with none in it: written as a no-op.
+        server.queue.completed.put(serialize_tasks([]), timeout=timeout)
+    except QueueFull:
+        return False
+    while time.monotonic() < deadline:
+        # Queue counters are no barrier here: the receiver marks a bundle done before it writes it.
+        if server.queue.completed.empty() and not server.receiver.machine.held:
+            return True
+        if not server.receiver.is_alive():
+            return True
+        time.sleep(0.1)
+    return False
+
+
+def scheduled_work(server: ServerThread) -> bool:
+    """
+    True if the server's scheduler is running and would schedule more: tasks not completed, or failures to retry.
+
+    This is the scheduler's own rule for stopping, read the same way: every task not completed, in every
+    group and zone, and then the failures it would retry in its current group, under its own attempts
+    and eager setting. Incomplete tasks are counted first, so a failure written between the two reads
+    is still seen. A scheduler that has ended has finished or failed its run on its own. Only committed
+    work counts: input still being read is not work, since no client can run a line until it lands.
+    """
+    scheduler = server.scheduler
+    if not scheduler.is_alive():
+        return False
+    machine = scheduler.machine
+    if Task.count_remaining() > 0:
+        return True
+    if machine.current_group is None:
+        return False  # No group chosen yet: nothing has been scheduled to fail
+    return Task.count_retryable(machine.attempts, group=machine.current_group, eager=machine.eager) > 0
+
+
+def work_remains(server: ServerThread, schedule_settle: float = SCHEDULE_SETTLE) -> bool:
+    """
+    True if `server` would otherwise wait forever on work, once no client can connect to it again.
+
+    Every result already returned is written first (:func:`results_written`). With a database, the
+    scheduler must still be running and find work (:func:`scheduled_work`) twice, `schedule_settle`
+    seconds apart, so a scheduler woken by its last clients leaving can reach its own end first. A
+    read that finds the database locked (:func:`database_locked`) is warned about and decides
+    nothing: False, so the watch reads again at its next poll.
+
+    Without a database, the server's receiver counts the results it has written, and behind the
+    barrier of :func:`results_written` that count is exact. Input still being read is work; once
+    the input has ended, work remains while fewer results are written than tasks were submitted. A
+    server that has ended, or was given no input, has nothing to wait on. So a client that returned
+    every result and then exited non-zero, before it told the server it had finished, leaves no
+    work: the server ends on its own once it evicts that client.
+    """
+    if not results_written(server):
+        return False
+    if server.scheduler is not None:
+        try:
+            if not scheduled_work(server):
+                return False
+            server.join(timeout=schedule_settle)
+            return server.is_alive() and scheduled_work(server)
+        except OperationalError as error:
+            if not database_locked(error):
+                raise
+            log.warning('Could not read whether tasks remain: database was locked (reading again)')
+            return False
+    submitter = server.submitter
+    if not server.is_alive() or submitter is None:
+        return False
+    if submitter.is_alive():
+        return True
+    return server.receiver.machine.written < submitter.task_count
+
+
+def watch_launched(server: ServerThread,
+                   launched: Sequence[Tuple[str, Popen]],
+                   advertised: Tuple[str, int],
+                   interval: float = WATCH_INTERVAL) -> None:
+    """
+    Watch the processes in `launched`, each with its name, until `server` ends.
+
+    A process that exits non-zero is warned about at once, naming it. Once every process has exited,
+    at least one of them non-zero, and the server still has work (:func:`work_remains`), the server
+    is stopped and :class:`ClusterLaunchError` is raised, naming every process, how it exited and the
+    address in `advertised`. That stop does not wait on input still being read: no client is left to
+    run it, and a producer that stays open would hold the stop forever. When the server ends on its
+    own, the processes still running are waited on, and any that exits non-zero is warned about. A
+    failure that ended the server is raised.
+    """
+    codes: List[Optional[int]] = [None] * len(launched)
+
+    def record(index: int, code: int) -> None:
+        codes[index] = code
+        if code != 0:
+            log.warning(f'Client {launched[index][0]} exited with {exit_text(code)}')
+
+    while server.is_alive():
+        for index, (_, proc) in enumerate(launched):
+            if codes[index] is None and (code := proc.poll()) is not None:
+                record(index, code)
+        if None not in codes and any(code != 0 for code in codes) and work_remains(server):
+            server.stop(wait=True, leave_input=True)
+            exits = '; '.join(f'{name} exited with {exit_text(code)}' for (name, _), code in zip(launched, codes))
+            host, port = advertised
+            raise ClusterLaunchError(f'every launched client has exited with tasks remaining: {exits}; '
+                                     f'clients were told to dial {host}:{port}')
+        server.join(timeout=interval)
+    server.join()
+    for index, (_, proc) in enumerate(launched):
+        if codes[index] is None:
+            record(index, proc.wait())

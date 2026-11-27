@@ -17,19 +17,31 @@ from importlib.metadata import version as get_version
 from platform import python_version, python_implementation
 
 # External libs
-from cmdkit.app import Application, ApplicationGroup
+from cmdkit.app import Application, ApplicationGroup, exit_status
 from cmdkit.cli import Interface
+from cmdkit.config import ConfigurationError
 
 # Internal libs
 from hypershell.core.logging import Logger, initialize_logging, role_from_command
+from hypershell.core.config_schema import flush_advice, shown
+from hypershell.core.exceptions import display_critical
 from hypershell.core.signal import register_handlers
-from hypershell.submit import SubmitApp, submit_from, submit_file
-from hypershell.server import ServerApp, serve_from, serve_file, serve_forever
-from hypershell.client import ClientApp, run_client
-from hypershell.cluster import ClusterApp, run_local, run_cluster, run_ssh
-from hypershell.task import TaskGroupApp, TaskInfoApp, TaskWaitApp, TaskRunApp, TaskSearchApp, TaskUpdateApp
-from hypershell.config import ConfigApp
-from hypershell.data import InitDBApp
+
+# The commands read their configuration as they are built: a stray numeric error there is a clean refusal.
+try:
+    from hypershell.submit import SubmitApp, submit_from, submit_file
+    from hypershell.server import ServerApp, serve_from, serve_file, serve_forever
+    from hypershell.client import ClientApp, run_client
+    from hypershell.cluster import ClusterApp, run_local, run_cluster, run_ssh
+    from hypershell.task import TaskGroupApp, TaskInfoApp, TaskWaitApp, TaskRunApp, TaskSearchApp, TaskUpdateApp
+    from hypershell.config import ConfigApp
+    from hypershell.data import InitDBApp
+    from hypershell.relay import RelayApp
+except (ConfigurationError, ValueError, OverflowError) as error:
+    _text = str(error).replace('\n', ' - ')
+    display_critical(_text if isinstance(error, ConfigurationError) else
+                     f'{type(error).__name__}: {_text if len(_text) <= 200 else shown(_text)}', module=__name__)
+    sys.exit(exit_status.bad_config)
 
 # Public interface
 __all__ = [
@@ -39,7 +51,7 @@ __all__ = [
     'ServerApp', 'serve_from', 'serve_file', 'serve_forever',
     'ClientApp', 'run_client',
     'ClusterApp', 'run_local', 'run_cluster', 'run_ssh',
-    'InitDBApp', 'ConfigApp',
+    'InitDBApp', 'ConfigApp', 'RelayApp',
     'TaskGroupApp', 'TaskInfoApp', 'TaskWaitApp', 'TaskRunApp', 'TaskSearchApp', 'TaskUpdateApp',
 ]
 
@@ -87,6 +99,7 @@ Commands:
   cluster                {ClusterApp.__doc__}
   server                 {ServerApp.__doc__}
   client                 {ClientApp.__doc__}
+  relay                  {RelayApp.__doc__}
   submit                 {SubmitApp.__doc__}
   initdb                 {InitDBApp.__doc__}
   info                   {TaskInfoApp.__doc__}
@@ -121,6 +134,7 @@ class HyperShellApp(ApplicationGroup):
         'cluster': ClusterApp,
         'server': ServerApp,
         'client': ClientApp,
+        'relay': RelayApp,
         'submit': SubmitApp,
         'config': ConfigApp,
         'initdb': InitDBApp,
@@ -137,6 +151,7 @@ def main(argv: List[str] | None = None) -> int:
     """Entry-point for 'hs' console application."""
     argv = list(sys.argv[1:] if argv is None else argv)
     initialize_logging(role=role_from_command(argv[0] if argv else None))
+    flush_advice()  # Warnings of settings read before logging was set up, and any later one at once
     register_handlers()
     return HyperShellApp.main(argv)
 

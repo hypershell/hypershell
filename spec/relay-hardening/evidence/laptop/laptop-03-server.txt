@@ -1,0 +1,254 @@
+# server.log from T_last - 10 s to the end; 4077 per-task lines of other tasks left out (the full log stays in the scratch site)
+2026-11-14 04:24:30.865 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.core.dispatch] Dispatched 32 tasks to client 288329ad-3ad5-5c9b-81df-d1b5893b6c8d (zone default)
+2026-11-14 04:24:30.866 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Selected 32 new tasks
+2026-11-14 04:24:30.868 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Updated 32 tasks
+2026-11-14 04:24:30.869 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Confirmed 32 tasks (<host>: 288329ad-3ad5-5c9b-81df-d1b5893b6c8d)
+2026-11-14 04:24:30.873 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Scheduled 32 tasks
+2026-11-14 04:24:30.875 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Updated 32 tasks
+2026-11-14 04:24:31.192 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.core.dispatch] Dispatched 32 tasks to client 288329ad-3ad5-5c9b-81df-d1b5893b6c8d (zone default)
+2026-11-14 04:24:31.193 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Selected 32 new tasks
+2026-11-14 04:24:31.195 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Updated 32 tasks
+2026-11-14 04:24:31.197 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Confirmed 32 tasks (<host>: 288329ad-3ad5-5c9b-81df-d1b5893b6c8d)
+2026-11-14 04:24:31.203 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Updated 32 tasks
+2026-11-14 04:24:31.206 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Scheduled 32 tasks
+2026-11-14 04:24:31.411 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.core.dispatch] Dispatched 32 tasks to client 288329ad-3ad5-5c9b-81df-d1b5893b6c8d (zone default)
+2026-11-14 04:24:31.412 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Selected 32 new tasks
+2026-11-14 04:24:31.413 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Updated 32 tasks
+2026-11-14 04:24:31.415 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Confirmed 32 tasks (<host>: 288329ad-3ad5-5c9b-81df-d1b5893b6c8d)
+2026-11-14 04:24:31.421 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Updated 32 tasks
+2026-11-14 04:24:31.424 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Scheduled 32 tasks
+2026-11-14 04:24:31.741 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.core.dispatch] Dispatched 32 tasks to client 288329ad-3ad5-5c9b-81df-d1b5893b6c8d (zone default)
+2026-11-14 04:24:31.742 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Selected 32 new tasks
+2026-11-14 04:24:31.745 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Updated 32 tasks
+2026-11-14 04:24:31.746 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Confirmed 32 tasks (<host>: 288329ad-3ad5-5c9b-81df-d1b5893b6c8d)
+2026-11-14 04:24:31.754 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Updated 32 tasks
+2026-11-14 04:24:31.758 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Scheduled 32 tasks
+2026-11-14 04:24:31.960 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.core.dispatch] Dispatched 32 tasks to client 288329ad-3ad5-5c9b-81df-d1b5893b6c8d (zone default)
+2026-11-14 04:24:31.961 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Selected 32 new tasks
+2026-11-14 04:24:31.964 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Updated 32 tasks
+2026-11-14 04:24:31.965 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Confirmed 32 tasks (<host>: 288329ad-3ad5-5c9b-81df-d1b5893b6c8d)
+2026-11-14 04:24:31.971 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Updated 32 tasks
+2026-11-14 04:24:31.975 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Scheduled 32 tasks
+2026-11-14 04:24:32.170 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.core.dispatch] Dispatched 32 tasks to client 288329ad-3ad5-5c9b-81df-d1b5893b6c8d (zone default)
+2026-11-14 04:24:32.171 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Selected 32 new tasks
+2026-11-14 04:24:32.173 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Updated 32 tasks
+2026-11-14 04:24:32.174 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Confirmed 32 tasks (<host>: 288329ad-3ad5-5c9b-81df-d1b5893b6c8d)
+2026-11-14 04:24:32.176 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Updated 32 tasks
+2026-11-14 04:24:32.180 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Scheduled 32 tasks
+2026-11-14 04:24:32.503 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.core.dispatch] Dispatched 32 tasks to client 288329ad-3ad5-5c9b-81df-d1b5893b6c8d (zone default)
+2026-11-14 04:24:32.504 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Selected 32 new tasks
+2026-11-14 04:24:32.507 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Updated 32 tasks
+2026-11-14 04:24:32.509 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Confirmed 32 tasks (<host>: 288329ad-3ad5-5c9b-81df-d1b5893b6c8d)
+2026-11-14 04:24:32.514 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Scheduled 32 tasks
+2026-11-14 04:24:32.515 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Updated 32 tasks
+2026-11-14 04:24:32.628 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] No completed tasks returned - waiting
+2026-11-14 04:24:32.729 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.core.dispatch] Dispatched 32 tasks to client 288329ad-3ad5-5c9b-81df-d1b5893b6c8d (zone default)
+2026-11-14 04:24:32.730 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Selected 32 new tasks
+2026-11-14 04:24:32.732 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Updated 32 tasks
+2026-11-14 04:24:32.733 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Confirmed 32 tasks (<host>: 288329ad-3ad5-5c9b-81df-d1b5893b6c8d)
+2026-11-14 04:24:32.738 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Updated 32 tasks
+2026-11-14 04:24:32.742 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Scheduled 32 tasks
+2026-11-14 04:24:32.948 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.core.dispatch] Dispatched 32 tasks to client 288329ad-3ad5-5c9b-81df-d1b5893b6c8d (zone default)
+2026-11-14 04:24:32.949 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Selected 32 new tasks
+2026-11-14 04:24:32.950 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Updated 32 tasks
+2026-11-14 04:24:32.952 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Confirmed 32 tasks (<host>: 288329ad-3ad5-5c9b-81df-d1b5893b6c8d)
+2026-11-14 04:24:32.955 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Scheduled 32 tasks
+2026-11-14 04:24:32.956 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Updated 32 tasks
+2026-11-14 04:24:33.283 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.core.dispatch] Dispatched 32 tasks to client 288329ad-3ad5-5c9b-81df-d1b5893b6c8d (zone default)
+2026-11-14 04:24:33.284 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Selected 32 new tasks
+2026-11-14 04:24:33.287 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Updated 32 tasks
+2026-11-14 04:24:33.288 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Confirmed 32 tasks (<host>: 288329ad-3ad5-5c9b-81df-d1b5893b6c8d)
+2026-11-14 04:24:33.293 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Updated 32 tasks
+2026-11-14 04:24:33.295 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Scheduled 32 tasks
+2026-11-14 04:24:33.507 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.core.dispatch] Dispatched 32 tasks to client 288329ad-3ad5-5c9b-81df-d1b5893b6c8d (zone default)
+2026-11-14 04:24:33.508 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Selected 32 new tasks
+2026-11-14 04:24:33.510 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Updated 32 tasks
+2026-11-14 04:24:33.511 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Confirmed 32 tasks (<host>: 288329ad-3ad5-5c9b-81df-d1b5893b6c8d)
+2026-11-14 04:24:33.516 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Updated 32 tasks
+2026-11-14 04:24:33.520 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Scheduled 32 tasks
+2026-11-14 04:24:33.828 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.core.dispatch] Dispatched 32 tasks to client 288329ad-3ad5-5c9b-81df-d1b5893b6c8d (zone default)
+2026-11-14 04:24:33.829 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Selected 32 new tasks
+2026-11-14 04:24:33.832 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Updated 32 tasks
+2026-11-14 04:24:33.833 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Confirmed 32 tasks (<host>: 288329ad-3ad5-5c9b-81df-d1b5893b6c8d)
+2026-11-14 04:24:33.841 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Updated 32 tasks
+2026-11-14 04:24:33.844 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Scheduled 32 tasks
+2026-11-14 04:24:34.048 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.core.dispatch] Dispatched 32 tasks to client 288329ad-3ad5-5c9b-81df-d1b5893b6c8d (zone default)
+2026-11-14 04:24:34.049 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Selected 32 new tasks
+2026-11-14 04:24:34.051 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Updated 32 tasks
+2026-11-14 04:24:34.052 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Confirmed 32 tasks (<host>: 288329ad-3ad5-5c9b-81df-d1b5893b6c8d)
+2026-11-14 04:24:34.058 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Updated 32 tasks
+2026-11-14 04:24:34.061 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Scheduled 32 tasks
+2026-11-14 04:24:34.383 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.core.dispatch] Dispatched 32 tasks to client 288329ad-3ad5-5c9b-81df-d1b5893b6c8d (zone default)
+2026-11-14 04:24:34.384 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Selected 32 new tasks
+2026-11-14 04:24:34.386 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Updated 32 tasks
+2026-11-14 04:24:34.388 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Confirmed 32 tasks (<host>: 288329ad-3ad5-5c9b-81df-d1b5893b6c8d)
+2026-11-14 04:24:34.395 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Updated 32 tasks
+2026-11-14 04:24:34.399 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Scheduled 32 tasks
+2026-11-14 04:24:34.610 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.core.dispatch] Dispatched 32 tasks to client 288329ad-3ad5-5c9b-81df-d1b5893b6c8d (zone default)
+2026-11-14 04:24:34.611 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Selected 32 new tasks
+2026-11-14 04:24:34.613 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Updated 32 tasks
+2026-11-14 04:24:34.614 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Confirmed 32 tasks (<host>: 288329ad-3ad5-5c9b-81df-d1b5893b6c8d)
+2026-11-14 04:24:34.619 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Scheduled 32 tasks
+2026-11-14 04:24:34.621 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Updated 32 tasks
+2026-11-14 04:24:34.678 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Heartbeat - running (<host>: 288329ad-3ad5-5c9b-81df-d1b5893b6c8d)
+2026-11-14 04:24:34.832 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.core.dispatch] Dispatched 32 tasks to client 288329ad-3ad5-5c9b-81df-d1b5893b6c8d (zone default)
+2026-11-14 04:24:34.833 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Selected 32 new tasks
+2026-11-14 04:24:34.834 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Updated 32 tasks
+2026-11-14 04:24:34.836 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Confirmed 32 tasks (<host>: 288329ad-3ad5-5c9b-81df-d1b5893b6c8d)
+2026-11-14 04:24:34.839 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Scheduled 32 tasks
+2026-11-14 04:24:34.840 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Updated 32 tasks
+2026-11-14 04:24:35.056 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.core.dispatch] Dispatched 32 tasks to client 288329ad-3ad5-5c9b-81df-d1b5893b6c8d (zone default)
+2026-11-14 04:24:35.057 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Selected 32 new tasks
+2026-11-14 04:24:35.058 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Updated 32 tasks
+2026-11-14 04:24:35.059 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Confirmed 32 tasks (<host>: 288329ad-3ad5-5c9b-81df-d1b5893b6c8d)
+2026-11-14 04:24:35.065 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Updated 32 tasks
+2026-11-14 04:24:35.068 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Scheduled 32 tasks
+2026-11-14 04:24:35.384 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.core.dispatch] Dispatched 32 tasks to client 288329ad-3ad5-5c9b-81df-d1b5893b6c8d (zone default)
+2026-11-14 04:24:35.385 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Selected 32 new tasks
+2026-11-14 04:24:35.386 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Updated 32 tasks
+2026-11-14 04:24:35.387 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Confirmed 32 tasks (<host>: 288329ad-3ad5-5c9b-81df-d1b5893b6c8d)
+2026-11-14 04:24:35.390 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Updated 32 tasks
+2026-11-14 04:24:35.393 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Scheduled 32 tasks
+2026-11-14 04:24:35.593 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.core.dispatch] Dispatched 32 tasks to client 288329ad-3ad5-5c9b-81df-d1b5893b6c8d (zone default)
+2026-11-14 04:24:35.593 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Selected 32 new tasks
+2026-11-14 04:24:35.595 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Updated 32 tasks
+2026-11-14 04:24:35.596 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Confirmed 32 tasks (<host>: 288329ad-3ad5-5c9b-81df-d1b5893b6c8d)
+2026-11-14 04:24:35.600 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Updated 32 tasks
+2026-11-14 04:24:35.602 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Scheduled 32 tasks
+2026-11-14 04:24:35.644 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] No completed tasks returned - waiting
+2026-11-14 04:24:35.919 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.core.dispatch] Dispatched 32 tasks to client 288329ad-3ad5-5c9b-81df-d1b5893b6c8d (zone default)
+2026-11-14 04:24:35.919 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Selected 32 new tasks
+2026-11-14 04:24:35.921 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Updated 32 tasks
+2026-11-14 04:24:35.922 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Confirmed 32 tasks (<host>: 288329ad-3ad5-5c9b-81df-d1b5893b6c8d)
+2026-11-14 04:24:35.926 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Updated 32 tasks
+2026-11-14 04:24:35.931 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Scheduled 32 tasks
+2026-11-14 04:24:36.139 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.core.dispatch] Dispatched 32 tasks to client 288329ad-3ad5-5c9b-81df-d1b5893b6c8d (zone default)
+2026-11-14 04:24:36.140 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Selected 32 new tasks
+2026-11-14 04:24:36.142 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Updated 32 tasks
+2026-11-14 04:24:36.144 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Confirmed 32 tasks (<host>: 288329ad-3ad5-5c9b-81df-d1b5893b6c8d)
+2026-11-14 04:24:36.148 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Scheduled 32 tasks
+2026-11-14 04:24:36.149 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Updated 32 tasks
+2026-11-14 04:24:36.357 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.core.dispatch] Dispatched 32 tasks to client 288329ad-3ad5-5c9b-81df-d1b5893b6c8d (zone default)
+2026-11-14 04:24:36.358 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Selected 32 new tasks
+2026-11-14 04:24:36.360 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Updated 32 tasks
+2026-11-14 04:24:36.361 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Confirmed 32 tasks (<host>: 288329ad-3ad5-5c9b-81df-d1b5893b6c8d)
+2026-11-14 04:24:36.365 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Scheduled 32 tasks
+2026-11-14 04:24:36.367 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Updated 32 tasks
+2026-11-14 04:24:36.682 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.core.dispatch] Dispatched 32 tasks to client 288329ad-3ad5-5c9b-81df-d1b5893b6c8d (zone default)
+2026-11-14 04:24:36.684 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Selected 32 new tasks
+2026-11-14 04:24:36.685 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Updated 32 tasks
+2026-11-14 04:24:36.687 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Confirmed 32 tasks (<host>: 288329ad-3ad5-5c9b-81df-d1b5893b6c8d)
+2026-11-14 04:24:36.692 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Scheduled 32 tasks
+2026-11-14 04:24:36.694 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Updated 32 tasks
+2026-11-14 04:24:36.909 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.core.dispatch] Dispatched 32 tasks to client 288329ad-3ad5-5c9b-81df-d1b5893b6c8d (zone default)
+2026-11-14 04:24:36.910 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Selected 32 new tasks
+2026-11-14 04:24:36.912 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Updated 32 tasks
+2026-11-14 04:24:36.913 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Confirmed 32 tasks (<host>: 288329ad-3ad5-5c9b-81df-d1b5893b6c8d)
+2026-11-14 04:24:36.919 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Updated 32 tasks
+2026-11-14 04:24:36.923 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Scheduled 32 tasks
+2026-11-14 04:24:37.121 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.core.dispatch] Dispatched 32 tasks to client 288329ad-3ad5-5c9b-81df-d1b5893b6c8d (zone default)
+2026-11-14 04:24:37.122 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Selected 32 new tasks
+2026-11-14 04:24:37.124 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Updated 32 tasks
+2026-11-14 04:24:37.125 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Confirmed 32 tasks (<host>: 288329ad-3ad5-5c9b-81df-d1b5893b6c8d)
+2026-11-14 04:24:37.129 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Updated 32 tasks
+2026-11-14 04:24:37.131 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Scheduled 32 tasks
+2026-11-14 04:24:37.442 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.core.dispatch] Dispatched 32 tasks to client 288329ad-3ad5-5c9b-81df-d1b5893b6c8d (zone default)
+2026-11-14 04:24:37.443 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Selected 32 new tasks
+2026-11-14 04:24:37.445 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Updated 32 tasks
+2026-11-14 04:24:37.449 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Confirmed 32 tasks (<host>: 288329ad-3ad5-5c9b-81df-d1b5893b6c8d)
+2026-11-14 04:24:37.450 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Scheduled 32 tasks
+2026-11-14 04:24:37.452 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Updated 32 tasks
+2026-11-14 04:24:37.653 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] No completed tasks returned - waiting
+2026-11-14 04:24:37.668 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.core.dispatch] Dispatched 32 tasks to client 288329ad-3ad5-5c9b-81df-d1b5893b6c8d (zone default)
+2026-11-14 04:24:37.669 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Selected 32 new tasks
+2026-11-14 04:24:37.671 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Updated 32 tasks
+2026-11-14 04:24:37.673 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Confirmed 32 tasks (<host>: 288329ad-3ad5-5c9b-81df-d1b5893b6c8d)
+2026-11-14 04:24:37.676 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Scheduled 32 tasks
+2026-11-14 04:24:37.677 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Updated 32 tasks
+2026-11-14 04:24:37.883 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.core.dispatch] Dispatched 32 tasks to client 288329ad-3ad5-5c9b-81df-d1b5893b6c8d (zone default)
+2026-11-14 04:24:37.884 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Selected 32 new tasks
+2026-11-14 04:24:37.886 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Updated 32 tasks
+2026-11-14 04:24:37.887 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Confirmed 32 tasks (<host>: 288329ad-3ad5-5c9b-81df-d1b5893b6c8d)
+2026-11-14 04:24:37.891 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Scheduled 32 tasks
+2026-11-14 04:24:37.891 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Updated 32 tasks
+2026-11-14 04:24:38.210 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.core.dispatch] Dispatched 32 tasks to client 288329ad-3ad5-5c9b-81df-d1b5893b6c8d (zone default)
+2026-11-14 04:24:38.211 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Selected 32 new tasks
+2026-11-14 04:24:38.214 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Updated 32 tasks
+2026-11-14 04:24:38.215 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Confirmed 32 tasks (<host>: 288329ad-3ad5-5c9b-81df-d1b5893b6c8d)
+2026-11-14 04:24:38.222 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Updated 32 tasks
+2026-11-14 04:24:38.225 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Scheduled 32 tasks
+2026-11-14 04:24:38.436 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.core.dispatch] Dispatched 32 tasks to client 288329ad-3ad5-5c9b-81df-d1b5893b6c8d (zone default)
+2026-11-14 04:24:38.437 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Selected 32 new tasks
+2026-11-14 04:24:38.439 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Updated 32 tasks
+2026-11-14 04:24:38.440 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Confirmed 32 tasks (<host>: 288329ad-3ad5-5c9b-81df-d1b5893b6c8d)
+2026-11-14 04:24:38.445 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Updated 32 tasks
+2026-11-14 04:24:38.449 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Scheduled 32 tasks
+2026-11-14 04:24:38.653 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.core.dispatch] Dispatched 32 tasks to client 288329ad-3ad5-5c9b-81df-d1b5893b6c8d (zone default)
+2026-11-14 04:24:38.654 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Selected 32 new tasks
+2026-11-14 04:24:38.656 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Updated 32 tasks
+2026-11-14 04:24:38.657 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Confirmed 32 tasks (<host>: 288329ad-3ad5-5c9b-81df-d1b5893b6c8d)
+2026-11-14 04:24:38.661 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Updated 32 tasks
+2026-11-14 04:24:38.663 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Scheduled 32 tasks
+2026-11-14 04:24:38.986 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.core.dispatch] Dispatched 32 tasks to client 288329ad-3ad5-5c9b-81df-d1b5893b6c8d (zone default)
+2026-11-14 04:24:38.987 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Selected 32 new tasks
+2026-11-14 04:24:38.990 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Updated 32 tasks
+2026-11-14 04:24:38.991 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Confirmed 32 tasks (<host>: 288329ad-3ad5-5c9b-81df-d1b5893b6c8d)
+2026-11-14 04:24:38.997 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Updated 32 tasks
+2026-11-14 04:24:39.000 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Scheduled 32 tasks
+2026-11-14 04:24:39.206 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.core.dispatch] Dispatched 32 tasks to client 288329ad-3ad5-5c9b-81df-d1b5893b6c8d (zone default)
+2026-11-14 04:24:39.206 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Selected 32 new tasks
+2026-11-14 04:24:39.208 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Updated 32 tasks
+2026-11-14 04:24:39.210 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Confirmed 32 tasks (<host>: 288329ad-3ad5-5c9b-81df-d1b5893b6c8d)
+2026-11-14 04:24:39.214 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Updated 32 tasks
+2026-11-14 04:24:39.219 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Scheduled 32 tasks
+2026-11-14 04:24:39.540 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.core.dispatch] Dispatched 32 tasks to client 288329ad-3ad5-5c9b-81df-d1b5893b6c8d (zone default)
+2026-11-14 04:24:39.542 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Selected 32 new tasks
+2026-11-14 04:24:39.545 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Updated 32 tasks
+2026-11-14 04:24:39.546 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Confirmed 32 tasks (<host>: 288329ad-3ad5-5c9b-81df-d1b5893b6c8d)
+2026-11-14 04:24:39.554 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Updated 32 tasks
+2026-11-14 04:24:39.558 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Scheduled 32 tasks
+2026-11-14 04:24:39.762 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.core.dispatch] Dispatched 32 tasks to client 288329ad-3ad5-5c9b-81df-d1b5893b6c8d (zone default)
+2026-11-14 04:24:39.763 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Selected 16 new tasks
+2026-11-14 04:24:39.765 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Updated 16 tasks
+2026-11-14 04:24:39.767 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Confirmed 32 tasks (<host>: 288329ad-3ad5-5c9b-81df-d1b5893b6c8d)
+2026-11-14 04:24:39.769 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Scheduled 16 tasks
+2026-11-14 04:24:39.769 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Scheduled task (01a1d84c-a0c7-7062-a128-f634952c68e0)
+2026-11-14 04:24:39.770 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Updated 32 tasks
+2026-11-14 04:24:39.985 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.core.dispatch] Dispatched 32 tasks to client 288329ad-3ad5-5c9b-81df-d1b5893b6c8d (zone default)
+2026-11-14 04:24:39.986 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Selected 0 new tasks
+2026-11-14 04:24:39.989 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] No tasks available for group (waiting on 272 tasks to complete) - backing off 1 seconds
+2026-11-14 04:24:39.990 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Confirmed 32 tasks (<host>: 288329ad-3ad5-5c9b-81df-d1b5893b6c8d)
+2026-11-14 04:24:39.991 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Updated 32 tasks
+2026-11-14 04:24:40.316 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.core.dispatch] Dispatched 16 tasks to client 288329ad-3ad5-5c9b-81df-d1b5893b6c8d (zone default)
+2026-11-14 04:24:40.317 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Selected 0 new tasks
+2026-11-14 04:24:40.320 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] No tasks available for group (waiting on 272 tasks to complete) - backing off 1 seconds
+2026-11-14 04:24:40.321 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Confirmed 16 tasks (<host>: 288329ad-3ad5-5c9b-81df-d1b5893b6c8d)
+2026-11-14 04:24:40.322 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Updated 16 tasks
+2026-11-14 04:24:40.540 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Selected 0 new tasks
+2026-11-14 04:24:40.542 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] No tasks available for group (waiting on 272 tasks to complete) - backing off 1 seconds
+2026-11-14 04:24:40.649 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] No completed tasks returned - waiting
+2026-11-14 04:24:41.555 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Selected 0 new tasks
+2026-11-14 04:24:41.563 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] No tasks available for group (waiting on 272 tasks to complete) - backing off 2 seconds
+2026-11-14 04:24:42.552 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Selected 0 new tasks
+2026-11-14 04:24:42.556 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] No tasks available for group (waiting on 272 tasks to complete) - backing off 2 seconds
+2026-11-14 04:24:42.651 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] No completed tasks returned - waiting
+2026-11-14 04:24:43.650 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Result applied for task (01a1d84c-a0c7-7062-a128-f634952c68e0)
+2026-11-14 04:24:43.655 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Completed task (01a1d84c-a0c7-7062-a128-f634952c68e0)
+2026-11-14 04:24:44.569 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Selected 0 new tasks
+2026-11-14 04:24:44.573 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Done (scheduler)
+2026-11-14 04:24:44.573 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Waiting (heartbeat)
+2026-11-14 04:24:44.692 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Heartbeat - running (<host>: 288329ad-3ad5-5c9b-81df-d1b5893b6c8d)
+2026-11-14 04:24:44.692 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Signaling clients (1 connected)
+2026-11-14 04:24:44.693 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Disconnect requested (<host>: 288329ad-3ad5-5c9b-81df-d1b5893b6c8d)
+2026-11-14 04:24:45.665 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] No completed tasks returned - waiting
+2026-11-14 04:24:46.717 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Heartbeat - running (<host>: 288329ad-3ad5-5c9b-81df-d1b5893b6c8d)
+2026-11-14 04:24:46.717 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Site client disconnected (<host>: 01a1d84c-a431-7d32-8c58-d9055fbeda6f) via relay 288329ad-3ad5-5c9b-81df-d1b5893b6c8d
+2026-11-14 04:24:47.348 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Client disconnected (<host>: 288329ad-3ad5-5c9b-81df-d1b5893b6c8d)
+2026-11-14 04:24:47.350 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.data.model] Updated 1 clients
+2026-11-14 04:24:47.350 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Site clients disconnected with relay 288329ad-3ad5-5c9b-81df-d1b5893b6c8d (3)
+2026-11-14 04:24:47.351 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Done (heartbeat)
+2026-11-14 04:24:47.351 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Waiting (receiver)
+2026-11-14 04:24:47.351 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Done (receiver)
+2026-11-14 04:24:47.351 <host>    TRACE [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Waiting (confirm)
+2026-11-14 04:24:47.351 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Done (confirm)
+2026-11-14 04:24:47.352 <host>    DEBUG [01a1d84c-a152-7442-af42-b652464bcda7] [hypershell.server] Done

@@ -1,0 +1,7 @@
+# Tests expected to fail on CI only, at the tests-first commit (P1), per `PostgreSQL (ENTRY)` job.
+# Read by drive/ci_check.py with red.txt. `ENTRY[,ENTRY...] NODEID` per line.
+# The real race: TimescaleDB 2.31 reports 0 matched rows for the contended write (local 2.32 does not).
+timescale,timescale-oss tests/test_contended_write.py::test_contended_retry_mark_lands
+timescale,timescale-oss tests/test_contended_write.py::test_contended_cancel_lands
+# The upgraded-database variant needs the hs283 template, which CI builds on every entry.
+pg13,pg18,timescale,timescale-oss,timescale-floor tests/test_contended_write.py::test_reserved_source_concurrent_first_use[upgraded]

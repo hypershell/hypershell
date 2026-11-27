@@ -1,0 +1,109 @@
+# zone_drive dynamic: launches (pid, {zone} word, HYPERSHELL_ZONE, client --zone, group-0 tasks left)
+launch pid=51138 word=default env=default client=- g0=15
+launch pid=51294 word=cpu env=cpu client=cpu g0=15
+launch pid=51384 word=default env=default client=- g0=11
+launch pid=51405 word=default env=default client=- g0=10
+launch pid=51851 word=gpu env=gpu client=gpu g0=0
+launch pid=51915 word=gpu env=gpu client=gpu g0=0
+launch pid=52090 word=gpu env=gpu client=gpu g0=0
+# zone_drive dynamic: tasks (zone, HYPERSHELL_ZONE seen by the task, index)
+cpu cpu 1
+cpu cpu 2
+cpu cpu 3
+default default 1
+default default 10
+default default 11
+default default 12
+default default 2
+default default 3
+default default 4
+default default 5
+default default 6
+default default 7
+default default 8
+default default 9
+gpu gpu 1
+gpu gpu 10
+gpu gpu 11
+gpu gpu 12
+gpu gpu 2
+gpu gpu 3
+gpu gpu 4
+gpu gpu 5
+gpu gpu 6
+gpu gpu 7
+gpu gpu 8
+gpu gpu 9
+# zone_drive dynamic: autoscaler log lines
+    INFO [hypershell.cluster] Autoscale start (policy: dynamic, init-size: 1)
+   DEBUG [hypershell.cluster] Autoscale launcher (zone default): sh <repo>/spec/zone-autoscale/drive/zone_shim.sh <site>/launches.log default <repo>/.venv/bin/hs client -H <host> -p 54707 -N 1 -b 1 -w 5 -t '{}' -d 0 -S 10 -T 2
+    INFO [hypershell.cluster] Autoscale adding client (51138, zone: default)
+   DEBUG [hypershell.cluster] Autoscale check (zone: default, pressure: unknown, clients: 1/1, tasks: 12 in group 0)
+   DEBUG [hypershell.cluster] Autoscale pause (zone: default, waiting on clients to complete initial tasks)
+   DEBUG [hypershell.cluster] Autoscale check (zone: cpu, pressure: unknown, clients: 0/0, tasks: 3 in group 0)
+   DEBUG [hypershell.cluster] Autoscale adding client (zone: cpu, 3 tasks remaining in group 0)
+   DEBUG [hypershell.cluster] Autoscale launcher (zone cpu): sh <repo>/spec/zone-autoscale/drive/zone_shim.sh <site>/launches.log cpu <repo>/.venv/bin/hs client -H <host> -p 54707 -N 1 -b 1 -w 5 -t '{}' -d 0 -S 10 -T 2 --zone cpu
+    INFO [hypershell.cluster] Autoscale adding client (51294, zone: cpu)
+   DEBUG [hypershell.cluster] Autoscale check (zone: default, pressure: 11.28, clients: 1/1, tasks: 11 in group 0)
+   DEBUG [hypershell.cluster] Autoscale pressure high (zone: default, 11.28)
+   DEBUG [hypershell.cluster] Autoscale adding client (zone: default, 11 tasks remaining in group 0)
+    INFO [hypershell.cluster] Autoscale adding client (51384, zone: default)
+   DEBUG [hypershell.cluster] Autoscale check (zone: default, pressure: 10.25, clients: 2/2, tasks: 10 in group 0)
+   DEBUG [hypershell.cluster] Autoscale pressure high (zone: default, 10.25)
+   DEBUG [hypershell.cluster] Autoscale adding client (zone: default, 10 tasks remaining in group 0)
+    INFO [hypershell.cluster] Autoscale adding client (51405, zone: default)
+   DEBUG [hypershell.cluster] Autoscale check (zone: default, pressure: 4.10, clients: 3/3, tasks: 8 in group 0)
+   DEBUG [hypershell.cluster] Autoscale pressure high (zone: default, 4.10)
+   DEBUG [hypershell.cluster] Autoscale max-size reached (zone: default, 3 >= 3)
+   DEBUG [hypershell.cluster] Autoscale check (zone: default, pressure: 1.70, clients: 3/3, tasks: 5 in group 0)
+   DEBUG [hypershell.cluster] Autoscale pressure high (zone: default, 1.70)
+   DEBUG [hypershell.cluster] Autoscale max-size reached (zone: default, 3 >= 3)
+   DEBUG [hypershell.cluster] Autoscale check (zone: default, pressure: 0.68, clients: 3/3, tasks: 2 in group 0)
+   DEBUG [hypershell.cluster] Autoscale pressure low (zone: default, 0.68)
+   DEBUG [hypershell.cluster] Autoscale check (zone: default, pressure: unknown, clients: 2/2, tasks: 0 in group 0)
+   DEBUG [hypershell.cluster] Autoscale pause (zone: default, waiting on clients to complete initial tasks)
+   DEBUG [hypershell.cluster] Autoscale check (zone: gpu, pressure: unknown, clients: 0/0, tasks: 12 in group 1)
+   DEBUG [hypershell.cluster] Autoscale adding client (zone: gpu, 12 tasks remaining in group 1)
+   DEBUG [hypershell.cluster] Autoscale launcher (zone gpu): sh <repo>/spec/zone-autoscale/drive/zone_shim.sh <site>/launches.log gpu <repo>/.venv/bin/hs client -H <host> -p 54707 -N 1 -b 1 -w 5 -t '{}' -d 0 -S 10 -T 2 --zone gpu
+    INFO [hypershell.cluster] Autoscale adding client (51851, zone: gpu)
+   DEBUG [hypershell.cluster] Autoscale check (zone: default, pressure: unknown, clients: 0/0, tasks: 0 in group 1)
+   DEBUG [hypershell.cluster] Autoscale pause (zone: default, no clients and no active tasks)
+   DEBUG [hypershell.cluster] Autoscale check (zone: gpu, pressure: unknown, clients: 1/1, tasks: 12 in group 1)
+   DEBUG [hypershell.cluster] Autoscale pause (zone: gpu, waiting on clients to complete initial tasks)
+   DEBUG [hypershell.cluster] Autoscale check (zone: default, pressure: unknown, clients: 0/0, tasks: 0 in group 1)
+   DEBUG [hypershell.cluster] Autoscale pause (zone: default, no clients and no active tasks)
+   DEBUG [hypershell.cluster] Autoscale check (zone: gpu, pressure: 11.27, clients: 1/1, tasks: 11 in group 1)
+   DEBUG [hypershell.cluster] Autoscale pressure high (zone: gpu, 11.27)
+   DEBUG [hypershell.cluster] Autoscale adding client (zone: gpu, 11 tasks remaining in group 1)
+    INFO [hypershell.cluster] Autoscale adding client (51915, zone: gpu)
+   DEBUG [hypershell.cluster] Autoscale check (zone: default, pressure: unknown, clients: 0/0, tasks: 0 in group 1)
+   DEBUG [hypershell.cluster] Autoscale pause (zone: default, no clients and no active tasks)
+   DEBUG [hypershell.cluster] Autoscale check (zone: gpu, pressure: 10.43, clients: 2/2, tasks: 10 in group 1)
+   DEBUG [hypershell.cluster] Autoscale pressure high (zone: gpu, 10.43)
+   DEBUG [hypershell.cluster] Autoscale adding client (zone: gpu, 10 tasks remaining in group 1)
+    INFO [hypershell.cluster] Autoscale adding client (52090, zone: gpu)
+   DEBUG [hypershell.cluster] Autoscale check (zone: default, pressure: unknown, clients: 0/0, tasks: 0 in group 1)
+   DEBUG [hypershell.cluster] Autoscale pause (zone: default, no clients and no active tasks)
+   DEBUG [hypershell.cluster] Autoscale check (zone: gpu, pressure: 4.11, clients: 3/3, tasks: 8 in group 1)
+   DEBUG [hypershell.cluster] Autoscale pressure high (zone: gpu, 4.11)
+   DEBUG [hypershell.cluster] Autoscale max-size reached (zone: gpu, 3 >= 3)
+   DEBUG [hypershell.cluster] Autoscale check (zone: default, pressure: unknown, clients: 0/0, tasks: 0 in group 1)
+   DEBUG [hypershell.cluster] Autoscale pause (zone: default, no clients and no active tasks)
+   DEBUG [hypershell.cluster] Autoscale check (zone: gpu, pressure: 1.71, clients: 3/3, tasks: 5 in group 1)
+   DEBUG [hypershell.cluster] Autoscale pressure high (zone: gpu, 1.71)
+   DEBUG [hypershell.cluster] Autoscale max-size reached (zone: gpu, 3 >= 3)
+   DEBUG [hypershell.cluster] Autoscale check (zone: default, pressure: unknown, clients: 0/0, tasks: 0 in group 1)
+   DEBUG [hypershell.cluster] Autoscale pause (zone: default, no clients and no active tasks)
+   DEBUG [hypershell.cluster] Autoscale check (zone: gpu, pressure: 0.68, clients: 3/3, tasks: 2 in group 1)
+   DEBUG [hypershell.cluster] Autoscale pressure low (zone: gpu, 0.68)
+   DEBUG [hypershell.cluster] Autoscale check (zone: default, pressure: unknown, clients: 0/0, tasks: 0 in group 1)
+   DEBUG [hypershell.cluster] Autoscale pause (zone: default, no clients and no active tasks)
+   DEBUG [hypershell.cluster] Autoscale check (zone: default, pressure: unknown, clients: 0/0, tasks: 0 in group 1)
+   DEBUG [hypershell.cluster] Autoscale pause (zone: default, no clients and no active tasks)
+   DEBUG [hypershell.cluster] Autoscale check (zone: default, pressure: unknown, clients: 0/0, tasks: 0 in group 1)
+   DEBUG [hypershell.cluster] Autoscale pause (zone: default, no clients and no active tasks)
+   DEBUG [hypershell.cluster] Autoscale check (zone: default, pressure: unknown, clients: 0/0, tasks: 0 in group 1)
+   DEBUG [hypershell.cluster] Autoscale pause (zone: default, no clients and no active tasks)
+   DEBUG [hypershell.cluster] Autoscale check (zone: default, pressure: unknown, clients: 0/0, tasks: 0 in group 1)
+   DEBUG [hypershell.cluster] Autoscale pause (zone: default, no clients and no active tasks)
+# zone_drive dynamic: PASS

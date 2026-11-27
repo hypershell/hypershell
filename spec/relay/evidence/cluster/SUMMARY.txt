@@ -1,0 +1,25 @@
+R21 run B: the relay drive (spec/relay/drive/relay_drive.sh) on a Linux cluster
+================================================================================
+
+Build commit:  d4a2ec8 (HyperShell 2.9.0a4, Python 3.12)
+Allocation:    one Slurm allocation of 3 nodes: the upstream server, site A (1 node), site B (1 node)
+Workload:      2000 tasks x 1 s in 3 groups, 3 of them failing once and retried
+Site clients:  2 per site node, 8 executor threads each; relay bundle size 32
+Settings:      TLS on; upstream eviction 30 s; relay heartbeat 5 s; failover at 0.4 of rows complete
+Records:       results only, as the drive writes them (counts and booleans; no host, user, path or
+               key). The transport (keys, logs, identities) was never copied. Each run id carries
+               the build commit and the allocation's job number.
+
+run                               variant  verdict  checks  wall     rows  peak backlog / bound (A, B)
+relay-d4a2ec8-45133930-r1-kill    kill     PASS     41      142.1 s  2003  128/128, 128/128
+relay-d4a2ec8-45133930-r2-pause   pause    PASS     41      119.0 s  2003  128/128, 128/128
+relay-d4a2ec8-45133930-r3-none    none     PASS     39       96.3 s  2003  128/128, 128/128
+
+kill:  relay B killed holding 112 confirmed tasks; evicted and reverted once; all 112 completed at A.
+pause: relay B paused holding 94; evicted and reverted once; all 94 completed at A, and B's 94 late
+       results refused as stale.
+none:  no failover; every row (2000 tasks and 3 retries) ran exactly once.
+
+Judged 2026-11-06 (stdlib only, no server started):
+  uv run python spec/relay/drive/relay_judge.py spec/relay/evidence/cluster --require kill,pause,none
+  -> relay_judge: PASS (3 runs)

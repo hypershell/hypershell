@@ -1,0 +1,57 @@
+# topology_judge.py with one assertion broken on purpose, over the rehearsal records of judge.txt.
+# Mutation (line 139 of topology_judge.py, restored afterwards; the restored judge passes again):
+#   -            if top > bound.get('max', 0):
+#   +            if top >= bound.get('max', 0):  # BROKEN ON PURPOSE: a peak at max fails
+# Exit status 1.
+rehearsal-fill (fill): FAIL
+  PASS record.schema: schema 1, scenario fill
+  PASS run.deadline: finished within its deadline
+  PASS tasks.complete: 96 of 96 succeeded (96 rows, 96 completed)
+  PASS tasks.failed: 0 failed
+  PASS tasks.group_order: group 0: scheduled from 8.59 s, last completed 24.24 s, group 1: scheduled from 27.76 s, last completed 29.85 s
+  PASS launch.some: 8 site clients launched
+  PASS launch.zone_named: 0 launches whose {zone}, HYPERSHELL_ZONE and --zone differ or are unset
+  PASS launch.placement: 0 launches in a zone their site does not serve; highmem at ['A'], gpu at ['B']
+  PASS launch.nodes: site clients on nodes [1, 2, 3] (node 0 is the server)
+  FAIL launch.peak: peak/max: A cpu 3/3, A highmem 1/2, B cpu 3/3, B gpu 1/2; over: ['A cpu 3 > 3', 'B cpu 3 > 3']
+  PASS launch.key: 0 site clients with the upstream key in their environment
+  PASS exit.all: 0 site clients with no recorded exit
+  PASS exit.idle: 8 idle exits (status 0), 0 by the kill, 0 otherwise
+  PASS relay.no_terminate: "Terminating site client" lines: {'A': 0, 'B': 0}
+  PASS relay.idle_seen: A: 4 idle exits and 0 non-zero of 4 launches, B: 4 idle exits and 0 non-zero of 4 launches
+  PASS launch.none_after_idle: 0 launches after every client had left at 33.32 s (observed until 41.34 s)
+  PASS relay.stayed: A: 0 evictions, 0 departures before the drain; B: 0 evictions, 0 departures before the drain
+  PASS relay.drained: A drained, status 0, B drained, status 0
+  PASS record.scrubbed: found: {'hosts': 0, 'key': 0, 'paths': 0, 'users': 0, 'words': 0}; 0 strings with a path or other unsafe character
+  PASS fill.distribution: distribution fill, sites ['A', 'B']
+  PASS fill.listed_over_rank: cpu registered: {'A': 4.15, 'B': 2.1} (the preferred site registered last)
+  PASS fill.saturate: A launched 3 cpu clients (max 3) before B's first at 16.22 s
+  PASS fill.no_kill: no relay killed or evicted
+rehearsal-spread-kill (spread-kill): FAIL
+  PASS record.schema: schema 1, scenario spread-kill
+  PASS run.deadline: finished within its deadline
+  PASS tasks.complete: 172 of 172 succeeded (172 rows, 172 completed)
+  PASS tasks.failed: 0 failed
+  PASS tasks.group_order: group 0: scheduled from 6.49 s, last completed 9.66 s, group 1: scheduled from 12.71 s, last completed 45.76 s
+  PASS launch.some: 11 site clients launched
+  PASS launch.zone_named: 0 launches whose {zone}, HYPERSHELL_ZONE and --zone differ or are unset
+  PASS launch.placement: 0 launches in a zone their site does not serve; highmem at ['A'], gpu at ['B']
+  PASS launch.nodes: site clients on nodes [1, 2, 3] (node 0 is the server)
+  FAIL launch.peak: peak/max: A cpu 5/5, A highmem 2/2, B cpu 2/5, B gpu 2/2; over: ['A cpu 5 > 5', 'A highmem 2 > 2', 'B gpu 2 > 2']
+  PASS launch.key: 0 site clients with the upstream key in their environment
+  PASS exit.all: 0 site clients with no recorded exit
+  PASS exit.idle: 9 idle exits (status 0), 2 by the kill, 0 otherwise
+  PASS relay.no_terminate: "Terminating site client" lines: {'A': 0, 'B': 0}
+  PASS relay.idle_seen: A: 7 idle exits and 0 non-zero of 7 launches
+  PASS launch.none_after_idle: 0 launches after every client had left at 48.7 s (observed until 56.72 s)
+  PASS relay.stayed: A: 0 evictions, 0 departures before the drain
+  PASS relay.drained: A drained, status 0
+  PASS record.scrubbed: found: {'hosts': 0, 'key': 0, 'paths': 0, 'users': 0, 'words': 0}; 0 strings with a path or other unsafe character
+  PASS spread.distribution: distribution spread
+  PASS spread.cpu_both: cpu launches before the kill: {'A': 2, 'B': 2}
+  PASS spread.side_done_first: group 0 (highmem, gpu) last completed 9.66 s; kill 20.41 s
+  PASS kill.done: kill requested 20.41 s, relay B killed 20.41 s
+  PASS kill.evicted: B evicted {'cpu': 32.4, 'gpu': 32.4}, orphans reverted {'cpu': 32.4, 'gpu': 32.4}
+  PASS kill.dropped: site B left the topology at [32.95] s
+  PASS kill.regrow: A cpu: 3 launches after B's eviction; peak 2 between the kill and the eviction, 5 after it
+topology_judge: FAIL (2 runs, 2 failed; required but not passed: spread-kill, fill)

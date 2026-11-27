@@ -1,0 +1,10 @@
+# Review cycle 1, F2: tests that must fail on the mutant whose retry mark matches its row by id alone
+# (the 'retryable' condition's `match = awaiting` replaced by `(by_id, )` in data/model.py), checked with
+#   sh spec/contended-writes/drive/mutant_check.sh
+# Same format as red.txt (red_check.sh reads it). The `pg:` line is red on plain PostgreSQL and on
+# TimescaleDB that re-checks a row it waited on (2.32 locally); on 2.29-2.31 the mark misses the row
+# and the lookup's own filters skip it, so the mutant passes there and the SQLite tests carry the pin.
+
+tests/test_contended_recovery.py::test_retry_mark_that_waited_matches_only_a_row_awaiting_retry[cancelled]
+tests/test_contended_recovery.py::test_retry_mark_that_waited_matches_only_a_row_awaiting_retry[retried]
+pg:tests/test_contended_write.py::test_contended_retry_mark_skips_cancelled_row

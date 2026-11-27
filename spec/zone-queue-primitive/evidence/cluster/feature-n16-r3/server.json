@@ -1,0 +1,38 @@
+{
+ "label": "feature",
+ "run_id": "feature-n16-r3",
+ "role": "server",
+ "hypershell": "2.9.0a2",
+ "python": "3.13.18",
+ "start_method": "fork",
+ "tls": 1,
+ "tasks": 10000,
+ "clients_expected": 16,
+ "clients_seen": 16,
+ "threads": 1,
+ "bundlesize": 1,
+ "client_bundlesize": 1,
+ "client_bundlewait": 1.0,
+ "server_rc": 0,
+ "submit_s": 2.154,
+ "server_wall_s": 62.846,
+ "db_span_s": 60.198,
+ "tasks_per_s": 166.1,
+ "p10_p90_tasks_per_s": 173.1,
+ "rows": 10000,
+ "retried": 0,
+ "incomplete": 0,
+ "exit_hist": {
+  "0": 9900,
+  "3": 100
+ },
+ "peak": {
+  "rss_mb": 94.0,
+  "threads": 56,
+  "fds": 58,
+  "children": 0,
+  "tree_rss_mb": 94.0,
+  "tree_threads": 56,
+  "tree_fds": 58
+ }
+}

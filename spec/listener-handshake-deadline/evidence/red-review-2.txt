@@ -1,0 +1,13 @@
+# Review cycle 2 (2026-11-14): relay --handshake drive against a copy of src with ssl_sock.settimeout(None) in _complete_handshake (red)
+## relay --handshake 2 (exit 1)
+PASS: upstream hs server listening
+PASS: relay-local server listening
+FAIL: hs relay site-local server: server closed the held connection None s after it connected (expected 2 to 5 s)
+PASS: hs relay still running when the window ended (no site client has run yet)
+PASS: upstream finished the tasks through the relay in 10.3 s (exit 0)
+## relay --handshake 3 (exit 1)
+PASS: upstream hs server listening
+PASS: relay-local server listening
+FAIL: hs relay site-local server: server closed the held connection None s after it connected (expected 3 to 6 s)
+PASS: hs relay still running when the window ended (no site client has run yet)
+PASS: upstream finished the tasks through the relay in 11.3 s (exit 0)

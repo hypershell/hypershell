@@ -46,8 +46,10 @@ from typing import List, Dict, Tuple, Iterable, IO, Optional, Callable, Type, Fi
 from types import TracebackType
 
 # Standard libs
-import io
+import os
 import sys
+import json
+import math
 import time
 from enum import Enum
 from numbers import Real
@@ -59,27 +61,37 @@ from queue import Empty as QueueEmpty, Full as QueueFull
 # External libs
 from cmdkit.app import Application
 from cmdkit.cli import Interface, ArgumentError
+from sqlalchemy import func
 
 # Internal libs
-from hypershell.core.exceptions import get_shared_exception_mapping
-from hypershell.core.config import config, default, find_available_ports, AUTH_ALLOWED_CHARS, AUTH_MINIMUM_LENGTH, resolve_auth
-from hypershell.core.tls import TLSConfig, from_namespace as tls_from_namespace
-from hypershell.core.types import parse_bytes, parse_time
+from hypershell.core.exceptions import get_shared_exception_mapping, ReadingMixin, reading
+from hypershell.core.config import (config, default, find_available_ports, AUTH_ALLOWED_CHARS, AUTH_MINIMUM_LENGTH,
+                                    AUTH_ENV, resolve_auth, refuse_key_option, config_seconds, blame,
+                                    ConfigurationError)
+from hypershell.core.config_schema import Kind, FORMS, SETTINGS, read_value
+from hypershell.core.tls import (TLSConfig, TLSError, DEFAULT_HANDSHAKE, handshake_seconds,
+                                 from_namespace as tls_from_namespace)
+from hypershell.core.types import parse_period, ranged
 from hypershell.core.logging import Logger
 from hypershell.core.fsm import State, StateMachine
-from hypershell.core.thread import Thread
+from hypershell.core.thread import Thread, join_waking
 from hypershell.core.queue import QueueServer, QueueConfig, DEFAULT_REMOTE_TIMEOUT, make_sentinel
+from hypershell.core.dispatch import Dispatcher
 from hypershell.core.signal import check_signal, SIGNAL_MAP, SIGUSR1, SIGUSR2
-from hypershell.core.heartbeat import Heartbeat, ClientState
-from hypershell.data.model import Task, Client, serialize_tasks, deserialize_tasks
+from hypershell.core.heartbeat import Heartbeat, ClientState, RosterEntry
+from hypershell.core.topology import SiteRegistry
+from hypershell.data.model import (Task, Client, Zone, ResultOutcome, CONTENDED_RERUNS, serialize_tasks,
+                                   deserialize_tasks, DEFAULT_ZONE_ID, DEFAULT_ZONE_NAME)
 from hypershell.data import ensuredb, DATABASE_ENABLED
-from hypershell.submit import SubmitThread, LiveSubmitThread, DEFAULT_BUNDLEWAIT
+from hypershell.submit import (SubmitThread, LiveSubmitThread, DEFAULT_BUNDLEWAIT, DEFAULT_TEMPLATE, scan_task_lines,
+                               is_file_input, refuse_below_reached_group)
 from hypershell.client import ClientInfo
 
 # Public interface
 __all__ = ['serve_from', 'serve_file', 'serve_forever', 'ServerThread', 'ServerApp', 'is_file_input',
            'DEFAULT_BUNDLESIZE', 'DEFAULT_BUNDLEWAIT', 'DEFAULT_ATTEMPTS',
-           'DEFAULT_EVICT', 'DEFAULT_EAGER_MODE', 'DEFAULT_SERVER_POLL',
+           'DEFAULT_EVICT', 'DEFAULT_EAGER_MODE', 'DEFAULT_SERVER_POLL', 'EVICT_MINIMUM', 'EVICT_MAXIMUM',
+           'configured_eager', 'configured_retries',
            'DEFAULT_BIND', 'DEFAULT_PORT', 'DEFAULT_AUTH']
 
 # Initialize logger
@@ -91,9 +103,8 @@ class SchedulerState(State, Enum):
     START = 0
     LOAD = 1
     PACK = 2
-    POST = 3
-    FINAL = 4
-    HALT = 5
+    FINAL = 3
+    HALT = 4
 
 
 DEFAULT_BUNDLESIZE: Final[int] = default.server.bundlesize
@@ -102,8 +113,36 @@ DEFAULT_BUNDLESIZE: Final[int] = default.server.bundlesize
 DEFAULT_ATTEMPTS: Final[int] = default.server.attempts
 """Default number of attempts for task retries."""
 
+
+def configured_retries() -> int:
+    """Retries `server.attempts` allows, read when called: the default of every `max_retries` not given."""
+    return config.server.attempts - 1
+
 DEFAULT_EAGER_MODE: Final[bool] = default.server.eager
 """When enabled tasks are retried immediately ahead scheduling new tasks."""
+
+
+def configured_eager(value: bool | int | float | str) -> bool:
+    """The eager mode `server.eager` gives, read by the boolean words the environment layer takes.
+
+    A boolean is used as given. Any other value (a file's text or number) must be one of the boolean
+    words in any letter case, or `ConfigurationError` names the key and its source. The value is named
+    too when the key gives it directly, not by its `_env` or `_eval` form.
+    """
+    if isinstance(value, bool):
+        return value
+    try:
+        return read_value(Kind.BOOL, str(value))
+    except ValueError:
+        table = config.server
+        form = next((given for given in ('eager', 'eager_env', 'eager_eval') if given in table), 'eager')
+        source = blame(config, 'server', form)
+        where = f' ({source})' if source else ''
+        if form == 'eager':
+            raise ConfigurationError(f'server.eager: expected {FORMS[Kind.BOOL]}, given {value!r}{where}') from None
+        if value is None and form == 'eager_env':
+            raise ConfigurationError(f'server.eager_env names {table[form]}, which is not set{where}') from None
+        raise ConfigurationError(f'server.{form}: expected {FORMS[Kind.BOOL]}{where}') from None
 
 DEFAULT_QUERY_PAUSE: Final[int] = default.server.poll  # Backwards compatibility
 DEFAULT_SERVER_POLL: Final[int] = default.server.poll
@@ -115,11 +154,17 @@ SERVER_POLL_MAX: Final[float] = 30.0
 
 
 class Scheduler(StateMachine):
-    """Enqueue tasks from database."""
+    """Stage tasks from database for clients to request.
+
+    Each zone a client serves (and the default zone, always) has a staging pool in the queue
+    server's dispatcher. LOAD selects one chunk for every pool at or below its refill mark, with
+    the same stamping as always; PACK encodes them and hands them to the dispatcher. With nothing to refill,
+    the scheduler waits (bounded) until a client takes tasks or a new zone asks for work.
+    """
 
     tasks: List[Task]
+    loaded: List[Tuple[str, List[Task]]]
     queue: QueueServer
-    bundle: Optional[bytes]
 
     bundlesize: int
     attempts: int
@@ -128,11 +173,14 @@ class Scheduler(StateMachine):
     restart_mode: bool
     poll: float
     poll_max: float
-    startup_phase: bool
     first_group_pending: bool
     highest_started_group: Optional[int]
     last_scheduled_group: Optional[int]
     current_group: Optional[int]
+    submitter: Optional[SubmitThread]
+    halting: bool
+    landed: int
+    finishing: Optional[Tuple[int, int]]
 
     state = SchedulerState.START
     states = SchedulerState
@@ -141,11 +189,12 @@ class Scheduler(StateMachine):
     def __init__(self: Scheduler, queue: QueueServer, bundlesize: int = DEFAULT_BUNDLESIZE,
                  attempts: int = DEFAULT_ATTEMPTS, eager: bool = DEFAULT_EAGER_MODE,
                  forever_mode: bool = False, restart_mode: bool = False,
-                 poll: int = DEFAULT_SERVER_POLL) -> None:
+                 poll: int = DEFAULT_SERVER_POLL, submitter: Optional[SubmitThread] = None) -> None:
         """Initialize queue and parameters."""
         self.queue = queue
         self.tasks = []
-        self.bundle = None
+        self.loaded = []
+        self._own_dispatcher = None
         self.bundlesize = bundlesize
         self.attempts = attempts
         self.eager = eager
@@ -153,11 +202,42 @@ class Scheduler(StateMachine):
         self.restart_mode = restart_mode
         self.poll = SERVER_POLL_MIN
         self.poll_max = poll
-        self.startup_phase = not self.restart_mode  # NOTE: Halt if everything in the database is already finished
         self.first_group_pending = False
         self.highest_started_group = None
         self.last_scheduled_group = None
         self.current_group = None
+        self.submitter = submitter
+        self.held = set()
+        self.woken = False
+        self.halting = False
+        self.landed = 0  # Results written back so far; only the receiver writes it.
+        self.finishing = None  # While the run may end on a landed result: (landed at the count, tasks remaining).
+
+    @property
+    def dispatcher(self: Scheduler) -> Dispatcher:
+        """The queue server's dispatcher, which holds the staging pools.
+
+        A scheduler built without a queue server (driven in-process) stages into a dispatcher
+        of its own.
+        """
+        dispatcher = getattr(self.queue, 'dispatcher', None)
+        if dispatcher is None:
+            if self._own_dispatcher is None:
+                self._own_dispatcher = Dispatcher(bundlesize=self.bundlesize)
+            dispatcher = self._own_dispatcher
+        return dispatcher
+
+    def submission_complete(self: Scheduler) -> bool:
+        """True once no more tasks can arrive from a co-running submitter.
+
+        The scheduler shares a process with an optional :class:`~hypershell.submit.SubmitThread`
+        (a file or a stream given to the cluster or server). It does not stop while that submitter
+        is still reading: with every task read so far done, the database reads as ``remaining == 0``
+        until the next line lands, however late it comes. The submitter ends only after its last
+        commit, so once this is True every row it read is visible to counts taken afterwards. When
+        there is no submitter (bare ``--restart`` DB resume) submission is trivially complete.
+        """
+        return self.submitter is None or not self.submitter.is_alive()
 
     @cached_property
     def actions(self: Scheduler) -> Dict[SchedulerState, Callable[[], SchedulerState]]:
@@ -165,19 +245,23 @@ class Scheduler(StateMachine):
             SchedulerState.START: self.start,
             SchedulerState.LOAD: self.load_bundle,
             SchedulerState.PACK: self.pack_bundle,
-            SchedulerState.POST: self.post_bundle,
             SchedulerState.FINAL: self.finalize,
         }
 
     def start(self: Scheduler) -> SchedulerState:
         """Initial setup then jump to LOAD state."""
         log.debug('Started (scheduler)')
+        Zone.ensure(DEFAULT_ZONE_NAME)
         if self.forever_mode:
             log.info('Scheduler will run forever')
         if (total_tasks := Task.count()) > 0:
             if (tasks_remaining := Task.count_remaining()) == 0:
                 if self.forever_mode:
                     log.info(f'All previous tasks completed ({total_tasks:,}) - waiting for new tasks')
+                elif not self.submission_complete():
+                    # A submitter is still ingesting (e.g. `hsx FILE --restart`): the DB looks
+                    # done only because its novel rows have not landed yet. Wait in LOAD.
+                    log.info(f'All previous tasks completed ({total_tasks:,}) - waiting for incoming tasks')
                 else:
                     log.info(f'All previous tasks completed ({total_tasks:,}) - stopping')
                     return SchedulerState.FINAL
@@ -195,54 +279,144 @@ class Scheduler(StateMachine):
         return SchedulerState.LOAD
 
     def load_bundle(self: Scheduler) -> SchedulerState:
-        """Load the next task bundle from the database."""
+        """Load the next chunk of tasks from the database for each pool that needs one."""
         if check_signal() in (SIGUSR1, SIGUSR2):
             log.warning(f'Signal interrupt ({SIGNAL_MAP[check_signal()]})')
             return SchedulerState.FINAL
-        self.tasks = self.next_tasks()
-        if self.tasks:
-            self.mark_group_started()
-            self.startup_phase = False
-            self.poll = SERVER_POLL_MIN
-            return SchedulerState.PACK
-        elif (not self.forever_mode and Task.count() > 0 and Task.count_remaining() == 0
-              and Task.count_retryable(self.attempts, group=self.current_group, eager=self.eager) == 0
-              and not self.startup_phase):
-            # A failure written back after Task.next() is still retried before the run stops;
-            # retryable failures are counted after incomplete tasks so that write is always seen.
-            return SchedulerState.FINAL
-        else:
-            group_info = Task.increment_group(self.current_group, attempts=self.attempts, eager=self.eager)
-            if not group_info.viable:
-                if self.forever_mode:
-                    log.warning(f'Failed task group {group_info.value} ({group_info.reason})')
-                    group_info.reason = f'waiting on failed tasks to be cleared'
-                    # NOTE: Do not halt in this mode
-                else:
-                    log.critical(f'Failed task group {group_info.value} ({group_info.reason})')
-                    return SchedulerState.FINAL
-            elif group_info.value != self.current_group:
-                log.info(f'Completed task group {self.current_group} - starting task group {group_info.value}')
-                self.current_group = group_info.value
-                return SchedulerState.LOAD
-            self.poll = min(self.poll_max, 2 * self.poll)
-            log.trace(f'No tasks available for group ({group_info.reason}) - backing off {int(self.poll)} seconds')
-            time.sleep(self.poll)
+        self.revert_unstaged()
+        self.revert_handed_back()
+        generation, refills = self.dispatcher.refills()
+        if not refills:
+            self.wait_need(generation, timeout=DEFAULT_REMOTE_TIMEOUT)
             return SchedulerState.LOAD
+        self.loaded = self.next_tasks(refills)
+        if self.loaded:
+            self.tasks = [task for _, tasks in self.loaded for task in tasks]
+            self.mark_group_started()
+            self.poll = SERVER_POLL_MIN
+            self.woken = False
+            self.finishing = None
+            return SchedulerState.PACK
+        # The submitter is read before the counts: once it has ended, every row it read is committed
+        # and the counts below see it.
+        input_ended = self.submission_complete()
+        armed = input_ended and not self.forever_mode
+        if armed:
+            # Armed before the counts: a result landing from here on is checked by the receiver, and
+            # one landing earlier is seen by the counts.
+            mark = self.landed
+            self.finishing = (mark, 0)
+        remaining = None
+        if not self.forever_mode and Task.count() > 0:
+            remaining = Task.count_remaining()
+            if armed:
+                self.finishing = (mark, remaining)
+        if (remaining == 0
+                and Task.count_retryable(self.attempts, group=self.current_group, eager=self.eager) == 0):
+            # Every task is terminal. A failure written back after Task.next() is still retried before
+            # the run stops; retryable failures are counted after incomplete tasks so that write is seen.
+            if input_ended:
+                return SchedulerState.FINAL
+            # Input still being read may yet bring tasks, so wait for it without choosing a next group:
+            # with nothing incomplete there is no group to advance to or to halt on.
+            return self.back_off(generation, 'All tasks done, input still open')
+        group_info = Task.increment_group(self.current_group, attempts=self.attempts, eager=self.eager)
+        if not group_info.viable:
+            if self.forever_mode:
+                log.warning(f'Failed task group {group_info.value} ({group_info.reason})')
+                group_info.reason = f'waiting on failed tasks to be cleared'
+                # NOTE: Do not halt in this mode
+            elif Task.count_remaining_outside(group_info.value) == 0:
+                # A failed group halts the run only while a task waits in another group. With none, a
+                # result written back after the counts above makes this the out-of-work case: the run
+                # stops once the input has ended and nothing is left, and otherwise waits as it does
+                # there (a line committed to this group since its check is loaded on the next pass).
+                if input_ended and Task.count_remaining() == 0:
+                    return SchedulerState.FINAL
+                return self.back_off(generation, f'Failed task group {group_info.value} holds no task '
+                                                 f'in another group')
+            else:
+                log.critical(f'Failed task group {group_info.value} ({group_info.reason})')
+                return SchedulerState.FINAL
+        elif group_info.value != self.current_group:
+            log.info(f'Completed task group {self.current_group} - starting task group {group_info.value}')
+            self.current_group = group_info.value
+            return SchedulerState.LOAD
+        self.report_held(group_info.value)
+        return self.back_off(generation, f'No tasks available for group ({group_info.reason})')
 
-    def next_tasks(self: Scheduler) -> List[Task]:
-        """Select the next tasks to schedule from the current group."""
+    def back_off(self: Scheduler, generation: int, reason: str) -> SchedulerState:
+        """Wait for new demand or the next poll, then load again.
+
+        A back-off cut short by a client taking tasks was not an empty poll; only a wait that ran its
+        full length grows the next one, up to the server's poll interval.
+        """
+        if not self.woken:
+            self.poll = min(self.poll_max, 2 * self.poll)
+        log.trace(f'{reason} - backing off {int(self.poll)} seconds')
+        self.woken = self.wait_need(generation, timeout=self.poll)
+        return SchedulerState.LOAD
+
+    def wait_need(self: Scheduler, generation: int, timeout: float) -> bool:
+        """Wait up to `timeout` for a cut or new demand, as the dispatcher's own wait does, unless halting.
+
+        Returns True when a cut or new demand ended (or skipped) the wait. The wait is on the
+        dispatcher's condition, and :meth:`halt` flags the halt and wakes that condition under the same
+        lock, so a halt is either seen before the wait or ends it at once.
+        """
+        dispatcher = self.dispatcher
+        with dispatcher.need:
+            if not self.halting and dispatcher.generation == generation:
+                dispatcher.need.wait(timeout)
+            return dispatcher.generation != generation
+
+    def halt(self: Scheduler) -> None:
+        """Set flag to signal for termination, and end a wait for demand so the halt is seen at once."""
+        super().halt()
+        dispatcher = self.dispatcher
+        with dispatcher.need:
+            self.halting = True
+            dispatcher.need.notify_all()
+
+    def wake(self: Scheduler) -> None:
+        """End a back-off at once, so the next pass runs without waiting out the poll interval."""
+        self.dispatcher.wake()
+
+    def results_landed(self: Scheduler, count: int) -> None:
+        """Count `count` results written back, and wake the scheduler if they finished the run.
+
+        Called by the receiver after each write. While a pass that found nothing to load is armed (the
+        input has ended, not in forever mode), the run can end only once as many results have landed
+        since its count as it found tasks remaining; only then are the stop predicate's counts read
+        here, and the scheduler is woken when nothing is left incomplete or retryable. The woken pass
+        reads the counts itself and stops.
+        """
+        self.landed += count
+        finishing = self.finishing
+        if finishing is None or self.landed - finishing[0] < finishing[1]:
+            return
+        if (Task.count_remaining() == 0
+                and Task.count_retryable(self.attempts, group=self.current_group, eager=self.eager) == 0):
+            log.trace('Result finished the run - waking scheduler')
+            self.wake()
+
+    def next_tasks(self: Scheduler, refills: List[Tuple[str, int]]) -> List[Tuple[str, List[Task]]]:
+        """Select the next tasks to schedule from the current group, for each zone that needs a refill."""
         if self.first_group_pending:
             # On an empty-database start no task is scheduled into a group chosen before any task
             # existed: the first group is the lowest one holding tasks, once there are any.
+            # Groups order the whole run, so the first group is chosen across every zone.
             first_group = Task.lowest_incomplete_group()
             if first_group is None:
                 return []
             self.current_group = first_group
-        return Task.next(limit=self.bundlesize,
-                         attempts=self.attempts,
-                         eager=self.eager,
-                         group=self.current_group)
+        loaded = []
+        for zone, size in refills:
+            tasks = Task.next(limit=size, attempts=self.attempts, eager=self.eager,
+                              group=self.current_group, zone=zone)
+            if tasks:
+                loaded.append((zone, tasks))
+        return loaded
 
     def mark_group_started(self: Scheduler) -> None:
         """Record that the current group has scheduled tasks, warning if a higher group started first."""
@@ -269,36 +443,81 @@ class Scheduler(StateMachine):
         """
         if self.first_group_pending:
             return group
-        if Task.count_remaining(group=group) == 0:
-            # With every task in the group complete, increment_group holds the group while a
-            # failure awaits retry, and halts it on a failure that has used its retries.
-            held = Task.increment_group(group, attempts=self.attempts, eager=self.eager)
-            if not held.viable or Task.count_retryable(self.attempts, group=group, eager=self.eager) > 0:
-                return group
-        lowest = Task.lowest_incomplete_group()
-        if lowest is None:
+        start = Task.starting_group(group, attempts=self.attempts, eager=self.eager)
+        if start is None:
             log.debug('No incomplete tasks - first task group chosen once tasks arrive')
             self.first_group_pending = True
             return group
-        if lowest != group:
-            log.debug(f'Moving to task group {lowest} (lowest group with incomplete tasks)')
-        return lowest
+        if start != group:
+            log.debug(f'Moving to task group {start} (lowest group with incomplete tasks)')
+        return start
+
+    @property
+    def active_group(self: Scheduler) -> Optional[int]:
+        """
+        The task group tasks are loaded from now, or None while it is not yet known.
+
+        None before the scheduler has started, and while it waits for the first tasks to choose
+        its first group. Read from other threads (the autoscaler), so it only reads attributes.
+        """
+        return None if self.first_group_pending else self.current_group
 
     def pack_bundle(self: Scheduler) -> SchedulerState:
-        """Pack tasks into bundle (list)."""
-        self.bundle = serialize_tasks(self.tasks)
-        return SchedulerState.POST
-
-    def post_bundle(self: Scheduler) -> SchedulerState:
-        """Put bundle on outbound queue."""
-        try:
-            self.queue.scheduled.put(self.bundle, timeout=DEFAULT_REMOTE_TIMEOUT)
-            log.debug(f'Scheduled {len(self.tasks)} tasks')
-            for task in self.tasks:
+        """Hand the loaded chunks, encoded once here, to their zones' pools."""
+        for zone, tasks in self.loaded:
+            self.dispatcher.stage(zone, [(task.id, json.dumps(task.to_json())) for task in tasks])
+            log.debug(f'Scheduled {len(tasks)} tasks')
+            for task in tasks:
                 log.trace(f'Scheduled task ({task.id})')
-            return SchedulerState.LOAD
-        except QueueFull:
-            return SchedulerState.POST
+        self.loaded = []
+        return SchedulerState.LOAD
+
+    def report_held(self: Scheduler, group: int) -> None:
+        """Log, once per zone, that `group` waits on tasks of a zone no client serves.
+
+        A zone counts when it has tasks of the group not yet scheduled and no client asking for
+        it. The default zone counts only while some client serves another zone, so a run without
+        zones logs nothing new.
+        """
+        waiting = dict(Task.query(Task.zone, func.count(Task.id))
+                       .filter(Task.group == group)
+                       .filter(Task.schedule_time.is_(None))
+                       .group_by(Task.zone).all())
+        if None in waiting:
+            waiting[DEFAULT_ZONE_ID] = waiting.pop(None) + self.dispatcher.staged(DEFAULT_ZONE_ID)
+        elif self.dispatcher.staged(DEFAULT_ZONE_ID):
+            waiting[DEFAULT_ZONE_ID] = self.dispatcher.staged(DEFAULT_ZONE_ID)
+        zoned = any(self.dispatcher.clients(zone) for zone in waiting if zone != DEFAULT_ZONE_ID)
+        idle = [zone for zone in waiting if (group, zone) not in self.held and not self.dispatcher.clients(zone)
+                and (zone != DEFAULT_ZONE_ID or zoned or self.dispatcher.zoned())]
+        if not idle:
+            return
+        names = Zone.names_for_ids([zone for zone in idle if zone != DEFAULT_ZONE_ID])
+        names[DEFAULT_ZONE_ID] = DEFAULT_ZONE_NAME
+        for zone in idle:
+            self.held.add((group, zone))
+            log.info(f'Task group {group} waiting on zone {names.get(zone, zone)}: '
+                     f'{waiting[zone]} tasks, no client serving it')
+
+    def revert_unstaged(self: Scheduler) -> None:
+        """Revert the rows staged for zones whose last client is gone, so another run can take them.
+
+        A row cancelled, completed or deleted while staged is left as it is.
+        """
+        if ids := self.dispatcher.take_unstaged():
+            reverted = Task.revert_staged(ids)
+            kept = f'; {len(ids) - reverted} left as completed, cancelled or deleted' if reverted < len(ids) else ''
+            log.info(f'Reverted {reverted} staged tasks (zone has no client{kept})')
+
+    def revert_handed_back(self: Scheduler) -> None:
+        """Requeue the tasks retired relays handed back, each only while it is still that relay's assignment.
+
+        A task completed, cancelled, dispatched again or deleted since is left as it is.
+        """
+        for identity, assignments in self.dispatcher.take_handbacks():
+            reverted = len(Task.revert_handed_back(identity, assignments))
+            kept = f'; {len(assignments) - reverted} already settled' if reverted < len(assignments) else ''
+            log.info(f'Requeued {reverted} tasks handed back by relay ({identity}{kept})')
 
     @staticmethod
     def finalize() -> SchedulerState:
@@ -317,11 +536,13 @@ class SchedulerThread(Thread):
                  eager: bool = DEFAULT_EAGER_MODE,
                  forever_mode: bool = False,
                  restart_mode: bool = False,
-                 poll: int = DEFAULT_SERVER_POLL) -> None:
+                 poll: int = DEFAULT_SERVER_POLL,
+                 submitter: Optional[SubmitThread] = None) -> None:
         """Initialize machine."""
         super().__init__(name='hypershell-scheduler')
         self.machine = Scheduler(queue=queue, bundlesize=bundlesize, attempts=attempts, eager=eager,
-                                 forever_mode=forever_mode, restart_mode=restart_mode, poll=poll)
+                                 forever_mode=forever_mode, restart_mode=restart_mode, poll=poll,
+                                 submitter=submitter)
 
     def run_with_exceptions(self: SchedulerThread) -> None:
         """Run machine."""
@@ -355,9 +576,10 @@ class Confirm(StateMachine):
     state = ConfirmState.START
     states = ConfirmState
 
-    def __init__(self: Confirm, queue: QueueServer, in_memory: bool = False) -> None:
-        """Initialize machine."""
+    def __init__(self: Confirm, queue: QueueServer, in_memory: bool = False, strict: bool = True) -> None:
+        """Initialize machine; with `strict` false, a confirmed task whose row is gone is skipped, not raised."""
         self.in_memory = in_memory
+        self.strict = strict
         self.queue = queue
         self.client_data = None
         self.client_info = None
@@ -400,7 +622,8 @@ class Confirm(StateMachine):
     def update_info(self: Confirm) -> ConfirmState:
         """Update client info in database for confirmed task bundle."""
         if not self.in_memory:
-            Task.update_all(self.client_info.transpose())
+            info = self.client_info
+            Task.confirm_all(info.task_ids, info.client_id, info.client_host, strict=self.strict)
         return ConfirmState.UNLOAD
 
     @staticmethod
@@ -444,21 +667,28 @@ class Receiver(StateMachine):
 
     queue: QueueServer
     tasks: List[Task]
+    held: List[Task]
     bundle: Optional[bytes]
 
     in_memory: bool
     redirect_failures: IO
+    scheduler: Optional[Scheduler]
+    written: int  # Results applied since the receiver started; written by its own thread only.
 
     state = ReceiverState.START
     states = ReceiverState
 
-    def __init__(self: Receiver, queue: QueueServer, in_memory: bool = False, redirect_failures: IO = None) -> None:
-        """Initialize receiver."""
+    def __init__(self: Receiver, queue: QueueServer, in_memory: bool = False, redirect_failures: IO = None,
+                 scheduler: Optional[Scheduler] = None) -> None:
+        """Initialize receiver; results written back are reported to `scheduler` when given."""
         self.queue = queue
+        self.scheduler = scheduler
         self.tasks = []
+        self.held = []  # Results whose row still qualifies but whose write did not land yet.
         self.bundle = None
         self.in_memory = in_memory
         self.redirect_failures = redirect_failures
+        self.written = 0
 
     @cached_property
     def actions(self: Receiver) -> Dict[ReceiverState, Callable[[], ReceiverState]]:
@@ -483,6 +713,10 @@ class Receiver(StateMachine):
             self.queue.completed.task_done()
             return ReceiverState.UNPACK
         except QueueEmpty:
+            if self.held:
+                # Held results are presented again on every cycle, not only when a bundle arrives.
+                self.tasks = []
+                return ReceiverState.UPDATE
             log.trace('No completed tasks returned - waiting')
             return ReceiverState.UNLOAD
 
@@ -490,6 +724,8 @@ class Receiver(StateMachine):
         """Unpack previous bundle into list of tasks."""
         data = deserialize_tasks(self.bundle)
         if data is None:
+            for task in self.held:
+                log.warning(f'Result for task ({task.id}) not written at shutdown - task left interrupted')
             return ReceiverState.FINAL
         else:
             self.tasks = data
@@ -497,14 +733,41 @@ class Receiver(StateMachine):
 
     def update_tasks(self: Receiver) -> ReceiverState:
         """Update tasks in database with run details."""
-        if not self.in_memory:
-            Task.update_all([task.to_dict() for task in self.tasks])
-        for task in self.tasks:
+        # A result applies only to the dispatch that produced it; anything else is logged and dropped.
+        # A result whose write did not land while its row still qualifies is held and presented again.
+        held = {id(task) for task in self.held}
+        results = self.held + self.tasks
+        if self.in_memory:
+            outcomes = [ResultOutcome.APPLIED] * len(results)
+        else:
+            for task in self.held:
+                log.debug(f'Retrying held result for task ({task.id})')
+            outcomes = Task.apply_results(results)
+        self.held = []
+        for task, outcome in zip(results, outcomes):
+            if outcome is ResultOutcome.DEFERRED:
+                if id(task) not in held:
+                    log.warning(f'Contended result write did not land for task ({task.id}) '
+                                f'after {1 + CONTENDED_RERUNS} attempts - result held for retry')
+                self.held.append(task)
+                continue
+            if outcome is ResultOutcome.STALE:
+                log.warning(f'Refused stale result for task ({task.id}) '
+                            f'from client ({task.client_host}: {task.client_id})')
+                continue
+            if outcome is ResultOutcome.DUPLICATE:
+                log.warning(f'Ignored duplicate result for task ({task.id}) '
+                            f'from client ({task.client_host}: {task.client_id})')
+                continue
             log.debug(f'Completed task ({task.id})')
             if task.exit_status != 0:
                 log.warning(f'Non-zero exit status ({task.exit_status}) for task ({task.id})')
                 if self.redirect_failures:
                     print(task.args, file=self.redirect_failures)
+            self.written += 1
+        applied = outcomes.count(ResultOutcome.APPLIED)
+        if applied and self.scheduler is not None:
+            self.scheduler.results_landed(applied)
         return ReceiverState.UNLOAD
 
     @staticmethod
@@ -520,10 +783,12 @@ class ReceiverThread(Thread):
     def __init__(self: ReceiverThread,
                  queue: QueueServer,
                  in_memory: bool = False,
-                 redirect_failures: IO = None) -> None:
+                 redirect_failures: IO = None,
+                 scheduler: Optional[Scheduler] = None) -> None:
         """Initialize machine."""
         super().__init__(name='hypershell-receiver')
-        self.machine = Receiver(queue=queue, in_memory=in_memory, redirect_failures=redirect_failures)
+        self.machine = Receiver(queue=queue, in_memory=in_memory, redirect_failures=redirect_failures,
+                                scheduler=scheduler)
 
     def run_with_exceptions(self: ReceiverThread) -> None:
         """Run machine."""
@@ -551,14 +816,40 @@ class HeartbeatState(State, Enum):
 DEFAULT_EVICT: Final[int] = default.server.evict
 """Default client eviction period in seconds."""
 
+EVICT_MINIMUM: Final[int] = SETTINGS['server.evict'].low
+"""Shortest client eviction period in seconds."""
+
+EVICT_MAXIMUM: Final[int] = SETTINGS['server.evict'].high
+"""Longest client eviction period in seconds (the longest duration of the table)."""
+
 
 class HeartMonitor(StateMachine):
-    """Collect heartbeat messages from connected clients."""
+    """
+    Collect heartbeat messages from connected clients.
+
+    A relay's heartbeat also carries its site and its roster, the site clients connected to it. The
+    site clients are registered (attributed to the site and the relay) and disconnected as they
+    come and go from the roster, but never enter `beats`: only their relay is evicted for missed
+    heartbeats, and its eviction or final heartbeat disconnects its whole roster.
+
+    With a site registry (a server autoscaling with relay sites), each beat of a relay identity
+    that advertises its zone is recorded there, overwriting that identity's previous record, and
+    the record is dropped when the identity is evicted or finishes. A relay identity that
+    advertises no zone (a relay of an earlier release) takes no part in the topology.
+
+    A client is aged by the server's own monotonic clock, from when its last heartbeat was received,
+    never by the time the client stamped on it, so a client that keeps beating is never evicted
+    however far its clock is from the server's.
+    """
 
     in_memory: bool
     no_confirm: bool
     queue: QueueServer
     beats: Dict[str, Heartbeat]
+    received: Dict[str, float]
+    rosters: Dict[str, Dict[str, RosterEntry]]
+    sites: Optional[SiteRegistry]
+    ignored_sites: set
     last_check: datetime
     wait_check: timedelta
     evict_after: timedelta
@@ -566,25 +857,31 @@ class HeartMonitor(StateMachine):
     startup_phase: bool = True  # should not halt until at least one client
     scheduler_done: bool = False  # set by parent thread when scheduling is over
     should_signal: bool = False  # set by parent thread to signal clients
-    signaled: bool = False  # clients have been told to disconnect; late arrivals are told too
     latest_heartbeat: Heartbeat = None
+    latest_received: float = None
 
     state = HeartbeatState.START
     states = HeartbeatState
 
     def __init__(self: HeartMonitor, queue: QueueServer, evict_after: int = DEFAULT_EVICT,
-                 in_memory: bool = False, no_confirm: bool = False) -> None:
+                 in_memory: bool = False, no_confirm: bool = False, sites: Optional[SiteRegistry] = None) -> None:
         """Initialize with queue server."""
         self.queue = queue
         self.last_check = datetime.now().astimezone()
         self.beats = {}
+        self.received = {}
+        self.rosters = {}
+        self.sites = sites
+        self.ignored_sites = set()
         self.in_memory = in_memory
         self.no_confirm = no_confirm
-        if evict_after >= 10:
-            self.wait_check = timedelta(seconds=int(evict_after / 10))
-            self.evict_after = timedelta(seconds=evict_after)
-        else:
-            raise RuntimeError(f'Evict period must be greater than 10 seconds: given {evict_after}')
+        if isinstance(evict_after, (int, float)) and not isinstance(evict_after, bool):
+            # An int too wide for a float is compared as an int: math.isfinite would overflow on it
+            if isinstance(evict_after, float) and not math.isfinite(evict_after) \
+                    or not SETTINGS['server.evict'].inside(evict_after):
+                raise RuntimeError(SETTINGS['server.evict'].refusal('evict_after', evict_after))
+        self.wait_check = timedelta(seconds=int(evict_after / 10))
+        self.evict_after = timedelta(seconds=evict_after)
 
     @cached_property
     def actions(self: HeartMonitor) -> Dict[HeartbeatState, Callable[[], HeartbeatState]]:
@@ -608,6 +905,7 @@ class HeartMonitor(StateMachine):
         """Get and stash heartbeat from clients."""
         try:
             hb_data = self.queue.heartbeat.get(timeout=DEFAULT_REMOTE_TIMEOUT)
+            received = time.monotonic()
             self.queue.heartbeat.task_done()
             self.startup_phase = False
             hb = Heartbeat.unpack_or_none(hb_data)
@@ -615,6 +913,7 @@ class HeartMonitor(StateMachine):
                 return HeartbeatState.FINAL
             else:
                 self.latest_heartbeat = hb
+                self.latest_received = received
                 return HeartbeatState.UPDATE
         except QueueEmpty:
             return HeartbeatState.SWITCH
@@ -627,31 +926,115 @@ class HeartMonitor(StateMachine):
                 log.trace(f'Heartbeat - running ({hb.host}: {hb.uuid})')
             else:
                 log.debug(f'Registered client ({hb.host}: {hb.uuid})')
+                if hb.site is not None:
+                    self.check_relay(hb)
                 if not self.in_memory:
                     new_client = Client.from_heartbeat(hb)
                     try:
                         # Check to see if we are re-registering a falsely-evicted client (Issue #29)
                         old_client = Client.from_id(new_client.id)
                         log.warning(f'Existing client re-registered ({old_client.host}: {old_client.id})')
-                        Client.update(old_client.id, disconnected_at=None, evicted=False)
+                        Client.reconnect(old_client.id, **self.relay_fields(hb))
                     except Client.NotFound:
                         Client.add(new_client)
-                if self.signaled:
-                    # Registered after the others were told to disconnect: it needs its own disconnect
-                    self.request_disconnect(hb)
             self.beats[hb.uuid] = hb
+            self.received[hb.uuid] = self.latest_received
+            if hb.roster is not None:
+                self.update_roster(hb)
+            if self.sites is not None and hb.site is not None:
+                self.record_site(hb)
             return HeartbeatState.SWITCH
         else:
             log.trace(f'Client disconnected ({hb.host}: {hb.uuid})')
             if hb.uuid in self.beats:
                 self.beats.pop(hb.uuid)
+                self.received.pop(hb.uuid, None)
                 if not self.in_memory:
                     Client.update(hb.uuid, disconnected_at=datetime.now().astimezone())
-            elif self.signaled:
-                # Finished without ever registering, so it may have taken a disconnect that was
-                # posted for a registered client: post one in its place
-                self.request_disconnect(hb)
+            if hb.site is not None or hb.uuid in self.rosters:
+                self.end_roster(hb.uuid)
+            self.drop_site(hb.uuid)
+            self.queue.dispatcher.forget(hb.uuid)
             return HeartbeatState.SWITCH
+
+    def record_site(self: HeartMonitor, hb: Heartbeat) -> None:
+        """Record a relay identity's advertisement, overwriting its previous one."""
+        if hb.zone is None or hb.bounds is None or hb.clients is None:
+            if hb.uuid not in self.ignored_sites:
+                self.ignored_sites.add(hb.uuid)
+                log.info(f'Relay ({hb.host}: {hb.uuid}, site {hb.site}) advertises no zone or bounds: '
+                         f'it takes no part in the site topology')
+            return
+        known = hb.uuid in self.sites
+        record = self.sites.record(hb.uuid, site=hb.site, zone=hb.zone, bounds=hb.bounds,
+                                   clients=hb.clients, host=hb.host, instance=hb.instance, retiring=hb.retiring)
+        if not known:
+            log.info(f'Relay site registered (site: {record.site}, zone: {record.zone}, '
+                     f'min: {record.bounds.min}, init: {record.bounds.init}, max: {record.bounds.max}, '
+                     f'clients: {record.clients}) ({hb.host}: {hb.uuid})')
+
+    def drop_site(self: HeartMonitor, uuid: str) -> None:
+        """Forget a relay identity's advertisement as it is evicted or finishes."""
+        if self.sites is not None:
+            self.ignored_sites.discard(uuid)
+            record = self.sites.drop(uuid)
+            if record is not None:
+                log.info(f'Relay site left (site: {record.site}, zone: {record.zone}) ({record.host}: {uuid})')
+
+    @staticmethod
+    def relay_fields(hb: Heartbeat) -> Dict[str, str]:
+        """Client columns a relay's heartbeat sets on its own row (none for an ordinary client)."""
+        return {} if hb.site is None else {'site': hb.site, 'relay': hb.uuid}
+
+    def check_relay(self: HeartMonitor, hb: Heartbeat) -> None:
+        """A relay registering here relies on confirmation and the database to fail over; say so if off."""
+        if self.in_memory or self.no_confirm:
+            mode = 'without a database' if self.in_memory else 'without confirmation'
+            log.error(f'Relay registered ({hb.host}: {hb.uuid}, site {hb.site}) with a server running {mode}: '
+                      f'tasks it holds are not put back if it fails')
+
+    def update_roster(self: HeartMonitor, hb: Heartbeat) -> None:
+        """Register the site clients new to a relay's roster and disconnect those gone from it.
+
+        An entry naming a client already attributed to another relay is ignored: a roster applies only
+        to clients with no relay or with the sender as their relay, so it never re-attributes or
+        disconnects another relay's site clients.
+        """
+        relay, previous = hb.uuid, self.rosters.get(hb.uuid, {})
+        current = {entry.uuid: entry for entry in hb.roster
+                   if entry.state is not ClientState.FINISHED and entry.uuid != relay and entry.uuid not in self.beats}
+        self.rosters[relay] = current
+        added = [entry for uuid, entry in current.items() if uuid not in previous]
+        dropped = [uuid for uuid in previous if uuid not in current]
+        for uuid in dropped:
+            log.debug(f'Site client disconnected ({previous[uuid].host}: {uuid}) via relay {relay}')
+        if self.in_memory:
+            for entry in added:
+                log.debug(f'Registered site client ({entry.host}: {entry.uuid}) via relay {relay}')
+            return
+        for entry in added:
+            fields = {'site': hb.site, 'relay': relay}
+            try:
+                holder = Client.from_id(entry.uuid, caching=False).relay
+            except Client.NotFound:
+                Client.add(Client.new(id=entry.uuid, host=entry.host, connected_at=hb.time, **fields))
+            else:
+                if holder is not None and str(holder) != relay:
+                    log.warning(f'Ignored roster entry ({entry.host}: {entry.uuid}) from {relay} '
+                                f'(a site client of relay {holder})')
+                    current.pop(entry.uuid)
+                    continue
+                Client.reconnect(entry.uuid, **fields)
+            log.debug(f'Registered site client ({entry.host}: {entry.uuid}) via relay {relay}')
+        Client.disconnect_all(dropped, datetime.now().astimezone())
+
+    def end_roster(self: HeartMonitor, relay: str) -> None:
+        """Disconnect every site client a relay forwarded, as the relay itself goes."""
+        roster = self.rosters.pop(relay, {})
+        if roster:
+            log.debug(f'Site clients disconnected with relay {relay} ({len(roster)})')
+        if not self.in_memory:
+            Client.disconnect_roster(relay, datetime.now().astimezone())
 
     def switch_mode(self: HeartMonitor) -> HeartbeatState:
         """Decide to bail, signal, check, or get another heartbeat."""
@@ -669,41 +1052,42 @@ class HeartMonitor(StateMachine):
             return HeartbeatState.NEXT
 
     def check_clients(self: HeartMonitor) -> HeartbeatState:
-        """Check last heartbeat on all clients and evict if necessary."""
+        """Evict every client whose last heartbeat arrived more than the eviction period ago.
+
+        Ages are taken by the server's monotonic clock against when each last heartbeat was received.
+        A client with no receive time is never evicted.
+        """
         log.debug(f'Checking clients ({len(self.beats)} connected)')
+        now = time.monotonic()
         for uuid in list(self.beats):
             hb = self.beats.get(uuid)
-            age = self.last_check - hb.time
+            received = self.received.get(uuid)
+            if received is None:
+                continue
+            age = timedelta(seconds=now - received)
             if age > self.evict_after:
                 log.warning(f'Evicting client ({hb.host}: {uuid})')
                 self.beats.pop(uuid)
+                self.received.pop(uuid, None)
                 if not self.in_memory:
                     Client.update(hb.uuid, disconnected_at=datetime.now().astimezone(), evicted=True)
                 if not self.in_memory and not self.no_confirm:
                     log.warning(f'Reverting orphaned tasks ({hb.host}: {uuid})')
                     Task.revert_orphaned(uuid)
+                if hb.site is not None or uuid in self.rosters:
+                    self.end_roster(uuid)
+                self.drop_site(uuid)
+                self.queue.dispatcher.forget(uuid)
         return HeartbeatState.SWITCH
 
     def signal_clients(self: HeartMonitor) -> HeartbeatState:
-        """
-        Send shutdown signal to all connected clients.
-
-        Each disconnect is one sentinel on the shared task queue, taken by whichever client reads
-        next, so every client must have one posted for it. Clients are counted by heartbeat, and a
-        client can take tasks before its first heartbeat arrives. One that registers after this
-        signal, or finishes without having registered, gets a disconnect of its own then.
-        """
+        """Tell clients to shut down once they have drained what is staged for them."""
         log.debug(f'Signaling clients ({len(self.beats)} connected)')
+        self.queue.dispatcher.finish()
         for hb in self.beats.values():
-            self.request_disconnect(hb)
-        self.signaled = True
+            log.debug(f'Disconnect requested ({hb.host}: {hb.uuid})')
         self.should_signal = False
         return HeartbeatState.SWITCH
-
-    def request_disconnect(self: HeartMonitor, hb: Heartbeat) -> None:
-        """Post one disconnect (sentinel) on the task queue on behalf of the client that sent `hb`."""
-        self.queue.scheduled.put(make_sentinel())
-        log.debug(f'Disconnect requested ({hb.host}: {hb.uuid})')
 
     @staticmethod
     def finalize() -> HeartbeatState:
@@ -716,18 +1100,25 @@ class HeartMonitorThread(Thread):
     """Run heart monitor within dedicated thread."""
 
     def __init__(self: HeartMonitorThread, queue: QueueServer, evict_after: int = DEFAULT_EVICT,
-                 in_memory: bool = False, no_confirm: bool = False) -> None:
+                 in_memory: bool = False, no_confirm: bool = False, sites: Optional[SiteRegistry] = None) -> None:
         """Initialize machine."""
         super().__init__(name='hypershell-heartmonitor')
         self.machine = HeartMonitor(queue=queue, evict_after=evict_after,
-                                    in_memory=in_memory, no_confirm=no_confirm)
+                                    in_memory=in_memory, no_confirm=no_confirm, sites=sites)
 
     def run_with_exceptions(self: HeartMonitorThread) -> None:
         """Run machine."""
         self.machine.run()
 
     def signal_clients(self: HeartMonitorThread) -> None:
-        """Set signal flag to post sentinel for each connected clients."""
+        """Tell clients to shut down once they have drained what is staged for them.
+
+        Dispatch finishes at once, so a request is told to shut down without waiting for the heart
+        monitor's next turn (which can wait out a heartbeat read); the heart monitor then logs the
+        signal and the clients it was sent to.
+        """
+        log.debug('Finishing dispatch - clients drain what is staged, then are told to shut down')
+        self.machine.queue.dispatcher.finish()
         self.machine.should_signal = True
 
     def signal_scheduler_done(self: HeartMonitorThread) -> None:
@@ -741,7 +1132,7 @@ class HeartMonitorThread(Thread):
         super().stop(wait=wait, timeout=timeout)
 
 
-DEFAULT_BIND: Final[str] = QueueConfig.host
+DEFAULT_BIND: Final[str] = default.server.bind
 """Default bind address for server."""
 
 DEFAULT_PORT: Final[int] = QueueConfig.port
@@ -806,7 +1197,8 @@ class ServerThread(Thread):
             Server authentication key. See :const:`DEFAULT_AUTH`.
 
         max_retries (int, optional):
-            Number of allowed task retries. See :const:`DEFAULT_ATTEMPTS`.
+            Number of allowed task retries.
+            Default: ``server.attempts`` - 1, read when called.
 
         eager (bool, optional):
             When enabled tasks are retried immediately ahead scheduling new tasks.
@@ -823,6 +1215,10 @@ class ServerThread(Thread):
             TLS configuration for queue interface.
             Clients must connect with compatible configuration.
             See :ref:`security <security>` documentation for details.
+
+        sites (SiteRegistry, optional):
+            Record the advertisements of relay identities here (a server autoscaling with
+            relay sites). Without it, nothing is recorded.
 
     Example:
         >>> from hypershell.server import ServerThread
@@ -843,6 +1239,7 @@ class ServerThread(Thread):
     heartmonitor: HeartMonitorThread
     in_memory: bool
     no_confirm: bool
+    sites: Optional[SiteRegistry]
 
     def __init__(self: ServerThread,
                  source: Iterable[str] = None,
@@ -858,14 +1255,19 @@ class ServerThread(Thread):
                  restart_mode: bool = False,
                  address: Tuple[str, int] = (DEFAULT_BIND, DEFAULT_PORT),
                  auth: str = DEFAULT_AUTH,
-                 max_retries: int = DEFAULT_ATTEMPTS - 1,
+                 max_retries: Optional[int] = None,
                  eager: bool = False,
                  redirect_failures: IO = None,
                  evict_after: int = DEFAULT_EVICT,
-                 tls: Optional[TLSConfig] = None) -> None:
+                 template: str = DEFAULT_TEMPLATE,
+                 from_json: bool = False,
+                 tls: Optional[TLSConfig] = None,
+                 sites: Optional[SiteRegistry] = None) -> None:
         """Initialize queue manager and child threads."""
+        max_retries = configured_retries() if max_retries is None else max_retries
         self.in_memory = in_memory
         self.no_confirm = no_confirm
+        self.sites = sites
         if not self.in_memory and not DATABASE_ENABLED:
             log.warning('No database configured - automatically disabled')
             self.in_memory = True
@@ -873,26 +1275,31 @@ class ServerThread(Thread):
             log.warning('Retries disabled when database disabled')
         queue_config = QueueConfig(host=address[0], port=address[1], auth=auth, size=config.server.queuesize, tls=tls)
         self.queue = QueueServer(config=queue_config)
+        self.queue.dispatcher.configure(bundlesize=bundlesize, in_memory=self.in_memory)
+        # NOTE: In JSON mode the template is expanded submit-side (here) against each
+        # record's context; otherwise the flat source is passed through verbatim and the
+        # client applies the template. See hypershell.submit.Loader.
+        submit_template = template if from_json else DEFAULT_TEMPLATE
         if self.in_memory:
             self.scheduler = None
             self.submitter = None if not source else LiveSubmitThread(
                 source, cores=task_cores, memory=task_memory, timeout=task_timeout, queue_config=queue_config,
-                bundlesize=bundlesize, bundlewait=bundlewait)
+                bundlesize=bundlesize, bundlewait=bundlewait, template=submit_template)
         else:
             self.submitter = None if not source else SubmitThread(
                 source, cores=task_cores, memory=task_memory, timeout=task_timeout,
-                bundlesize=bundlesize, bundlewait=bundlewait)
+                bundlesize=bundlesize, bundlewait=bundlewait, template=submit_template)
             self.scheduler = SchedulerThread(queue=self.queue, bundlesize=bundlesize, attempts=max_retries + 1,
                                              eager=eager, forever_mode=forever_mode, restart_mode=restart_mode,
-                                             poll=poll)
+                                             poll=poll, submitter=self.submitter)
         if self.no_confirm:
             self.confirm = None
         else:
             self.confirm = ConfirmThread(queue=self.queue, in_memory=self.in_memory)
-        self.receiver = ReceiverThread(queue=self.queue, in_memory=self.in_memory, redirect_failures=redirect_failures)
+        self.receiver = ReceiverThread(queue=self.queue, in_memory=self.in_memory, redirect_failures=redirect_failures,
+                                       scheduler=None if self.scheduler is None else self.scheduler.machine)
         self.heartmonitor = HeartMonitorThread(queue=self.queue, evict_after=evict_after,
-                                               in_memory=self.in_memory, no_confirm=no_confirm)
-        log.info(f'Server listening on {address[0]}:{address[1]}')
+                                               in_memory=self.in_memory, no_confirm=no_confirm, sites=sites)
         super().__init__(name='hypershell-server')
 
     def run_with_exceptions(self: ServerThread) -> None:
@@ -901,6 +1308,8 @@ class ServerThread(Thread):
         with self.queue:
             self.start_threads()
             self.wait_submitter()
+            if self.scheduler is not None:
+                self.scheduler.machine.wake()  # The input has ended: the scheduler sees it without waiting out its poll
             self.wait_scheduler()
             self.wait_heartbeat()
             self.wait_receiver()
@@ -908,12 +1317,18 @@ class ServerThread(Thread):
         log.debug('Done')
 
     def start(self: ServerThread) -> None:
-        """Override default start method to wait for queue to be ready."""
+        """Override default start method to wait for queue to be ready.
+
+        A failure to start the queue (e.g., the address is in use) is raised here, in the caller.
+        """
         super().start()
         while not self.queue:  # None until initialized by __init__()
             time.sleep(0.1)
         while not self.queue.ready:
+            if not self.is_alive():
+                self.join()  # Re-raises the exception that ended the thread before the queue was ready
             time.sleep(0.1)
+        log.info(f'Server listening on {self.queue.config.host}:{self.queue.config.port}')
 
     def start_threads(self: ServerThread) -> None:
         """Start child threads; with file input, scheduling starts once the whole file is submitted."""
@@ -960,6 +1375,33 @@ class ServerThread(Thread):
         self.heartmonitor.signal_scheduler_done()
         self.heartmonitor.signal_clients()
         self.heartmonitor.join()
+        self.revert_staged()
+        self.revert_handed_back()
+
+    def revert_staged(self: ServerThread) -> None:
+        """Revert rows still staged once no client is left to take them.
+
+        A row cancelled, completed or deleted while staged is left as it is.
+        """
+        ids = self.queue.dispatcher.take_staged()
+        if ids and not self.in_memory:
+            reverted = Task.revert_staged(ids)
+            kept = f' ({len(ids) - reverted} left as completed, cancelled or deleted)' if reverted < len(ids) else ''
+            log.info(f'Reverted {reverted} staged tasks never delivered{kept}')
+
+    def revert_handed_back(self: ServerThread) -> None:
+        """Requeue what relays handed back after scheduling ended, each only while it is still that relay's.
+
+        The scheduler requeues a hand-back on its next pass; one that arrives once scheduling is over
+        (a relay handing back what it took at the shutdown) is requeued here as the server stops, as
+        staged rows are, so it waits for the next run rather than staying assigned to the relay.
+        """
+        if self.in_memory:
+            return
+        for identity, assignments in self.queue.dispatcher.take_handbacks():
+            reverted = len(Task.revert_handed_back(identity, assignments))
+            kept = f'; {len(assignments) - reverted} already settled' if reverted < len(assignments) else ''
+            log.info(f'Requeued {reverted} tasks handed back by relay ({identity}{kept})')
 
     def wait_receiver(self: ServerThread) -> None:
         """Wait for receiver to stop."""
@@ -974,11 +1416,16 @@ class ServerThread(Thread):
             self.queue.confirmed.put(make_sentinel())
             self.confirm.join()
 
-    def stop(self: ServerThread, wait: bool = False, timeout: int = None) -> None:
-        """Stop child threads before main thread."""
+    def stop(self: ServerThread, wait: bool = False, timeout: int = None, leave_input: bool = False) -> None:
+        """Stop child threads before main thread.
+
+        With `leave_input`, a submitter blocked reading its input (standard input from a producer that
+        stays open) is not waited on: the tasks it has committed are kept, and the rest of its input is
+        not read. Without it, a read the submitter is blocked in is waited on until it returns.
+        """
         log.warning('Stopping')
         if self.submitter is not None:
-            self.submitter.stop(wait=wait, timeout=timeout)
+            self.submitter.stop(wait=wait, timeout=timeout, leave_input=leave_input)
         if self.scheduler is not None:
             # A scheduler not yet started, because a task file is still being submitted, has
             # nothing to join.
@@ -990,24 +1437,6 @@ class ServerThread(Thread):
             self.queue.confirmed.put(make_sentinel())
             self.confirm.stop(wait=wait, timeout=timeout)
         super().stop(wait=wait, timeout=timeout)
-
-
-def is_file_input(source: Iterable[str | dict]) -> bool:
-    """True if `source` is a whole task file: a seekable file (not standard input), or a list or tuple.
-
-    Standard input, pipes, FIFOs, process substitution and other iterables are streams, which
-    are scheduled as they arrive.
-    """
-    # A gated source carries the stream it wraps as `iterable`.
-    inner = getattr(source, 'iterable', source)
-    if isinstance(inner, (list, tuple)):
-        return True
-    if isinstance(inner, io.IOBase) and inner is not sys.stdin:
-        try:
-            return inner.seekable()
-        except (OSError, ValueError):
-            return False
-    return False
 
 
 def serve_from(source: Iterable[str],
@@ -1022,7 +1451,7 @@ def serve_from(source: Iterable[str],
                poll: int = DEFAULT_SERVER_POLL,
                address: Tuple[str, int] = (DEFAULT_BIND, DEFAULT_PORT),
                auth: str = DEFAULT_AUTH,
-               max_retries: int = DEFAULT_ATTEMPTS - 1,
+               max_retries: Optional[int] = None,
                eager: bool = DEFAULT_EAGER_MODE,
                redirect_failures: IO = None,
                evict_after: int = DEFAULT_EVICT,
@@ -1075,7 +1504,8 @@ def serve_from(source: Iterable[str],
             Server authentication key. See :const:`DEFAULT_AUTH`.
 
         max_retries (int, optional):
-            Number of allowed task retries. See :const:`DEFAULT_ATTEMPTS`.
+            Number of allowed task retries.
+            Default: ``server.attempts`` - 1, read when called.
 
         eager (bool, optional):
             When enabled tasks are retried immediately ahead scheduling new tasks.
@@ -1119,7 +1549,7 @@ def serve_from(source: Iterable[str],
                               evict_after=evict_after,
                               tls=tls)
     try:
-        thread.join()
+        join_waking(thread)
     except Exception:
         thread.stop()
         raise
@@ -1136,7 +1566,7 @@ def serve_file(path: str,
                poll: int = DEFAULT_SERVER_POLL,
                address: Tuple[str, int] = (DEFAULT_BIND, DEFAULT_PORT),
                auth: str = DEFAULT_AUTH,
-               max_retries: int = DEFAULT_ATTEMPTS - 1,
+               max_retries: Optional[int] = None,
                eager: bool = DEFAULT_EAGER_MODE,
                redirect_failures: Optional[IO] = None,
                evict_after: int = DEFAULT_EVICT,
@@ -1185,7 +1615,8 @@ def serve_file(path: str,
             Server authentication key. See :const:`DEFAULT_AUTH`.
 
         max_retries (int, optional):
-            Number of allowed task retries. See :const:`DEFAULT_ATTEMPTS`.
+            Number of allowed task retries.
+            Default: ``server.attempts`` - 1, read when called.
 
         eager (bool, optional):
             When enabled tasks are retried immediately ahead scheduling new tasks.
@@ -1240,7 +1671,7 @@ def serve_forever(bundlesize: int = DEFAULT_BUNDLESIZE,
                   poll: int = DEFAULT_SERVER_POLL,
                   address: Tuple[str, int] = (DEFAULT_BIND, DEFAULT_PORT),
                   auth: str = DEFAULT_AUTH,
-                  max_retries: int = DEFAULT_ATTEMPTS - 1,
+                  max_retries: Optional[int] = None,
                   eager: bool = DEFAULT_EAGER_MODE,
                   redirect_failures: IO = None,
                   evict_after: int = DEFAULT_EVICT,
@@ -1266,7 +1697,8 @@ def serve_forever(bundlesize: int = DEFAULT_BUNDLESIZE,
             Server authentication key. See :const:`DEFAULT_AUTH`.
 
         max_retries (int, optional):
-            Number of allowed task retries. See :const:`DEFAULT_ATTEMPTS`.
+            Number of allowed task retries.
+            Default: ``server.attempts`` - 1, read when called.
 
         poll (int, optional):
             Polling interval in seconds between database queries if no tasks are available.
@@ -1310,7 +1742,7 @@ def serve_forever(bundlesize: int = DEFAULT_BUNDLESIZE,
                               evict_after=evict_after,
                               tls=tls)
     try:
-        thread.join()
+        join_waking(thread)
     except Exception:
         thread.stop()
         raise
@@ -1320,9 +1752,10 @@ APP_NAME = 'hs server'
 APP_USAGE = f"""\
 Usage:
   hs server [-h] [FILE | --forever | --restart] [-b NUM] [-w SEC] [-r NUM [--eager]]
-            [-c NUM] [-m MEM] [-W SEC] [-H ADDR] [-p PORT] [-k KEY] [-Q NUM]
+            [-c NUM] [-m MEM] [-W SEC] [-H ADDR] [-p PORT] [-Q SEC]
             [--no-db | --initdb] [--print | -f PATH] [--no-confirm]
             [--no-tls | [--tls-ca PATH] [--tls-cert PATH] [--tls-key PATH]]
+            [--autoscaling [MODE] [-F VALUE] [-P SEC]]
 
   Launch server, schedule directly or asynchronously from database.\
 """
@@ -1342,26 +1775,38 @@ APP_HELP = f"""\
   Tasks are bundled and clients pull them in these bundles. However, by default the bundle
   size is one, meaning that at small scales there is greater responsiveness.
 
+  The key that secures the server is taken from the {AUTH_ENV} environment
+  variable or from server.auth in a configuration file, never from the command line.
+
+  With --autoscaling the server schedules forever and launches nothing. Relays connected with
+  its key advertise the zones they serve and each zone's min/max/init clients; the server plans
+  each zone's clients over the live relay sites (autoscale.distribution: spread or fill) and
+  publishes them for each relay to launch with its own launcher.
+
 Arguments:
   FILE                        Path to input task file (default: <stdin>).
 
 Options:
   -H, --bind            ADDR  Bind address (default: {DEFAULT_BIND}).
   -p, --port            NUM   Port number (default: {DEFAULT_PORT}).
-  -k, --auth            KEY   Cryptographic key to secure server.
       --no-tls                Disable TLS for queue interface (not recommended).
       --tls-key               Path to TLS private key file (default: <auto>).
       --tls-cert              Path to TLS certificate file (default: <auto>).
       --tls-ca                Path to TLS CA certificate file (default: <auto>).
       --forever               Schedule forever.
       --restart               Start scheduling from last completed task.
+  -A, --autoscaling   [MODE]  Publish client targets for relay sites (fixed or dynamic; implies --forever).
+  -F, --factor        VALUE   Scaling factor (default: {default.autoscale.factor}).
+  -P, --period        SEC     Scaling period, greater than zero; seconds, 30s, 5m or [D-]HH:MM:SS (default: {default.autoscale.period}).
   -c, --task-cores      NUM   Number of cores to assign each task (default: none).
   -m, --task-memory     MEM   Memory to assign each task; K/M/G/T[B|iB] are powers of 1024 (default: none).
   -W, --task-timeout    SEC   Task-level walltime limit; seconds, 1h30m, 1.5h or [D-]HH:MM:SS (default: none).
   -b, --bundlesize      NUM   Size of task bundle (default: {DEFAULT_BUNDLESIZE}).
-  -w, --bundlewait      SEC   Seconds to wait before flushing tasks (default: {DEFAULT_BUNDLEWAIT}).
-  -Q, --poll            NUM   Polling interval between database queries if no tasks available.
+  -w, --bundlewait      SEC   Wait before flushing tasks; seconds, 30s, 5m or [D-]HH:MM:SS (default: {DEFAULT_BUNDLEWAIT}).
+  -Q, --poll            SEC   Polling interval between database queries if no tasks available; seconds, 30s, 5m or [D-]HH:MM:SS.
   -r, --max-retries     NUM   Auto-retry failed tasks (default: {DEFAULT_ATTEMPTS - 1}).
+                              A task that did not run (-1001, -1002) is never retried;
+                              a retry keeps its task's cores, memory and walltime.
       --eager                 Schedule failed tasks before new tasks.
       --no-db                 Disable database (submit directly to clients).
       --initdb                Auto-initialize database.
@@ -1372,7 +1817,7 @@ Options:
 """
 
 
-class ServerApp(Application):
+class ServerApp(ReadingMixin, Application):
     """Run server in stand-alone mode."""
 
     name = APP_NAME
@@ -1382,22 +1827,22 @@ class ServerApp(Application):
     interface.add_argument('filepath', nargs='?', default=None)
 
     bundlesize: int = config.server.bundlesize
-    interface.add_argument('-b', '--bundlesize', type=int, default=bundlesize)
+    ranged(interface, '-b', '--bundlesize', setting='server.bundlesize', default=bundlesize)
 
     bundlewait: int = config.submit.bundlewait
-    interface.add_argument('-w', '--bundlewait', type=int, default=bundlewait)
+    ranged(interface, '-w', '--bundlewait', setting='submit.bundlewait', default=bundlewait)
 
     task_cores: Optional[int] = config.task.cores or None
     task_memory: Optional[int] = config.task.memory or None
     task_timeout: Optional[int] = config.task.timeout or None
-    interface.add_argument('-c', '--task-cores', type=int, default=task_cores)
-    interface.add_argument('-m', '--task-memory', type=parse_bytes, default=task_memory)
-    interface.add_argument('-W', '--task-timeout', type=parse_time, default=task_timeout)
+    ranged(interface, '-c', '--task-cores', setting='task.cores', default=task_cores)
+    ranged(interface, '-m', '--task-memory', setting='task.memory', default=task_memory)
+    ranged(interface, '-W', '--task-timeout', setting='task.timeout', default=task_timeout)
 
     eager_mode: bool = config.server.eager
-    max_retries: int = config.server.attempts - 1
-    interface.add_argument('-r', '--max-retries', type=int, default=max_retries)
-    interface.add_argument('--eager', action='store_true', dest='eager_mode')
+    max_retries: int = configured_retries()
+    ranged(interface, '-r', '--max-retries', setting='option.max_retries', default=max_retries)
+    interface.add_argument('--eager', action='store_true', dest='eager_mode', default=eager_mode)
 
     forever_mode: bool = False
     interface.add_argument('--forever', action='store_true', dest='forever_mode')
@@ -1405,17 +1850,27 @@ class ServerApp(Application):
     restart_mode: bool = False
     interface.add_argument('--restart', action='store_true', dest='restart_mode')
 
+    autoscaling_policy: Optional[str] = None
+    autoscaling_factor: float = config.autoscale.factor
+    autoscaling_period: int = config.autoscale.period
+    interface.add_argument('-A', '--autoscaling', nargs='?', default=None,
+                           const=config.autoscale.policy, dest='autoscaling_policy')
+    ranged(interface, '-F', '--factor', setting='autoscale.factor', default=autoscaling_factor,
+           dest='autoscaling_factor')
+    ranged(interface, '-P', '--period', setting='autoscale.period', default=autoscaling_period,
+           dest='autoscaling_period')
+
     poll: int = config.server.poll
-    interface.add_argument('-Q', '--poll', type=int, default=poll)
+    ranged(interface, '-Q', '--poll', setting='server.poll', default=poll)
 
     host: str = config.server.bind
     interface.add_argument('-H', '--bind', default=host, dest='host')
 
     port: int = config.server.port
-    interface.add_argument('-p', '--port', type=int, default=port)
+    ranged(interface, '-p', '--port', setting='server.port', default=port)
 
-    auth: Optional[str] = None  # Without -k, the key is resolve_auth('server') (see run)
-    interface.add_argument('-k', '--auth', default=auth)
+    auth: Optional[str] = None  # The key is resolve_auth('server') (see run)
+    refuse_key_option(interface)
 
     in_memory: bool = False
     auto_initdb: bool = False
@@ -1446,6 +1901,9 @@ class ServerApp(Application):
     show_available_ports: bool = False
     interface.add_argument('--available-ports', action='store_true', dest='show_available_ports')
 
+    # Seconds from `server.evict` (any duration form), read when the arguments are checked.
+    evict_after: int | float = DEFAULT_EVICT
+
     exceptions = {
         **get_shared_exception_mapping(__name__)
     }
@@ -1454,12 +1912,28 @@ class ServerApp(Application):
         """Run server."""
         if self.special_options():
             return
-        if self.auth is None:
+        with reading('configuration'):
             self.auth = resolve_auth('server')
-        self.check_args()
+            self.check_args()
         self.enable_tls()
-        ensuredb()
-        if self.forever_mode:
+        self.check_database()
+        self.prepare_source()
+        if self.autoscaling_policy is not None:
+            # Imported here: the cluster package imports this module.
+            from hypershell.cluster.topology import serve_with_sites
+            serve_with_sites(bundlesize=self.bundlesize,
+                             address=(self.host, self.port),
+                             auth=self.auth,
+                             poll=self.poll,
+                             max_retries=self.max_retries,
+                             eager=self.eager_mode,
+                             redirect_failures=self.failure_stream,
+                             evict_after=self.evict_after,
+                             tls=self.tls,
+                             policy=self.autoscaling_policy,
+                             factor=self.autoscaling_factor,
+                             period=self.autoscaling_period)
+        elif self.forever_mode:
             serve_forever(bundlesize=self.bundlesize,
                           address=(self.host, self.port),
                           auth=self.auth,
@@ -1469,7 +1943,7 @@ class ServerApp(Application):
                           max_retries=self.max_retries,
                           eager=self.eager_mode,
                           redirect_failures=self.failure_stream,
-                          evict_after=config.server.evict,
+                          evict_after=self.evict_after,
                           tls=self.tls)
         else:
             serve_from(source=self.input_stream,
@@ -1487,11 +1961,15 @@ class ServerApp(Application):
                        max_retries=self.max_retries,
                        eager=self.eager_mode,
                        redirect_failures=self.failure_stream,
-                       evict_after=config.server.evict,
+                       evict_after=self.evict_after,
                        tls=self.tls)
 
     def check_args(self: ServerApp) -> None:
         """Fail particular argument combinations."""
+        # A number from the configuration (checked as it loaded) is not parsed by the option: under one second is one.
+        self.autoscaling_period = parse_period(self.autoscaling_period)
+        if self.autoscaling_policy is not None:
+            self.check_autoscaling()
         if self.filepath and self.forever_mode:
             raise ArgumentError('Cannot specify both FILE and --forever')
         if self.filepath and self.restart_mode:
@@ -1506,8 +1984,45 @@ class ServerApp(Application):
             raise ArgumentError(f'Authentication key must be at least {AUTH_MINIMUM_LENGTH} characters')
         if not AUTH_ALLOWED_CHARS.fullmatch(self.auth):
             raise ArgumentError(f'Authentication key must contain only "{AUTH_ALLOWED_CHARS.pattern}"')
+        self.evict_after = config_seconds('server', 'evict')
+        self.eager_mode = configured_eager(self.eager_mode)
         if not self.tls_enabled:
             log.warning('TLS is disabled - this is not recommended for production!')
+
+    def check_autoscaling(self: ServerApp) -> None:
+        """Fail combinations with --autoscaling, which runs forever and relies on the database and confirmation."""
+        if self.autoscaling_policy not in ('fixed', 'dynamic'):
+            raise ArgumentError(f'Autoscaling mode must be \'fixed\' or \'dynamic\' '
+                                f'(given \'{self.autoscaling_policy}\')')
+        if self.filepath:
+            raise ArgumentError('Cannot specify both FILE and --autoscaling')
+        if self.restart_mode:
+            raise ArgumentError('Using --autoscaling with --restart is invalid')
+        if self.in_memory:
+            raise ArgumentError('Cannot use --autoscaling with --no-db')
+        if self.no_confirm:
+            raise ArgumentError('Cannot use --autoscaling with --no-confirm')
+        self.forever_mode = True
+
+    def check_database(self: ServerApp) -> None:
+        """Initialize the database with --initdb, else check (and upgrade) it; never open it with --no-db."""
+        if not self.in_memory:
+            ensuredb(auto_init=self.auto_initdb)
+
+    def prepare_source(self: ServerApp) -> None:
+        """Check a named task file whole before anything is inserted or dispatched, with a database or without.
+
+        A group that is not an integer refuses the file (exit 5), as does a zone with no database. The
+        server ingests raw lines, so the scan uses the default template. With a database, a task below the reached group
+        refuses the file (exit 2); tasks in flight do not count toward it, since the scheduler
+        reverts them when it starts. A stream is checked line by line as it arrives.
+        """
+        if self.input_stream is not None and is_file_input(self.input_stream):
+            path = os.path.abspath(self.filepath)
+            with open(path, mode='r') as stream:
+                scan = scan_task_lines(stream, name=path, zones=not self.in_memory and DATABASE_ENABLED)
+            if not self.in_memory and DATABASE_ENABLED:
+                refuse_below_reached_group(scan.groups, Task.reached_group(in_flight=False))
 
     def special_options(self: ServerApp) -> bool:
         """Special terminating options print information lazily (not import time)."""
@@ -1518,8 +2033,17 @@ class ServerApp(Application):
             return False
 
     def enable_tls(self: ServerApp) -> None:
-        """Configure TLS if enabled."""
+        """Configure TLS if enabled; refuse a handshake deadline that is not valid before anything else.
+
+        The server uses TLS unless ``--no-tls`` is given or ``server.tls.enabled`` is false (the switch
+        :func:`~hypershell.core.tls.from_namespace` reads); a plain server never reads the deadline.
+        """
         if self.tls_enabled:
+            if bool(config.server.tls.get('enabled', False)):
+                try:
+                    handshake_seconds(config.server.tls.get('handshake', DEFAULT_HANDSHAKE))
+                except TLSError as error:
+                    raise ArgumentError(str(error)) from error
             self.tls = tls_from_namespace({
                 **config.server.tls,
                 'cert': self.tls_cert,
@@ -1529,8 +2053,8 @@ class ServerApp(Application):
 
     @cached_property
     def input_stream(self: ServerApp) -> Optional[IO]:
-        """Input IO stream for task args."""
-        if self.forever_mode or self.restart_mode or not self.filepath:
+        """Input IO stream for task args (none with --autoscaling, which never reads one)."""
+        if self.forever_mode or self.restart_mode or self.autoscaling_policy is not None or not self.filepath:
             return None
         else:
             return sys.stdin if self.filepath == '-' else open(self.filepath, mode='r')

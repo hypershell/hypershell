@@ -1,0 +1,130 @@
+# Review rubric — `hs-review`
+
+The operating manual for the adversarial QA pass. The correctness reviewer runs in an **isolated
+context** (fresh subagent) and grades the branch diff against `GOAL.md` + the AGENTS.md invariants
+**only** — it is denied `PLAN.md`/`TECH.md` (showing the author's own rationale triggers
+grading-its-own-homework and plan-sycophancy). Verification is by **executed command**, never by
+assertion.
+
+## What the reviewer sees
+
+- ✅ `GOAL.md` (the locked contract — R-IDs)
+- ✅ the branch diff **excluding `spec/`** (`git diff <base>...HEAD -- . ':(exclude)spec/'` — the
+  spec artifacts are committed on the branch, so an unfiltered diff would hand the reviewer
+  PLAN/TECH/research and any prior cycle's REVIEW.md) and the full runnable repo
+- ✅ [`invariants.md`](invariants.md) (the footgun checklist) and `AGENTS.md`
+- ❌ **NOT** `PLAN.md`, `TECH.md`, `research/`, or `META.md` (for the correctness pass — `META.md` is
+  the harness self-improvement log and leaks author intent, same as PLAN/TECH)
+- A **separate, later** completeness sub-pass *may* read `TECH.md` to ask "was every planned phase
+  shipped? did scope balloon?" — kept isolated so the plan never contaminates the correctness verdict.
+
+**The `spec/` exclusion bounds the artifacts, not the rationale.** `issues/{slug}.md` and
+`ROADMAP.md` sit outside `spec/`, so a seed this cycle filed is **inside** the graded diff — and it
+should be. It is a claim about the repository, not a design rationale: grade it as prose the same
+way you grade a docs change. Does its `Problem` describe behavior that is actually there, at the
+`file:line` it cites? Does its `status:` match reality? Does the `ROADMAP.md` entry point at a file
+that exists? A seed that misstates the defect is a real finding. What you must **not** do is treat
+the seed as evidence of what the cycle intended — that is the leak the `spec/` exclusion exists to
+prevent, and a deferral's stated reason is exactly the kind of author intent that would bias you.
+
+## Scope — flag ONLY
+
+1. **Correctness bugs** — the code produces wrong behavior / crashes / data corruption.
+2. **GOAL-requirement gaps** — an R-ID with no implementing change, or implemented incorrectly.
+3. **AGENTS.md invariant violations** — auto-CRITICAL (see below), except §12 project conventions,
+   which grade **HIGH**. §12 includes the docs same-commit rule: a user-visible change with no prose
+   update or no `versionadded`/`versionchanged` marker, and a docs build that warns under `-W`.
+   The change's user-facing note belongs in the PR's squash commit body, which `hs-publish` drafts
+   after review, so a missing note is not a review finding.
+4. **Scope creep** — changes that map to no R-ID (report, don't necessarily block).
+
+**Do NOT** report style nits, speculative hardening, or "you could also…" gold-plating. A
+gap-hunting reviewer manufactures gaps, which drives over-engineering. Silence on a clean diff is a
+valid, valuable result.
+
+**Absurd input is not a finding.** A value no real run would use, outside a setting's sane range
+(thousands of digits, `1e-300`, `1e300`, a period of millennia, a rate of one task per century),
+is handled in one place. Each setting has a declared range, every option, configuration key and
+environment variable of that kind is read through one parser, and out-of-range or non-numeric input
+stops the command with one error. Do not grade the next absurd value a diff fails to refuse
+gracefully. Report it only when:
+
+- a value **inside** a setting's declared or documented range misbehaves;
+- the diff reads a value around the central parser, bypassing it;
+- the declared range itself is wrong for real use.
+
+Otherwise list it at most as a one-line note in `REVIEW.md`, never as a finding. It never loops a
+cycle or triggers the human gate. The ranges are the table `SETTINGS` in `core/config_schema.py`,
+with the advisory limits past which a value runs with a warning; a new numeric setting needs its
+entry there (2026-11-22, maintainer).
+
+## Reviewer conduct (the subagent)
+
+- **Leave the tree clean.** Make no edits to tracked files; if you must instrument to reproduce a
+  finding (a probe, a print), revert it before returning — `git status --porcelain` must be empty
+  when you hand back. Drive the CLI in a throwaway site (`.agents/factory/bin/temp_site.sh`), never
+  the developer's real one.
+- The **Verdict & loop** section below is the *orchestrator's* job, executed after you return — do
+  not write `REVIEW.md`, call `ReportFindings`, or run `set_phase.py` yourself. Your deliverable is
+  the structured findings list + requirement→evidence matrix you were asked for.
+
+## Refutation protocol (mandatory)
+
+For every candidate finding, **try to disprove it first**:
+
+1. Reproduce it — run the exact command / construct the exact input that triggers it.
+2. If reproduced with observed wrong behavior → **CONFIRMED**.
+3. If plausible by reading but not reproduced → **PLAUSIBLE** (needs human triage; does not auto-loop).
+4. If it dissolves under scrutiny → drop it silently.
+
+Default to dropping when uncertain. A single-model reviewer has self-preference bias even in a fresh
+context, so lean on *executed evidence*, not opinion.
+
+## Severity
+
+| Severity | Meaning |
+|---|---|
+| **CRITICAL** | Data loss/corruption, security/auth weakening, or **any** AGENTS.md invariant violation (`invariants.md` §1–§11; a §12 project-conventions violation is **HIGH**, not auto-CRITICAL). |
+| **HIGH** | A GOAL R-ID unmet or wrong; a real bug on a common path. |
+| **MEDIUM** | A bug on an edge path; a partial/again-fragile requirement. |
+| **LOW** | Minor correctness risk; missing-but-non-blocking test coverage of an R-ID. |
+
+## Verdict & loop (orchestrator only)
+
+- Emit findings via `ReportFindings` (most-severe first) **and** write `REVIEW.md`.
+- **CONFIRMED** findings → set `TECH.md` `status: blocked` + `review.verdict: changes-requested`
+  (via `set_phase.py`) and loop back to `hs-build`.
+- **One exception — deferred, not blocked.** A CONFIRMED finding against behavior that **predates
+  the diff** *and* that a `GOAL.md` criterion requires preserving, which cannot be repaired this
+  cycle without failing that criterion. Record it in `REVIEW.md` and defer it to `issues/{slug}.md`
+  (from `templates/ISSUE.md`, `status: unshaped`) plus a `ROADMAP.md` entry, committed *before* the
+  `set_phase.py --reviewed-commit` call and with that call re-pinned to a fresh `git rev-parse HEAD`
+  — both paths sit outside `spec/`, so a seed committed after the pinned SHA is what
+  `/hs-publish`'s staleness gate reads as post-review drift. The verdict is
+  otherwise unchanged by it. **If either condition fails, it blocks.** A finding that describes an
+  unremediated weakness takes the `.security/` lane instead, which is gitignored — nothing to commit,
+  and it is never named in the PR body.
+- **PLAUSIBLE** findings → surface to the human for triage, do not auto-loop.
+- Clean pass → `review.verdict: approved`; proceed to `hs-publish`.
+- Cycle 2+ **appends** a dated `## Review cycle {n}` section to `REVIEW.md` — never overwrite an
+  earlier cycle; the file is the cumulative record.
+- **Bounded loop:** at most 2–3 review↔build cycles — graded against the durable `review.cycle`
+  counter in `TECH.md` (auto-incremented by each `set_phase.py --verdict`). On non-convergence, STOP
+  and escalate to the human (self-correction does not reliably converge).
+
+## Mandatory human sign-off gate
+
+Regardless of auto-loop, a human must approve before `hs-publish` whenever a CONFIRMED finding
+touches:
+
+- the high-blast-radius core: `data/model.py`, `server.py`, `client.py`,
+  `core/queue|tls|fsm|thread|signal.py`, `cluster/remote|ssh.py`; **or**
+- a security / DB-lifecycle invariant (auth minimums, TLS posture, CANCEL_STATUS/exit_status
+  filters, `completion_time` terminality, one retry row per failure (the single Scheduler and the
+  `retried` filter), `in_memory` write guards).
+
+## Optional debate variant (high-risk diffs)
+
+For a diff touching the coupled core, run **two** independent fresh reviewers — one arguing "ship",
+one arguing "block" — and reconcile. Independent instances beat single-model introspection. Reserve
+for genuinely high-risk changes (cost).

@@ -6,31 +6,46 @@
 
 # Type annotations
 from __future__ import annotations
-from typing import Dict, Callable, Optional, Any, Iterable, Type, Final, Tuple
+from typing import Dict, Callable, Optional, Any, Iterable, Type, Final, Tuple, List
 from types import TracebackType
 
 # Standard libs
 import io
 import os
 import ssl
+import time
+import errno
 import select
 import socket
 import struct
+import inspect
+import threading
+import selectors
 from functools import cache
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from multiprocessing.managers import BaseManager, listener_client
-from multiprocessing.connection import (_ConnectionBase, Listener, Client, Connection, address_type,
-                                        answer_challenge, deliver_challenge, BUFSIZE)
-from multiprocessing import JoinableQueue
+from multiprocessing import util, ProcessError
+from multiprocessing.managers import (BaseManager, BaseProxy, Server, State, AutoProxy, RemoteError, Token,
+                                      listener_client, convert_to_error, dispatch)
+from multiprocessing.connection import (_ConnectionBase, Listener, SocketListener, Client, Connection,
+                                        address_type, answer_challenge, deliver_challenge, BUFSIZE)
+from queue import Queue, SimpleQueue
+
+try:
+    import resource
+except ImportError:  # Not POSIX: no open-file limit to manage
+    resource = None
 
 # Internal libs
-from hypershell.core.config import default, config as _config
-from hypershell.core.logging import Logger
+from hypershell.core.config import default, config as _config, client_host
+from hypershell.core.logging import Logger, close_inherited_slot_locks
 from hypershell.core.types import NoneType, serialize
-from hypershell.core.tls import (TLSConfig, install_process_context,
+from hypershell.core.tls import (TLSConfig, TLSError, install_process_context, build_server_context,
                                  get_server_context, get_client_context, get_tls_config,
-                                 verify_peer_fingerprint, from_namespace as _tls_from_namespace)
+                                 verify_peer_fingerprint, handshake_seconds, HANDSHAKE_KEY,
+                                 from_namespace as _tls_from_namespace)
+from hypershell.core.dispatch import Dispatcher, PROTOCOL
+from hypershell.core.codec import encode, decode, CodecError, PickleFrame, OLD_PEER_REPLY
 
 # Public interface
 __all__ = [
@@ -38,6 +53,8 @@ __all__ = [
     'SENTINEL', 'make_sentinel',
     'SecureConnection', 'SecureListener', 'secure_client', 'SecureManager',
     'QueueConfig', 'QueueInterface', 'QueueServer', 'QueueClient',
+    'QueueServerError', 'QueueVersionError', 'QueueSubmitRefused', 'ClientTooOld', 'unsupported_internals', 'PROTOCOL',
+    'DISPATCH_EXPOSED',
 ]
 
 # Initialize logger
@@ -48,11 +65,13 @@ TLS_SERIALIZER: Final[str] = 'hypershell-tls'
 """Serializer key registered with :data:`multiprocessing.managers.listener_client`.
 When a :class:`BaseManager` is constructed with this serializer, both ends route their
 traffic through :class:`SecureListener` / :func:`secure_client` instead of the cleartext
-stock pair."""
+pair. Every message is encoded with the queue's codec (:mod:`hypershell.core.codec`)."""
 
 PLAIN_SERIALIZER: Final[str] = 'hypershell-plain'
-"""Serializer key for cleartext queue traffic: the stock listener and client with Nagle's algorithm
-off on every TCP connection. The wire is the stock one, byte for byte."""
+"""Serializer key for cleartext queue traffic: :class:`_PlainListener` and :func:`_plain_client`, with
+Nagle's algorithm off on every TCP connection. The framing and the authentication handshake are the
+stock connection's, byte for byte; every message is encoded with the queue's codec
+(:mod:`hypershell.core.codec`)."""
 
 
 def _no_delay(sock: socket.socket) -> None:
@@ -96,16 +115,119 @@ def _no_delay_connection(conn: Connection) -> None:
             os.set_blocking(fd, blocking)
 
 
-class SecureConnection(_ConnectionBase):
+OLD_FRAMING: Final[str] = ('the peer speaks the queue framing of a release before 2.9.0a10; '
+                           'run matching server and client versions')
+"""Why a server refuses a peer of a release before 2.9.0a10 (logged with the peer's address)."""
+
+
+PUBLIC_REQUESTS: Final[frozenset] = frozenset(Server.public)
+"""The names a connection's first request to a queue manager's server may carry: the manager's public requests."""
+
+
+class _Refused(EOFError):
+    """A queue server's connection refused a message outside the queue vocabulary and is closed.
+
+    An :class:`EOFError`, so the manager's serve loop ends that connection's handler as it does for a
+    peer that disconnects, and serves its other connections as before.
+    """
+
+
+class _EnvelopeCodec:
+    """
+    The ``send`` and ``recv`` of a queue connection: each message is encoded and decoded with the queue's
+    codec (:mod:`hypershell.core.codec`), over the connection's own framing (``_send_bytes`` and
+    ``_recv_bytes``), which is unchanged. The authentication challenge (``send_bytes`` and
+    ``recv_bytes``) is unchanged too.
+
+    A connection a client dialled knows the address it dialled (``_dialled``); one a server accepted has
+    none. A message that does not decode into the vocabulary is refused: the connection closes itself
+    first, so nothing more is sent or received on it, records why (``refusal``), and raises. On a
+    server that is :class:`_Refused`; on a client it is :class:`QueueVersionError`, which is fatal: the
+    server it reached is of another version, or is not a queue server this client can understand.
+
+    A message in the pickle framing of a release before 2.9.0a10 is never decoded. A server answers it
+    with the one fixed reply such a peer reads (:data:`~hypershell.core.codec.OLD_PEER_REPLY`, the same
+    bytes for every peer) before it closes; a client names the older framing in its version error.
+
+    A queue client never asks its server for a proxy in a reply (``#PROXY``), so on a client's connection
+    such a reply is refused as a message outside the vocabulary, whether it comes as a tuple or as a list.
+
+    A server's connection takes its first request through :meth:`_recv_request` (see :class:`_ManagerServer`).
+    """
+
+    _dialled: Optional[Tuple[str, int]] = None
+    refusal: Optional[str] = None
+
+    def send(self, obj: Any) -> None:
+        """Send `obj` as one message; a value outside the vocabulary raises before anything is written."""
+        self._check_closed()
+        self._check_writable()
+        self._send_bytes(encode(obj))
+
+    def recv(self) -> Any:
+        """Receive one message, decoded into the vocabulary or refused (see the class notes)."""
+        self._check_closed()
+        self._check_readable()
+        buf = self._recv_bytes()
+        try:
+            with buf.getbuffer() as frame:  # Released before the buffer, even on a refusal
+                message = decode(frame)
+        except PickleFrame:
+            self._refuse_old_peer()
+        except CodecError as error:
+            self._refuse(error)
+        if self._dialled is not None and type(message) in (tuple, list) and message and message[0] == '#PROXY':
+            self._refuse(CodecError('a proxy in a reply, which a queue client never asks for'))
+        return message
+
+    def _recv_request(self) -> Any:
+        """Receive a server connection's first request, refused as outside the vocabulary unless it is a tuple
+        ``(ident, name, args, kwds)`` whose name is one of :data:`PUBLIC_REQUESTS`.
+
+        Set on the connection in place of :meth:`recv` for that one message; later messages are received
+        by :meth:`recv` itself.
+        """
+        del self.recv
+        message = self.recv()
+        if not (type(message) is tuple and len(message) == 4
+                and type(message[1]) is str and message[1] in PUBLIC_REQUESTS):
+            self._refuse(CodecError("a first request outside the manager's public requests"))
+        return message
+
+    def _refuse(self, error: CodecError) -> None:
+        """Close this connection, record why, and raise the error of its side."""
+        self.refusal = f'it sent a message outside the queue vocabulary ({error})'
+        self.close()
+        if self._dialled is None:
+            raise _Refused(self.refusal)
+        raise QueueVersionError(f'Server at {_peer_text(self._dialled)} sent a message outside this '
+                                f'version\'s queue vocabulary ({error}); run matching server and client versions')
+
+    def _refuse_old_peer(self) -> None:
+        """Refuse a peer of a release before 2.9.0a10: a server sends it the fixed reply first; then close
+        this connection, record why, and raise the error of its side."""
+        self.refusal = OLD_FRAMING
+        if self._dialled is None:
+            try:
+                self.send_bytes(OLD_PEER_REPLY)
+            except OSError:  # The peer has gone; there is nothing more to tell it
+                pass
+            self.close()
+            raise _Refused(self.refusal)
+        self.close()
+        raise QueueVersionError(f'Server at {_peer_text(self._dialled)} speaks the queue framing of a release '
+                                f'before 2.9.0a10; run matching server and client versions')
+
+
+class SecureConnection(_EnvelopeCodec, _ConnectionBase):
     """
     A :class:`multiprocessing.connection.Connection`-compatible wrapper around an :class:`ssl.SSLSocket`.
 
     Implements the same wire framing as the stock connection (a 4-byte network-order signed
     length, with a ``-1`` sentinel + 8-byte payload length for messages larger than 2 GiB)
     so it is a drop-in replacement, but every byte read or written passes through the TLS
-    layer. ``send`` / ``recv`` (which transparently pickle Python objects) are inherited
-    from :class:`_ConnectionBase` for free since they are layered on top of
-    ``_send_bytes`` / ``_recv_bytes``.
+    layer. ``send`` / ``recv`` encode and decode each message with the queue's codec
+    (:class:`_EnvelopeCodec`), layered on ``_send_bytes`` / ``_recv_bytes``.
     """
 
     def __init__(self: SecureConnection, ssl_sock: ssl.SSLSocket,
@@ -189,6 +311,15 @@ class SecureListener:
     Owns its bound listening socket directly rather than reaching into the internals of
     :class:`multiprocessing.connection.Listener`; the constructor signature mirrors that
     of the stock listener so this class slots into :data:`listener_client`.
+
+    A listener given its own configuration with :meth:`serve_with` builds its server context from
+    it and never reads the process-wide one; otherwise it uses the process-wide context. When its own
+    context cannot be built, it says so once at ERROR and every connection fails closed.
+
+    :meth:`accept` runs the TLS handshake before it returns, as a stock accept loop expects. An
+    in-process queue server instead takes the TCP connection with :meth:`accept_pending` and runs the
+    handshake on that connection's own thread (:meth:`wrap_pending`, then :func:`_complete_handshake`),
+    so its accept loop never waits on a peer.
     """
 
     def __init__(self: SecureListener,
@@ -210,6 +341,10 @@ class SecureListener:
         self._socket = sock
         self._address = sock.getsockname()
         self._last_accepted = None
+        self._tls: Optional[TLSConfig] = None
+        self._context: Optional[ssl.SSLContext] = None
+        self._context_failed = False
+        self._context_lock = threading.Lock()  # Handler threads may build the context at once
         # `authkey` is part of the stock Listener interface but unused here; the manager
         # performs the challenge handshake explicitly after we hand back the connection.
         self._authkey = authkey
@@ -222,17 +357,62 @@ class SecureListener:
     def last_accepted(self: SecureListener):
         return self._last_accepted
 
+    def serve_with(self: SecureListener, cfg: TLSConfig) -> None:
+        """Use a server context built from `cfg` (on first accept) instead of the process-wide one."""
+        self._tls = cfg
+        self._context = None
+        self._context_failed = False
+
+    def _server_context(self: SecureListener) -> ssl.SSLContext:
+        """This listener's own server context when it has a configuration, else the process-wide one."""
+        if self._tls is None:
+            return get_server_context()
+        with self._context_lock:
+            if self._context is None:
+                try:
+                    self._context = build_server_context(self._tls)
+                except Exception as error:
+                    if not self._context_failed:
+                        self._context_failed = True
+                        log.error(f'Queue server cannot set up TLS and refuses every connection '
+                                  f'({error.__class__.__name__}: {error})')
+                    raise
+            return self._context
+
     def accept(self: SecureListener) -> SecureConnection:
         """Block on the listening socket and return a TLS-wrapped connection."""
         raw, self._last_accepted = self._socket.accept()
         raw.setblocking(True)
         _no_delay(raw)
         try:
-            ssl_sock = get_server_context().wrap_socket(raw, server_side=True)
+            ssl_sock = self._server_context().wrap_socket(raw, server_side=True)
         except Exception:
             raw.close()
             raise
         return SecureConnection(ssl_sock)
+
+    def accept_pending(self: SecureListener) -> Tuple[socket.socket, Tuple[str, int]]:
+        """Block on the listening socket and return the TCP connection and its peer, before any TLS.
+
+        Nothing is read from or written to the peer here.
+        """
+        raw, self._last_accepted = self._socket.accept()
+        try:
+            raw.setblocking(True)
+            _no_delay(raw)
+        except OSError:
+            raw.close()
+            raise
+        return raw, self._last_accepted
+
+    def wrap_pending(self: SecureListener, raw: socket.socket) -> ssl.SSLSocket:
+        """Wrap a connection from :meth:`accept_pending` for the server side of TLS, without starting
+        the handshake. On failure `raw` is closed and the error raised."""
+        try:
+            return self._server_context().wrap_socket(raw, server_side=True, do_handshake_on_connect=False)
+        except Exception:
+            raw.close()
+            raise
 
     def close(self: SecureListener) -> None:
         sock = self._socket
@@ -257,27 +437,36 @@ def secure_client(address, family=None, authkey: Optional[bytes] = None) -> Secu
     Matches the signature of :func:`multiprocessing.connection.Client` so it slots in as a
     drop-in replacement. Opens a TLS connection, optionally verifies the peer fingerprint,
     then performs the BaseManager challenge/response handshake over the encrypted channel.
+
+    Until the TLS handshake ends the calling thread is on the server side (see :func:`_decref`): a
+    forked manager's accept loop runs the handshake inline and waits on this thread meanwhile. (An
+    in-process queue server runs it on the connection's own handler thread, under its deadline.)
     """
     cfg = get_tls_config()
     ctx = get_client_context()
-    # Dial IPv4 only, exactly as the cleartext client does: the listener binds AF_INET, so
-    # following the resolver to an IPv6 address (e.g., `localhost` -> ::1) could reach some
-    # other process holding the same port number there instead of the server.
-    raw = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    _mark()
     try:
-        raw.setblocking(True)
-        _no_delay(raw)
-        raw.connect(address)
-        servername = (cfg.servername if cfg is not None and cfg.servername else None)
-        if servername is None and ctx.check_hostname:
-            servername = address[0] if isinstance(address, tuple) else None
-        ssl_sock = ctx.wrap_socket(raw, server_hostname=servername)
-    except Exception:
-        raw.close()
-        raise
+        # Dial IPv4 only, exactly as the cleartext client does: the listener binds AF_INET, so
+        # following the resolver to an IPv6 address (e.g., `localhost` -> ::1) could reach some
+        # other process holding the same port number there instead of the server.
+        raw = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            raw.setblocking(True)
+            _no_delay(raw)
+            raw.connect(address)
+            servername = (cfg.servername if cfg is not None and cfg.servername else None)
+            if servername is None and ctx.check_hostname:
+                servername = address[0] if isinstance(address, tuple) else None
+            ssl_sock = ctx.wrap_socket(raw, server_hostname=servername)
+        except Exception:
+            raw.close()
+            raise
+    finally:
+        _unmark()
     if cfg is not None:
         verify_peer_fingerprint(ssl_sock, cfg)
     conn = SecureConnection(ssl_sock)
+    conn._dialled = address
     if authkey is not None:
         if not isinstance(authkey, bytes):
             raise TypeError('authkey should be a byte string')
@@ -293,25 +482,47 @@ def secure_client(address, family=None, authkey: Optional[bytes] = None) -> Secu
 listener_client[TLS_SERIALIZER] = (SecureListener, secure_client)
 
 
-class _PlainListener(Listener):
-    """The stock listener, with Nagle's algorithm off on each accepted TCP connection."""
+class _PlainConnection(_EnvelopeCodec, Connection):
+    """A cleartext queue connection: the stock connection's framing, with the queue's codec for each message.
 
-    def accept(self: _PlainListener) -> Connection:
+    The stock :class:`~multiprocessing.connection.Connection` itself is left as it is: a forked manager's
+    pipe to its child and process start-up use it.
+    """
+
+
+class _PlainListener(Listener):
+    """The stock listener, handing over each accepted connection as a :class:`_PlainConnection`, with
+    Nagle's algorithm off on a TCP connection."""
+
+    def accept(self: _PlainListener) -> _PlainConnection:
         """Accept a connection as the stock listener does. A manager's server gives its listener no
         `authkey`, so the option is set before the handshake."""
         conn = super().accept()
+        conn.__class__ = _PlainConnection  # The same connection, with the queue's codec for each message
         _no_delay_connection(conn)
         return conn
 
 
-def _plain_client(address, family=None, authkey: Optional[bytes] = None) -> Connection:
-    """The stock :func:`multiprocessing.connection.Client`, with Nagle's algorithm off on a TCP
-    connection before the authentication handshake."""
+def _plain_client(address, family=None, authkey: Optional[bytes] = None) -> _PlainConnection:
+    """A cleartext queue connection to `address`, as the stock :func:`multiprocessing.connection.Client`
+    makes, but a :class:`_PlainConnection`, with Nagle's algorithm off on a TCP connection before the
+    authentication handshake."""
     if authkey is not None and not isinstance(authkey, bytes):
         raise TypeError('authkey should be a byte string')
-    conn = Client(address, family)
     if (family or address_type(address)) == 'AF_INET':
-        _no_delay_connection(conn)
+        raw = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            raw.setblocking(True)
+            _no_delay(raw)
+            raw.connect(address)
+        except Exception:
+            raw.close()
+            raise
+        conn = _PlainConnection(raw.detach())
+    else:
+        conn = Client(address, family)
+        conn.__class__ = _PlainConnection  # The same connection, with the queue's codec for each message
+    conn._dialled = address
     if authkey is not None:
         answer_challenge(conn, authkey)
         deliver_challenge(conn, authkey)
@@ -322,11 +533,693 @@ def _plain_client(address, family=None, authkey: Optional[bytes] = None) -> Conn
 listener_client[PLAIN_SERIALIZER] = (_PlainListener, _plain_client)
 
 
-def _tls_bootstrap(cfg: TLSConfig, user_init, user_initargs) -> None:
-    """Initializer used by :class:`SecureManager.start` to install TLS state in the subprocess."""
-    install_process_context(cfg)
+def _child_bootstrap(cfg: Optional[TLSConfig], user_init, user_initargs) -> None:
+    """Initializer run in the forked manager child before it serves.
+
+    Closes log-slot lock descriptors inherited across the fork so the parent stays the sole
+    holder (a killed parent never leaves a ghost lock), installs the per-process TLS context
+    when TLS is active, then runs any user initializer. Ordered so the fd hygiene and TLS state
+    are in place before serving; touches neither the RPC framing, authkey, nor the handshake.
+    """
+    close_inherited_slot_locks()
+    if cfg is not None:
+        install_process_context(cfg)
     if user_init is not None:
         user_init(*user_initargs)
+
+
+class QueueServerError(RuntimeError):
+    """The queue server could not start serving."""
+
+
+class QueueVersionError(RuntimeError):
+    """The server and this client do not speak the same work-request protocol."""
+
+
+class QueueSubmitRefused(RuntimeError):
+    """The server does not serve tasks submitted to its live queue (it has a database)."""
+
+
+class ClientTooOld(Exception):
+    """A client connected without the work-request protocol (a release before it); it is refused."""
+
+
+def _var_positional(func: Callable[..., Any]) -> bool:
+    """Whether `func` takes ``*args``."""
+    return any(p.kind is inspect.Parameter.VAR_POSITIONAL for p in inspect.signature(func).parameters.values())
+
+
+def _register_passes_args() -> bool:
+    """Whether the method `BaseManager.register` makes passes its positional arguments to ``_create``."""
+    methods = [const for const in BaseManager.register.__code__.co_consts if inspect.iscode(const)]
+    return any(code.co_flags & inspect.CO_VARARGS and '_create' in code.co_names for code in methods)
+
+
+def _parameters(func: Callable[..., Any]) -> List[str]:
+    """Parameter names of `func`, in order."""
+    return list(inspect.signature(func).parameters)
+
+
+def _names(func: Callable[..., Any]) -> Tuple[str, ...]:
+    """Global and attribute names referenced by the body of `func`."""
+    return func.__code__.co_names
+
+
+def _strings(func: Callable[..., Any]) -> set:
+    """The string constants of the body of `func`, read through nested tuples and nested code objects."""
+    found, pending = set(), list(func.__code__.co_consts)
+    while pending:
+        const = pending.pop()
+        if isinstance(const, str):
+            found.add(const)
+        elif isinstance(const, tuple):
+            pending.extend(const)
+        elif inspect.iscode(const):
+            pending.extend(const.co_consts)
+    return found
+
+
+# The manager reaches a connection only through `send` and `recv` (which a queue connection encodes with
+# its codec), never through the byte-level methods or the pickler directly
+_ENVELOPE: Final[frozenset] = frozenset({'send', 'recv'})
+_BYTE_LEVEL: Final[frozenset] = frozenset({'send_bytes', 'recv_bytes', 'dumps', 'loads', '_ForkingPickler'})
+
+
+def _sends_through_envelope(func: Callable[..., Any]) -> bool:
+    """Whether `func` sends and receives with `send` and `recv`, and touches no byte-level method or pickler."""
+    names = set(_names(func))
+    return _ENVELOPE <= names and not names & _BYTE_LEVEL
+
+
+def _dispatches(code) -> bool:
+    """Whether the code object `code` makes its request through `dispatch` and touches no connection method."""
+    names = set(code.co_names)
+    return 'dispatch' in names and not names & (_ENVELOPE | _BYTE_LEVEL)
+
+
+def _manager_requests_dispatch() -> bool:
+    """Whether every manager request outside the serve loop and a proxy's calls goes through `dispatch`."""
+    funcs = (BaseManager.connect, BaseManager._create, BaseManager._debug_info, BaseManager._number_of_objects,
+             BaseManager._finalize_manager, BaseProxy._connect, BaseProxy._incref, BaseProxy._decref, AutoProxy)
+    methods = [const for const in BaseManager.register.__code__.co_consts
+               if inspect.iscode(const) and '_create' in const.co_names]
+    return bool(methods) and all(_dispatches(func.__code__) for func in funcs) and all(map(_dispatches, methods))
+
+
+# The CPython multiprocessing privates the in-process serve loop relies on, each with a check of its
+# presence and shape. Checks read signatures and compiled names only; none binds a socket.
+_INTERNALS: Final[Tuple[Tuple[str, Callable[[], bool]], ...]] = (
+    ('Server.__init__(registry, address, authkey, serializer)',
+     lambda: _parameters(Server.__init__) == ['self', 'registry', 'address', 'authkey', 'serializer']),
+    ('Server.__init__ sets listener, address, mutex, id_to_obj, registry and authkey',
+     lambda: {'listener', 'address', 'mutex', 'id_to_obj', 'registry', 'authkey'} <= set(_names(Server.__init__))),
+    ('Server._handle_request(c)', lambda: _parameters(Server._handle_request) == ['self', 'c']),
+    ('Server._handle_request takes the request from recv after the challenge, then looks its name up',
+     lambda: {'deliver_challenge', 'answer_challenge', 'recv', 'getattr'} <= set(_names(Server._handle_request))),
+    ('Server.handle_request(conn)', lambda: _parameters(Server.handle_request) == ['self', 'conn']),
+    ('Server.serve_client(conn)', lambda: _parameters(Server.serve_client) == ['self', 'conn']),
+    ('Server.shutdown(c)', lambda: _parameters(Server.shutdown) == ['self', 'c']),
+    ("'shutdown' in Server.public", lambda: 'shutdown' in Server.public),
+    ('Server.serve_client loops on stop_event and exits through sys.exit',
+     lambda: {'stop_event', 'is_set', 'sys', 'exit'} <= set(_names(Server.serve_client))),
+    ('Server.handle_request absorbs SystemExit', lambda: 'SystemExit' in _names(Server.handle_request)),
+    ('Listener keeps its socket at _listener._socket',
+     lambda: '_listener' in _names(Listener.__init__) and '_socket' in _names(SocketListener.__init__)),
+    ('listener_client maps serializers to (Listener, Client) pairs',
+     lambda: (len(listener_client['pickle']) == 2
+              and TLS_SERIALIZER in listener_client and PLAIN_SERIALIZER in listener_client)),
+    ('BaseManager sets _state, _address, _authkey and _serializer',
+     lambda: {'_state', '_address', '_authkey', '_serializer'} <= set(_names(BaseManager.__init__))),
+    ('State.INITIAL, State.STARTED and State.SHUTDOWN',
+     lambda: len({State.INITIAL, State.STARTED, State.SHUTDOWN}) == 3),
+    ('BaseProxy._address_to_local and BaseProxy._mutex',
+     lambda: isinstance(BaseProxy._address_to_local, dict) and callable(BaseProxy._mutex.__enter__)),
+    ('util.Finalize(args=, exitpriority=)',
+     lambda: {'args', 'exitpriority'} <= set(_parameters(util.Finalize.__init__))),
+    ('BaseProxy._incref sets _close to a util.Finalize of BaseProxy._decref',
+     lambda: {'Finalize', 'BaseProxy', '_decref', '_close'} <= set(_names(BaseProxy._incref))),
+    ('BaseProxy._decref(token, ...)', lambda: _parameters(BaseProxy._decref)[0] == 'token'),
+    ('util.Finalize calls its _callback with its _args',
+     lambda: {'_callback', '_args'} <= set(_names(util.Finalize.__init__)) & set(_names(util.Finalize.__call__))),
+    ('Thread.start runs Thread._bootstrap() first on the new thread',
+     lambda: '_bootstrap' in _names(threading.Thread.start) and _parameters(threading.Thread._bootstrap) == ['self']),
+    ('threading._active maps the identifier of each thread that threading has started to its Thread, '
+     'which the new thread registers itself',
+     lambda: (isinstance(threading._active, dict) and '_active' in _names(threading.Thread._bootstrap_inner)
+              and '_active' not in _names(threading.Thread.start))),
+    ('threading._DummyThread is the Thread of a thread that threading did not start',
+     lambda: issubclass(threading._DummyThread, threading.Thread)),
+    ('Server.serve_client takes no mutex', lambda: 'mutex' not in _names(Server.serve_client)),
+    ('Server._handle_request turns an exception into #TRACEBACK',
+     lambda: '#TRACEBACK' in Server._handle_request.__code__.co_consts and 'format_exc' in _names(Server._handle_request)),
+    ('Server.create passes *args to the registry callable', lambda: _var_positional(Server.create)),
+    ("BaseManager.register's method passes *args to _create", _register_passes_args),
+    ('convert_to_error produces RemoteError', lambda: isinstance(convert_to_error('#TRACEBACK', ''), RemoteError)),
+    ('BaseProxy._callmethod caches a connection per thread (_tls.connection)',
+     lambda: {'_tls', 'connection'} <= set(_names(BaseProxy._callmethod))),
+    ('dispatch, Server._handle_request, Server.serve_client and BaseProxy._callmethod use only send and recv',
+     lambda: all(map(_sends_through_envelope, (dispatch, Server._handle_request, Server.serve_client,
+                                                BaseProxy._callmethod)))),
+    ('Server.accept_connection and Server.shutdown reply with send',
+     lambda: 'send' in _names(Server.accept_connection) and 'send' in _names(Server.shutdown)),
+    ("Every other manager and proxy request goes through dispatch", _manager_requests_dispatch),
+    ('Server.serve_client sends #RETURN, #ERROR, #PROXY, #TRACEBACK and #UNSERIALIZABLE, and ends on EOFError',
+     lambda: ({'#RETURN', '#ERROR', '#PROXY', '#TRACEBACK', '#UNSERIALIZABLE'} <= _strings(Server.serve_client)
+              and 'EOFError' in _names(Server.serve_client))),
+    ('Server._handle_request sends #RETURN and #TRACEBACK',
+     lambda: {'#RETURN', '#TRACEBACK'} <= _strings(Server._handle_request)),
+    ('convert_to_error reads #ERROR, #TRACEBACK and #UNSERIALIZABLE',
+     lambda: {'#ERROR', '#TRACEBACK', '#UNSERIALIZABLE'} <= _strings(convert_to_error)),
+    ('BaseProxy._callmethod reads #RETURN and #PROXY', lambda: {'#RETURN', '#PROXY'} <= _strings(BaseProxy._callmethod)),
+    ('Server.public names the nine manager requests',
+     lambda: set(Server.public) == {'shutdown', 'create', 'accept_connection', 'get_methods', 'debug_info',
+                                    'number_of_objects', 'dummy', 'incref', 'decref'}),
+    ('The authentication challenge uses send_bytes and recv_bytes, not send and recv',
+     lambda: all({'send_bytes', 'recv_bytes'} <= set(_names(func)) and not set(_names(func)) & _ENVELOPE
+                 for func in (deliver_challenge, answer_challenge))),
+    ('_ConnectionBase.send and recv frame through _send_bytes and _recv_bytes',
+     lambda: ({'_check_closed', '_check_writable', '_send_bytes'} <= set(_names(_ConnectionBase.send))
+              and {'_check_closed', '_check_readable', '_recv_bytes'} <= set(_names(_ConnectionBase.recv)))),
+    ('Token(typeid, address, id)',
+     lambda: Token.__slots__ == ('typeid', 'address', 'id')
+     and _parameters(Token.__init__) == ['self', 'typeid', 'address', 'id']),
+)
+
+
+def unsupported_internals() -> List[str]:
+    """The multiprocessing internals the in-process serve loop needs but this Python lacks or reshaped."""
+    problems = []
+    for what, check in _INTERNALS:
+        try:
+            supported = check()
+        except Exception:  # A missing attribute or an unreadable signature is a failed check
+            supported = False
+        if not supported:
+            problems.append(what)
+    return problems
+
+
+# Seconds between checks of the halt flag in the in-process accept loop
+POLL: Final[float] = 0.25
+
+# Descriptors the in-process server keeps free for its own files (database, logs) by refusing
+# new connections that would use them
+RESERVE: Final[int] = 32
+
+# Seconds between warnings about refused connections; refusals in between are logged at DEBUG
+REFUSAL_WARNING_INTERVAL: Final[float] = 60.0
+
+# Accept errors that mean the process (or system) is out of descriptors
+OUT_OF_DESCRIPTORS: Final[Tuple[int, ...]] = (errno.EMFILE, errno.ENFILE)
+
+# Set by a registry callable on the handler thread whose connection it refused as too old, and read
+# by that thread once the connection is closed, so the warning is logged outside the server mutex.
+_refusals = threading.local()
+
+
+def _open_file_limit() -> Optional[int]:
+    """The soft open-file limit of this process, or None when there is none."""
+    if resource is None:
+        return None
+    soft, _ = resource.getrlimit(resource.RLIMIT_NOFILE)
+    return None if soft == resource.RLIM_INFINITY else soft
+
+
+def _listening_socket(listener) -> socket.socket:
+    """The bound socket behind `listener`: our own for TLS, the stock listener's otherwise."""
+    sock = getattr(listener, '_socket', None)
+    if isinstance(sock, socket.socket):
+        return sock
+    return listener._listener._socket
+
+
+def _cut(conn) -> None:
+    """Shut down both directions of a live connection's socket so its handler wakes and exits.
+
+    A socket still in its TLS handshake (raw, or wrapped but not yet handshaken) and the TLS socket of
+    a connection are shut down at the plain-socket level, leaving any SSL object to the handler thread
+    that owns it. A stock connection is reached through a duplicate of its descriptor. Platforms that
+    offer neither are skipped; their handlers exit when the peer disconnects.
+    """
+    try:
+        ssl_sock = getattr(conn, '_ssl_sock', None)
+        if isinstance(conn, socket.socket):
+            socket.socket.shutdown(conn, socket.SHUT_RDWR)
+        elif ssl_sock is not None:
+            socket.socket.shutdown(ssl_sock, socket.SHUT_RDWR)
+        else:
+            with socket.fromfd(conn.fileno(), socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.shutdown(socket.SHUT_RDWR)
+    except (OSError, ValueError, AttributeError):
+        pass
+
+
+def _peer_text(peer: Optional[Tuple[str, int]]) -> str:
+    """A peer's address as ``host:port`` for a log line, or 'unknown peer'."""
+    return f'{peer[0]}:{peer[1]}' if isinstance(peer, tuple) and len(peer) == 2 else 'unknown peer'
+
+
+def _complete_handshake(ssl_sock: ssl.SSLSocket, deadline_at: float) -> None:
+    """Run the server side of the TLS handshake on `ssl_sock`, ending by `deadline_at` (monotonic).
+
+    The socket timeout is set to what is left before `deadline_at`, and one handshake call measures
+    its timeout once, from its start, so data the peer sends does not extend it. The deadline is at
+    most a day (:func:`~hypershell.core.tls.handshake_seconds`), well inside the longest wait the
+    ``ssl`` module keeps. The socket is blocking again afterwards.
+
+    Raises:
+        TimeoutError: the deadline passed first (``errno`` is None).
+    """
+    remaining = deadline_at - time.monotonic()
+    if remaining <= 0:
+        raise TimeoutError('TLS handshake deadline passed')
+    ssl_sock.settimeout(remaining)
+    ssl_sock.do_handshake()
+    ssl_sock.settimeout(None)
+
+
+class _ManagerServer(Server):
+    """
+    The stock :class:`multiprocessing.managers.Server`, but each connection's first request is checked
+    explicitly: unless it names one of the manager's public requests (:data:`PUBLIC_REQUESTS`), the
+    connection refuses it as a message outside the vocabulary and closes, before the stock handler sees
+    it. The check holds under any interpreter flags, including Python's optimisation flag.
+
+    A queue manager's server is always this class: in a process of its own or built by ``get_server``
+    (``SecureManager._Server``), and in-process (:class:`_InProcessServer`).
+    """
+
+    def _handle_request(self: _ManagerServer, c) -> None:
+        """Serve a connection's first request as the stock server does, taking it through
+        :meth:`_EnvelopeCodec._recv_request`."""
+        c.recv = c._recv_request
+        super()._handle_request(c)
+
+
+class _InProcessServer(_ManagerServer):
+    """
+    A :class:`multiprocessing.managers.Server` served by daemon threads of the calling process.
+
+    Construction (bind and listen) and per-connection request handling are those of
+    :class:`_ManagerServer`, so the manager protocol, authentication handshake, codec, TLS layer and the
+    check of each connection's first request are exactly those of a forked manager. A connection that
+    refuses a message outside the queue vocabulary closes itself and ends its handler; it is logged
+    once, naming the peer, and the other connections are served as before.
+    The accept loop is our own: unlike ``serve_forever`` it never exits the process or touches
+    ``sys.stdout``/``sys.stderr``, and :meth:`stop` releases the port and cuts live connections
+    without waiting on any thread.
+
+    Connections never hold the last :data:`RESERVE` descriptors below the open-file limit: one that
+    would is closed at once, so the server's own files keep working. An accept that fails for want of
+    descriptors is retried after a pause.
+
+    With TLS the accept loop does only the TCP accept. Each connection's handler thread runs its TLS
+    handshake, which must end within the handshake deadline (``server.tls.handshake``) counted from
+    the accept, or the connection is closed; so a peer slow or silent in its handshake holds only its
+    own thread and descriptor, and only until then.
+    """
+
+    def __init__(self: _InProcessServer, registry: Dict[str, tuple], address: Tuple[str, int],
+                 authkey: bytes, serializer: str, tls: Optional[TLSConfig] = None) -> None:
+        """Bind and listen; the accept loop starts with :meth:`serve`.
+
+        With `tls`, the listener serves with its own context built from it, so the process-wide
+        TLS configuration that clients in this process use plays no part in accepting connections.
+
+        Raises:
+            QueueServerError: the handshake deadline of `tls` is not valid (checked before binding).
+        """
+        self._handshake: Optional[int] = None
+        if tls is not None:
+            try:
+                self._handshake = handshake_seconds(tls.handshake)
+            except TLSError as error:
+                raise QueueServerError(str(error)) from error
+        super().__init__(registry, address, authkey, serializer)
+        if tls is not None:
+            self.listener.serve_with(tls)
+        # Read by serve_client() between requests. Never set: setting it desynchronises a
+        # connection's request/reply pairing; stopping cuts the sockets instead.
+        self.stop_event = threading.Event()
+        self._halted = False
+        self._live = set()
+        self._lock = threading.Lock()
+        self._warned_at: Optional[float] = None
+        self._handshake_warned_at: Optional[float] = None
+        self._handshake_warned_lock = threading.Lock()
+        self._unstarted_warned_at: Optional[float] = None
+
+    def serve(self: _InProcessServer) -> None:
+        """Accept connections until stopped, one daemon handler thread per connection.
+
+        With TLS only the TCP connection is accepted here; its handler thread runs the handshake
+        (:meth:`handle_pending`). A connection whose handler thread cannot start is closed and
+        logged, and accepting goes on (:meth:`_unstarted`).
+        """
+        pending = isinstance(self.listener, SecureListener) and self._handshake is not None
+        try:
+            with selectors.DefaultSelector() as selector:
+                selector.register(_listening_socket(self.listener), selectors.EVENT_READ)
+                while not self._halted:
+                    if not selector.select(timeout=POLL) or self._halted:
+                        continue
+                    try:
+                        if pending:
+                            conn, peer = self.listener.accept_pending()
+                            accepted = time.monotonic()
+                        else:
+                            conn = self.listener.accept()
+                    except Exception as error:
+                        # A failed accept (reset, handshake or TLS error, closed listener) drops that peer only.
+                        log.debug(f'Queue server dropped a connection: {error!r}')
+                        if isinstance(error, OSError) and error.errno in OUT_OF_DESCRIPTORS:
+                            # The peer stays queued, so the socket stays readable: pause before retrying
+                            time.sleep(POLL)
+                        continue
+                    if not self._admits(conn):
+                        conn.close()
+                        continue
+                    if pending:
+                        target, args = self.handle_pending, (conn, peer, accepted)
+                    else:
+                        peer = getattr(self.listener, 'last_accepted', None)
+                        target, args = self.handle_request, (conn, peer)
+                    with self._lock:
+                        if self._halted:
+                            conn.close()
+                            break
+                        self._live.add(conn)
+                    try:
+                        _ServerThread(target=target, args=args, name='hypershell-queue-handler').start()
+                    except Exception as error:
+                        self._unstarted(conn, peer, error)
+        except Exception as error:
+            if not self._halted:
+                log.error(f'Queue server stopped accepting connections: {error!r}')
+
+    def _admits(self: _InProcessServer, conn) -> bool:
+        """Whether `conn` leaves the reserved descriptors free; a refusal warns at most once per interval."""
+        limit = _open_file_limit()
+        if limit is None or conn.fileno() < limit - RESERVE:
+            return True
+        message = (f'Refusing new queue connections: open files near the limit of {limit} '
+                   f'({RESERVE} kept for the server)')
+        now = time.monotonic()
+        if self._warned_at is None or now - self._warned_at >= REFUSAL_WARNING_INTERVAL:
+            self._warned_at = now
+            log.warning(message)
+        else:
+            log.debug(message)
+        return False
+
+    def _unstarted(self: _InProcessServer, conn, peer: Optional[Tuple[str, int]], error: Exception) -> None:
+        """Forget and close a connection whose handler thread did not start, so the accept loop goes on.
+
+        Logged with the peer address and the error only: a WARNING at most once per
+        :data:`REFUSAL_WARNING_INTERVAL`, the rest at DEBUG.
+        """
+        with self._lock:
+            self._live.discard(conn)
+        try:
+            conn.close()
+        except OSError:
+            pass
+        message = f'Queue server closed a connection from {_peer_text(peer)}: its handler did not start ({error!r})'
+        now = time.monotonic()
+        if self._unstarted_warned_at is None or now - self._unstarted_warned_at >= REFUSAL_WARNING_INTERVAL:
+            self._unstarted_warned_at = now
+            log.warning(message)
+        else:
+            log.debug(message)
+
+    def handle_pending(self: _InProcessServer, raw: socket.socket, peer: Optional[Tuple[str, int]],
+                       accepted: float) -> None:
+        """Run the TLS handshake of a connection accepted at `accepted` (monotonic), then serve it.
+
+        The handshake must end within the handshake deadline counted from `accepted`, or the
+        connection is closed (:meth:`_closed_pending`); any other failure drops it as a failed accept
+        does. Either way its socket is closed and this thread ends at once. The live entry follows the
+        connection from raw socket to TLS socket to connection, so :meth:`stop` cuts it at any stage.
+        """
+        held = raw  # What this thread forgets and closes when it does not go on to serve the connection
+        try:
+            try:
+                ssl_sock = self.listener.wrap_pending(raw)
+            except Exception as error:
+                log.debug(f'Queue server dropped a connection: {error!r}')
+                return
+            held = ssl_sock
+            if not self._replace(raw, ssl_sock):
+                return
+            try:
+                _complete_handshake(ssl_sock, accepted + self._handshake)
+                conn = SecureConnection(ssl_sock)
+            except TimeoutError as error:
+                if error.errno is None:  # The handshake's own timeout, not one the system reported
+                    self._closed_pending(peer)
+                else:
+                    log.debug(f'Queue server dropped a connection: {error!r}')
+                return
+            except Exception as error:
+                log.debug(f'Queue server dropped a connection: {error!r}')
+                return
+            held = conn
+            if not self._replace(ssl_sock, conn):
+                return
+            held = None
+        finally:
+            if held is not None:
+                with self._lock:
+                    self._live.discard(held)
+                held.close()
+        self.handle_request(conn, peer)
+
+    def _replace(self: _InProcessServer, old, new) -> bool:
+        """Put `new` in place of `old` among the live connections, unless the server has stopped."""
+        with self._lock:
+            self._live.discard(old)
+            if self._halted:
+                return False
+            self._live.add(new)
+            return True
+
+    def _closed_pending(self: _InProcessServer, peer: Optional[Tuple[str, int]]) -> None:
+        """Log a connection closed for missing the handshake deadline: its address and the deadline only.
+
+        Each close is logged at DEBUG. The first also warns, naming the deadline and its key, and so
+        does the first after each :data:`REFUSAL_WARNING_INTERVAL` since the last warning.
+        """
+        where = _peer_text(peer)
+        log.debug(f'Queue server closed a connection from {where} that did not complete its TLS handshake '
+                  f'within {self._handshake} seconds')
+        now = time.monotonic()
+        with self._handshake_warned_lock:
+            warn = (self._handshake_warned_at is None
+                    or now - self._handshake_warned_at >= REFUSAL_WARNING_INTERVAL)
+            if warn:
+                self._handshake_warned_at = now
+        if warn:
+            log.warning(f'Closing queue connections that do not complete their TLS handshake within '
+                        f'{self._handshake} seconds ({HANDSHAKE_KEY}), from {where}; more within '
+                        f'{REFUSAL_WARNING_INTERVAL:g} seconds are logged at DEBUG')
+
+    def handle_request(self: _InProcessServer, conn, peer: Optional[Tuple[str, int]] = None) -> None:
+        """Serve one connection, then forget and close it; log a connection refused for a message outside
+        the queue vocabulary, or a client refused as too old."""
+        try:
+            self._handle_request(conn)
+        except SystemExit:
+            # The stock serve_client() ends its thread with sys.exit() on EOF or a failed send.
+            pass
+        finally:
+            with self._lock:
+                self._live.discard(conn)
+            conn.close()
+            refusal = getattr(conn, 'refusal', None)
+            if refusal is not None:
+                log.warning(f'Refused a queue connection from {_peer_text(peer)}: {refusal}')
+            if getattr(_refusals, 'too_old', False):
+                _refusals.too_old = False
+                where = f'{peer[0]}:{peer[1]}' if isinstance(peer, tuple) and len(peer) == 2 else 'unknown peer'
+                log.warning(f'Client too old (no work-request protocol) from {where}')
+
+    def shutdown(self: _InProcessServer, c) -> None:
+        """Remote shutdown request: stop serving after the reply, without exiting the process."""
+        with self._lock:
+            # The requesting connection is left to its handler so the reply can be sent.
+            self._live.discard(c)
+        _ServerThread(target=self.stop, name='hypershell-queue-stop').start()
+
+    def stop(self: _InProcessServer) -> None:
+        """Stop accepting, release the port and cut live connections. Idempotent; never blocks.
+
+        The calling thread is on the server side throughout (see :func:`_decref`).
+        """
+        _mark()
+        try:
+            with self._lock:
+                # Swept under the lock: a listed connection is not yet closed, so its descriptor
+                # cannot have been reused.
+                if self._halted:
+                    return
+                self._halted = True
+                try:
+                    _listening_socket(self.listener).shutdown(socket.SHUT_RDWR)
+                except (OSError, AttributeError):
+                    pass
+                self.listener.close()
+                for conn in self._live:
+                    _cut(conn)
+                self._live.clear()
+        finally:
+            _unmark()
+
+
+# Threads on the server side, by identifier, with the number of marks each holds: every thread an
+# in-process queue server starts, for its whole life (its handler threads run their connections' TLS
+# handshakes); any thread while it is inside a server's start or stop; and any thread while it is in a
+# TLS handshake with a queue server, which a forked manager's accept loop waits on. Each thread changes
+# only its own entry; proxy finalizers read it without a lock.
+_server_side: Dict[int, int] = {}
+
+# Decrefs that proxy finalizers hand off, and the one thread that sends them
+_decrefs: SimpleQueue = SimpleQueue()
+_decref_sender: Optional[threading.Thread] = None
+_decref_sender_lock = threading.Lock()
+
+# Whether threads here have native identifiers (``Thread.native_id`` and ``threading.get_native_id``)
+_NATIVE_IDS: Final[bool] = hasattr(threading, 'get_native_id')
+
+
+def _mark() -> None:
+    """Mark the calling thread as on the server side until a matching :func:`_unmark`."""
+    ident = threading.get_ident()
+    _server_side[ident] = _server_side.get(ident, 0) + 1
+
+
+def _unmark() -> None:
+    """Remove one mark of the calling thread."""
+    ident = threading.get_ident()
+    marks = _server_side.get(ident, 0) - 1
+    if marks > 0:
+        _server_side[ident] = marks
+    else:
+        _server_side.pop(ident, None)
+
+
+class _ServerThread(threading.Thread):
+    """A daemon thread of an in-process queue server, on the server side from its first statement to its last."""
+
+    def __init__(self: _ServerThread, target: Callable[..., Any], name: str, args: Tuple[Any, ...] = ()) -> None:
+        super().__init__(target=target, args=args, name=name, daemon=True)
+
+    def _bootstrap(self: _ServerThread) -> None:
+        # Marked before the threading start-up code, which is what releases the thread waiting in start().
+        # A collection that runs here before the mark finds the thread not yet registered (see _decref).
+        _server_side[threading.get_ident()] = 1
+        try:
+            super()._bootstrap()
+        finally:
+            _unmark()
+
+
+def _decref(*args: Any) -> None:
+    """Finalizer of a queue client's proxy: the stock decref, unless it runs on the server side.
+
+    The cyclic garbage collector runs a proxy's finalizer in whichever thread triggers the collection, and
+    the stock decref connects to the proxy's server and waits for its answer. On a thread of an in-process
+    server (its handler threads run the TLS handshakes too), a thread inside a server's start or stop, or
+    a thread in a TLS handshake that a forked manager's accept loop waits on, that answer can depend on
+    the waiting thread itself. There the decref is handed to the decref
+    sender instead: ``SimpleQueue.put`` never blocks and is safe to re-enter. Every other decref is the
+    stock one, in the finalizer's thread.
+
+    A thread that :mod:`threading` has not yet registered as started is still in its start-up, which
+    may be a server thread's before its mark (a collection another thread scheduled can run there), so
+    its decref is handed off too, as is one on a thread that :mod:`threading` did not start (see
+    :func:`_not_started`). So once this process has served, every decref finalized on a thread that
+    :mod:`threading` did not start, or on a main thread that it knows only by a ``_DummyThread``, is
+    handed off, including a decref for a server in another process. The sender then runs the whole
+    stock decref, whose closing of a cached connection (``tls.connection.close()``) reads the sender's
+    thread-local connection, not the finalizing thread's.
+    """
+    if _decref_sender is not None:
+        ident = threading.get_ident()
+        if ident in _server_side or _not_started(ident):
+            _decrefs.put(args)
+            return
+    BaseProxy._decref(*args)
+
+
+def _not_started(ident: int) -> bool:
+    """Whether :mod:`threading` has not registered thread `ident` as one it started (it is still
+    starting, or :mod:`threading` did not start it). Reads the registry without its lock, and adds nothing to it.
+
+    An entry under `ident` may be stale: one left by an ended thread whose identifier the OS has reused,
+    such as the ``_DummyThread`` of a thread :mod:`threading` did not start, or, on 3.11 and 3.12, the
+    ``_MainThread`` of a thread that first imported :mod:`threading` and has ended. :mod:`threading` sets a
+    thread's native identifier before it registers the thread, so an entry whose native identifier is not
+    the calling thread's is not the calling thread's own. Two live threads fail that match as well, and
+    hand off: on 3.11 and 3.12 the thread that forked, in the child (:mod:`threading` keeps its parent's
+    native identifier there), and from 3.13 a main thread whose entry :mod:`threading` made on another thread.
+    """
+    thread = threading._active.get(ident)
+    if thread is None or isinstance(thread, threading._DummyThread):
+        return True
+    return _NATIVE_IDS and getattr(thread, 'native_id', None) != threading.get_native_id()
+
+
+def _send_decrefs() -> None:
+    """Send handed-off decrefs, in order, for the life of the process."""
+    while True:
+        args = _decrefs.get()
+        try:
+            BaseProxy._decref(*args)
+        except Exception as error:  # The stock decref absorbs connection errors; keep sending
+            log.debug(f'Queue client decref failed: {error!r}')
+
+
+def _start_decref_sender() -> None:
+    """Start the decref sender, once per process (again in a forked child that serves queues)."""
+    global _decref_sender
+    with _decref_sender_lock:
+        if _decref_sender is None or not _decref_sender.is_alive():
+            _decref_sender = _ServerThread(target=_send_decrefs, name='hypershell-queue-decref')
+            _decref_sender.start()
+
+
+def _forget_after_fork() -> None:
+    """In a forked child, drop the parent's server-side marks, waiting decrefs and sender, none of which are its own.
+
+    The parent sends its own decrefs; sending them again from the child would release objects that
+    the parent's clients still hold.
+    """
+    global _decrefs, _decref_sender, _decref_sender_lock
+    _server_side.clear()
+    _decrefs = SimpleQueue()
+    _decref_sender = None
+    _decref_sender_lock = threading.Lock()
+
+
+if hasattr(os, 'register_at_fork'):
+    os.register_at_fork(after_in_child=_forget_after_fork)
+
+
+def _defer_decref(proxy: BaseProxy) -> BaseProxy:
+    """Give `proxy` the finalizer :func:`_decref` in place of the stock one."""
+    close = getattr(proxy, '_close', None)
+    if isinstance(close, util.Finalize) and close._callback is BaseProxy._decref:
+        close._callback = _decref
+    return proxy
+
+
+def _finalize_in_process(server: _InProcessServer, state: State, addresses: Iterable[Tuple[str, int]]) -> None:
+    """Stop an in-process server and drop cached proxy connections to every address it answered on."""
+    server.stop()
+    state.value = State.SHUTDOWN
+    with BaseProxy._mutex:
+        for address in addresses:
+            BaseProxy._address_to_local.pop(address, None)
 
 
 class SecureManager(BaseManager):
@@ -337,9 +1230,24 @@ class SecureManager(BaseManager):
     serializer so that the stock multiprocessing machinery automatically picks our
     :class:`SecureListener` and :func:`secure_client` for both the server-side listener and
     every per-proxy RPC connection. When ``tls`` is ``None`` (or inactive), selects the
-    ``hypershell-plain`` serializer: the stock cleartext listener and client, with Nagle's
-    algorithm off on every TCP connection (the wire is unchanged).
+    ``hypershell-plain`` serializer: the cleartext listener and client, with Nagle's algorithm
+    off on every connection. Either way every message is encoded with the queue's codec
+    (:mod:`hypershell.core.codec`), and no other serializer is accepted. Its server, in a process of
+    its own, in-process or built by :meth:`get_server`, refuses a connection whose first request is not
+    one of the manager's public requests, under any interpreter flags.
+
+    The client-side refusals of what a server offers belong to :class:`QueueClient`: code that uses
+    this class directly as a client should register each type with an explicit proxy type and list of
+    methods.
+
+    .. versionchanged:: 2.9.0
+       Messages are encoded with the queue's codec, not pickled, and a ``serializer`` other than
+       these two raises :class:`ValueError`.
     """
+
+    # The server of a manager started in a process of its own (built by BaseManager._run_server) or built by
+    # get_server for its caller to run
+    _Server = _ManagerServer
 
     def __init__(self: SecureManager,
                  address: Optional[Tuple[str, int]] = None,
@@ -347,20 +1255,87 @@ class SecureManager(BaseManager):
                  *,
                  tls: Optional[TLSConfig] = None,
                  **kwargs: Any) -> None:
-        """Initialize with optional `tls`; flip to TLS serializer only when `tls` is active."""
+        """Initialize with optional `tls`; flip to TLS serializer only when `tls` is active.
+
+        Raises:
+            ValueError: `serializer` is given and is neither of the queue's own two.
+        """
         self._tls = tls if (tls is not None and tls.is_active()) else None
-        kwargs.setdefault('serializer', TLS_SERIALIZER if self._tls is not None else PLAIN_SERIALIZER)
+        serializer = kwargs.setdefault('serializer', TLS_SERIALIZER if self._tls is not None else PLAIN_SERIALIZER)
+        if serializer not in (TLS_SERIALIZER, PLAIN_SERIALIZER):
+            raise ValueError(f'A queue manager speaks only {TLS_SERIALIZER!r} or {PLAIN_SERIALIZER!r}, '
+                             f'not {serializer!r}')
         super().__init__(address=address, authkey=authkey, **kwargs)
+
+    def get_server(self: SecureManager) -> _ManagerServer:
+        """A server for this manager's registry, address, key and serializer, for the caller to run.
+
+        As :meth:`BaseManager.get_server`, but the server is this manager's own server class.
+
+        Raises:
+            ProcessError: the manager has already started or has shut down.
+        """
+        if self._state.value != State.INITIAL:
+            if self._state.value == State.STARTED:
+                raise ProcessError('Already started server')
+            elif self._state.value == State.SHUTDOWN:
+                raise ProcessError('Manager has shut down')
+            else:
+                raise ProcessError('Unknown state {!r}'.format(self._state.value))
+        return self._Server(self._registry, self._address, self._authkey, self._serializer)
 
     def start(self: SecureManager,
               initializer: Optional[Callable[..., Any]] = None,
               initargs: Iterable[Any] = ()) -> None:
-        """Spawn the server subprocess, ensuring the TLS context is installed inside it."""
-        if self._tls is not None:
-            super().start(initializer=_tls_bootstrap,
-                          initargs=(self._tls, initializer, tuple(initargs)))
+        """Start a manager server in a child process, closing inherited log-slot locks (and installing
+        the TLS context when active) inside the child before any user initializer runs.
+
+        This is the generic manager path. :class:`QueueServer` serves its queues in-process instead.
+        """
+        super().start(initializer=_child_bootstrap,
+                      initargs=(self._tls, initializer, tuple(initargs)))
+
+    def _serve_in_process(self: SecureManager, registry: Dict[str, tuple]) -> None:
+        """Serve `registry` from daemon threads of this process instead of a child process.
+
+        The server keeps its TLS configuration on its own listener and leaves the process-wide one,
+        which clients in this process use, untouched. Keeps the manager's shape: :attr:`address` is
+        the bound address and ``shutdown()`` is an idempotent finalizer that also runs at
+        interpreter exit.
+
+        Raises:
+            QueueServerError: this Python's multiprocessing internals are not supported, or the
+                address cannot be bound and listened on. Nothing of the server is left running.
+        """
+        if self._state.value != State.INITIAL:
+            if self._state.value == State.STARTED:
+                raise ProcessError('Already started server')
+            raise ProcessError('Manager has shut down')
+        problems = unsupported_internals()
+        if problems:
+            raise QueueServerError("This Python's multiprocessing internals are not supported: "
+                                   + '; '.join(problems))
+        host, port = self._address
+        # The sender runs before anything is on the server side, so every decref handed off is sent.
+        # From the bind until the accept loop runs, a proxy finalizer here hands off (see _decref).
+        _start_decref_sender()
+        _mark()
+        try:
+            server = _InProcessServer(registry, self._address, self._authkey, self._serializer, self._tls)
+        except OSError as error:
+            raise QueueServerError(f'Cannot listen on {host}:{port} ({error})') from error
         else:
-            super().start(initializer=initializer, initargs=initargs)
+            _ServerThread(target=server.serve, name='hypershell-queue-server').start()
+        finally:
+            _unmark()
+        # Clients cache connections by the address they dial, which may name the host differently
+        # (e.g., 'localhost') than the bound address does; both are dropped at shutdown.
+        dialed = (host, server.address[1])
+        self._address = server.address
+        self._process = None
+        self._state.value = State.STARTED
+        self.shutdown = util.Finalize(self, _finalize_in_process, exitpriority=0,
+                                      args=(server, self._state, (dialed, server.address)))
 
     def connect(self: SecureManager) -> None:
         """Install the local-process TLS context, then perform the manager handshake."""
@@ -373,7 +1348,7 @@ class SecureManager(BaseManager):
 class QueueConfig:
     """Connection details for queue interface."""
 
-    host: str = default.server.bind
+    host: str = default.server.host
     port: int = default.server.port
     auth: str = default.server.auth
     size: int = default.server.queuesize
@@ -391,7 +1366,7 @@ class QueueConfig:
         # any `[server.tls]` keys; from_namespace then treats that as "TLS off".
         tls_ns = _config.server.get('tls') if hasattr(_config.server, 'get') else None
         return cls.from_dict({
-            'host': _config.server.host,
+            'host': client_host(_config),
             'port': _config.server.port,
             'auth': _config.server.auth,
             'size': _config.server.queuesize,
@@ -418,17 +1393,16 @@ class QueueInterface(SecureManager, ABC):
     """The queue interface provides access to four managed distributed queues."""
 
     config: QueueConfig
-    scheduled: JoinableQueue[bytes]
-    completed: JoinableQueue[bytes]
-    heartbeat: JoinableQueue[bytes]
-    confirmed: JoinableQueue[bytes]
+    scheduled: Queue[bytes]
+    completed: Queue[bytes]
+    heartbeat: Queue[bytes]
+    confirmed: Queue[bytes]
     ready: bool = False
 
     def __init__(self: QueueInterface, config: QueueConfig) -> None:
         """Initialize queue interface."""
         self.config = config
-        # `tls` is forwarded to SecureManager: when None or inactive, the queue speaks the stock
-        # cleartext wire, preserving the existing default.
+        # `tls` is forwarded to SecureManager: when None or inactive, the queue speaks cleartext.
         super().__init__(address=(self.config.host, self.config.port),
                          authkey=self.config.auth.encode('ascii'), tls=self.config.tls)
 
@@ -449,38 +1423,149 @@ class QueueInterface(SecureManager, ABC):
         """Stop or disconnect."""
 
 
+# Methods a remote client may call on a managed queue. Pinned rather than discovered, so the remote
+# surface is the same on every Python version (newer threading queues also offer `shutdown`).
+QUEUE_EXPOSED: Final[Tuple[str, ...]] = ('empty', 'full', 'get', 'get_nowait', 'join',
+                                         'put', 'put_nowait', 'qsize', 'task_done')
+
+
+# Methods a remote client may call on the dispatcher.
+DISPATCH_EXPOSED: Final[Tuple[str, ...]] = ('request', 'takes_submissions', 'topology', 'handback')
+
+
+def _proxy_method(name: str) -> Callable[..., Any]:
+    """A proxy method that calls the remote method `name`."""
+    def method(self: BaseProxy, /, *args: Any, **kwds: Any) -> Any:
+        return self._callmethod(name, args, kwds)
+    method.__name__ = method.__qualname__ = name
+    return method
+
+
+@cache
+def _proxy_type(typeid: str, names: Tuple[str, ...]) -> Type[BaseProxy]:
+    """The proxy class for `typeid` with one method for each of `names`, which are always a client's own."""
+    namespace: Dict[str, Any] = {name: _proxy_method(name) for name in names}
+    namespace['_exposed_'] = names
+    return type(f'QueueProxy[{typeid}]', (BaseProxy, ), namespace)
+
+
+class _ClientProxy:
+    """
+    The proxy type a queue client registers for one type id: it builds each proxy from the client's own
+    method names, never from the names its server sends.
+
+    The manager calls it, as it would call a proxy class, with a new object's token and the method names
+    the server offers for it (``exposed``). Those names are only compared with the client's own (as a set,
+    since the proxy's methods and their order are the client's): anything but a tuple of names, or a name
+    outside the client's own, is refused with :class:`QueueVersionError` before any proxy exists. The
+    proxy has each of the client's own methods that the server offers: all of them from a server of this
+    version, fewer from one that offers fewer (a caller that looks such a method up goes without it).
+    """
+
+    def __init__(self: _ClientProxy, typeid: str, names: Tuple[str, ...]) -> None:
+        """Keep the client's own `names` for `typeid` and build the proxy class that has all of them."""
+        self.typeid = typeid
+        self.names = names
+        _proxy_type(typeid, names)
+
+    def __call__(self: _ClientProxy, token: Token, serializer: str, manager: Optional[BaseManager] = None,
+                 authkey: Optional[bytes] = None, exposed: Any = None, incref: bool = True,
+                 manager_owned: bool = False) -> BaseProxy:
+        """A proxy for `token` with the client's own methods that `exposed` offers.
+
+        Raises:
+            QueueVersionError: `exposed` is not a tuple of names, or offers a name outside the client's own.
+        """
+        if (type(exposed) is not tuple or any(type(name) is not str for name in exposed)
+                or not set(exposed) <= set(self.names)):
+            raise QueueVersionError(f'Server at {_peer_text(token.address)} offers methods on {self.typeid} '
+                                    f'that this version does not; run matching server and client versions')
+        names = tuple(name for name in self.names if name in exposed)
+        return _proxy_type(self.typeid, names)(token, serializer, manager=manager, authkey=authkey,
+                                               incref=incref, manager_owned=manager_owned)
+
+
+# The proxy type a queue client registers for each object its server creates.
+_CLIENT_PROXIES: Final[Dict[str, _ClientProxy]] = {
+    **{f'_get_{name}': _ClientProxy(f'_get_{name}', QUEUE_EXPOSED)
+       for name in ('scheduled', 'completed', 'heartbeat', 'confirmed')},
+    '_get_dispatch': _ClientProxy('_get_dispatch', DISPATCH_EXPOSED),
+}
+
+
+def _provider(obj: Any) -> Callable[[], Any]:
+    """Registry callable handing the manager `obj`; lock-free, since it runs under the server's mutex."""
+    return lambda: obj
+
+
+def _versioned_provider(obj: Any) -> Callable[..., Any]:
+    """Registry callable handing the manager `obj` only to a client that names this work-request protocol.
+
+    Every release before the protocol creates `_get_scheduled()` with no argument as the first step
+    of connecting, so it is refused here, before it starts a thread or sends a heartbeat, and exits.
+    The refusal is noted for the handler thread to log once the connection is closed.
+    """
+    def provide(*args: Any) -> Any:
+        if not args:
+            _refusals.too_old = True
+            raise ClientTooOld('client too old: this server requires the work-request protocol '
+                               f'(protocol {PROTOCOL}); run a client of the same version as the server')
+        if args != (PROTOCOL, ):
+            raise ClientTooOld(f'client speaks work-request protocol {args[0]!r}; '
+                               f'this server speaks protocol {PROTOCOL}')
+        return obj
+    return provide
+
+
 class QueueServer(QueueInterface):
-    """Server for managing queue."""
+    """Server for managing queue, served from within the calling process."""
+
+    dispatcher: Dispatcher
+
+    def __init__(self: QueueServer, config: QueueConfig) -> None:
+        """Initialize queue interface and the dispatcher that serves work requests."""
+        super().__init__(config)
+        self.dispatcher = Dispatcher(queuesize=config.size, bundlemax=_config.server.bundlemax,
+                                     max_wait=DEFAULT_REMOTE_TIMEOUT)
 
     def start(self: QueueServer,
               initializer: Optional[Callable[..., Any]] = None,
               initargs: Iterable[Any] = ()) -> None:
-        """Initialize queues and start server."""
-        self.scheduled = JoinableQueue(maxsize=self.config.size)
-        self.completed = JoinableQueue(maxsize=self.config.size)
-        self.heartbeat = JoinableQueue(maxsize=0)
-        self.confirmed = JoinableQueue(maxsize=0)
-        # Without create_method=False, register() replaces these methods on the class with ones that
-        # ask a running server for a proxy, and the next server started in this process would serve
-        # those in place of its queues (under fork, which copies the changed class to the server).
-        self.register('_get_scheduled', callable=self._get_scheduled, create_method=False)
-        self.register('_get_completed', callable=self._get_completed, create_method=False)
-        self.register('_get_heartbeat', callable=self._get_heartbeat, create_method=False)
-        self.register('_get_confirmed', callable=self._get_confirmed, create_method=False)
-        super().start()
+        """Initialize queues and serve them from this process.
+
+        Raises:
+            QueueServerError: the queues cannot be served (see :meth:`SecureManager._serve_in_process`).
+        """
+        self.scheduled = Queue(maxsize=self.config.size)
+        self.completed = Queue(maxsize=self.config.size)
+        self.heartbeat = Queue(maxsize=0)
+        self.confirmed = Queue(maxsize=0)
+        # Per-instance registry: the class registry is shared, so two servers in one process
+        # would otherwise serve each other's queues.
+        registry = {f'_get_{name}': (_provider(getattr(self, name)), QUEUE_EXPOSED, None, AutoProxy)
+                    for name in ('completed', 'heartbeat', 'confirmed')}
+        registry['_get_scheduled'] = (_versioned_provider(self.scheduled), QUEUE_EXPOSED, None, AutoProxy)
+        registry['_get_dispatch'] = (_provider(self.dispatcher), DISPATCH_EXPOSED, None, AutoProxy)
+        self.dispatcher.attach(self.scheduled)
+        if initializer is not None:
+            initializer(*initargs)
+        self._serve_in_process(registry)
         self.ready = True
 
-    def _get_scheduled(self: QueueServer) -> JoinableQueue[bytes]:
+    def _get_scheduled(self: QueueServer) -> Queue[bytes]:
         return self.scheduled
 
-    def _get_completed(self: QueueServer) -> JoinableQueue[bytes]:
+    def _get_completed(self: QueueServer) -> Queue[bytes]:
         return self.completed
 
-    def _get_heartbeat(self: QueueServer) -> JoinableQueue[bytes]:
+    def _get_heartbeat(self: QueueServer) -> Queue[bytes]:
         return self.heartbeat
 
-    def _get_confirmed(self: QueueServer) -> JoinableQueue[bytes]:
+    def _get_confirmed(self: QueueServer) -> Queue[bytes]:
         return self.confirmed
+
+    def _get_dispatch(self: QueueServer) -> Dispatcher:
+        return self.dispatcher
 
     def __enter__(self: QueueServer) -> QueueServer:
         """Start the server."""
@@ -492,29 +1577,52 @@ class QueueServer(QueueInterface):
                  exc_val: Optional[Exception],
                  exc_tb: Optional[TracebackType]) -> None:
         """Shutdown the server."""
+        self.dispatcher.finish()
         self.shutdown()
 
 
 class QueueClient(QueueInterface):
     """Client connection to queue manager."""
 
-    _get_scheduled: Callable[[], JoinableQueue[bytes]]
-    _get_completed: Callable[[], JoinableQueue[bytes]]
-    _get_heartbeat: Callable[[], JoinableQueue[bytes]]
-    _get_confirmed: Callable[[], JoinableQueue[bytes]]
+    _get_scheduled: Callable[[], Queue[bytes]]
+    _get_completed: Callable[[], Queue[bytes]]
+    _get_heartbeat: Callable[[], Queue[bytes]]
+    _get_confirmed: Callable[[], Queue[bytes]]
+    _get_dispatch: Callable[[], Any]
+    _dispatcher: Optional[BaseProxy] = None
 
     def connect(self: QueueClient) -> None:
-        """Connect to server using unique client ID for token generation."""
-        self.register('_get_scheduled')
-        self.register('_get_completed')
-        self.register('_get_heartbeat')
-        self.register('_get_confirmed')
+        """Connect to server using unique client ID for token generation.
+
+        The first queue is created with this client's work-request protocol, so a server that does
+        not speak it is found before anything else is done. Each proxy is built from this client's own
+        method names (see :class:`_ClientProxy`); a server that offers any other is refused with
+        :class:`QueueVersionError`. The proxies' finalizer is :func:`_decref`: in a process that serves
+        queues itself, a decref finalized on the server side is sent by the decref sender.
+        """
+        for typeid, proxytype in _CLIENT_PROXIES.items():
+            self.register(typeid, proxytype=proxytype, exposed=proxytype.names)
         super().connect()
-        self.scheduled = self._get_scheduled()
-        self.completed = self._get_completed()
-        self.heartbeat = self._get_heartbeat()
-        self.confirmed = self._get_confirmed()
+        self._dispatcher_lock = threading.Lock()
+        try:
+            self.scheduled = _defer_decref(self._get_scheduled(PROTOCOL))
+        except RemoteError as error:
+            host, port = self._address
+            raise QueueVersionError(f'Server at {host}:{port} does not speak work-request protocol {PROTOCOL} '
+                                    f'(an older release such as 2.8.x or 2.9.0a2, or a newer one); '
+                                    f'run matching server and client versions') from None
+        self.completed = _defer_decref(self._get_completed())
+        self.heartbeat = _defer_decref(self._get_heartbeat())
+        self.confirmed = _defer_decref(self._get_confirmed())
         self.ready = True
+
+    @property
+    def dispatcher(self: QueueClient) -> BaseProxy:
+        """The server's dispatcher, created on first use (only a client that requests work holds one)."""
+        with self._dispatcher_lock:
+            if self._dispatcher is None:
+                self._dispatcher = _defer_decref(self._get_dispatch())
+            return self._dispatcher
 
     def __enter__(self: QueueClient) -> QueueClient:
         """Connect to server."""

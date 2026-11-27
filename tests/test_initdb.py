@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 # Standard libs
+import sqlite3
 from pathlib import Path
 
 # External libs
@@ -15,7 +16,7 @@ from pytest import mark
 from cmdkit.app import exit_status
 
 # Internal libs
-from tests import main, main_lines, NO_OUTPUT, create_taskfile_echo, assert_output
+from tests import main, main_lines, NO_OUTPUT, create_taskfile
 
 
 @mark.integration
@@ -63,20 +64,43 @@ def test_vacuum(temp_site: Path) -> None:
     ])
 
 
+def _task_parts(path: Path) -> list[tuple[int, object]]:
+    """Read each task's `part` column and its `part` tag-JSON key from a SQLite file."""
+    conn = sqlite3.connect(str(path))
+    try:
+        return conn.execute("select part, json_extract(tag, '$.part') from task").fetchall()
+    finally:
+        conn.close()
+
+
 @mark.integration
 def test_rotate(temp_site: Path) -> None:
-    """Rotate database."""
-    assert main_lines(['hs', 'initdb', '--yes']) == (
-        exit_status.success, NO_OUTPUT, [
-        f'INFO [hypershell.data] SQLite database initialized automatically',
-        f'INFO [hypershell.data] Optimizing database {temp_site / "local.db"}'
-    ])
-    taskfile = create_taskfile_echo(temp_site, count=4)
-    rc, stdout, stderr = main(['hs', 'submit', taskfile])
-    assert rc == exit_status.success
-    assert stdout == ''
-    assert_output(r'DEBUG .* Submitted from (?P<file>.*) \(implicit - not executable\)$',
-                  stderr, 1, groups={'file': str(taskfile)})
-    assert_output(r'DEBUG .* Submitted 1 tasks$', stderr, 4)
-    assert_output(r'DEBUG .* Done$', stderr, 1)
-    assert_output(r'INFO .* Submitted 4 tasks$', stderr, 1)
+    """Rotation moves completed tasks into the next partition via the `part` column.
+
+    Completed tasks (exit_status set) are stamped with the new partition's index in the
+    `part` **column** — never the tag — cloned into the partition file, and dropped from
+    main; incomplete tasks stay behind at part 0. Auto-union re-joins both files at read
+    time; `--ignore-partitions` sees only main.
+    """
+    main_db = temp_site / 'local.db'
+    partition = temp_site / 'local.1'
+
+    # Four tasks; complete two (n:0, n:1), leave two (n:2, n:3) unscheduled.
+    taskfile = create_taskfile(temp_site, [f'echo {n}  # HYPERSHELL: n:{n}' for n in range(4)])
+    assert main(['hs', 'submit', str(taskfile)])[0] == exit_status.success
+    assert main(['hs', 'update', 'exit_status=0', '-t', 'n:0', '--no-confirm'])[0] == exit_status.success
+    assert main(['hs', 'update', 'exit_status=0', '-t', 'n:1', '--no-confirm'])[0] == exit_status.success
+
+    # Rotate: completed -> local.1 at part 1, main keeps the two incomplete at part 0.
+    assert main(['hs', 'initdb', '--rotate', '--yes'])[0] == exit_status.success
+    assert partition.exists()
+
+    main_rows = _task_parts(main_db)
+    part_rows = _task_parts(partition)
+    assert sorted(part for part, _ in main_rows) == [0, 0]       # incomplete tasks stay at part 0
+    assert sorted(part for part, _ in part_rows) == [1, 1]       # completed tasks carry the partition index
+    assert all(tag_part is None for _, tag_part in main_rows + part_rows)   # `part` never leaks into tag JSON
+
+    # Auto-union re-joins both files; --ignore-partitions restricts to main.
+    assert main_lines(['hs', 'list', '--count'])[1] == ['4']
+    assert main_lines(['hs', 'list', '--count', '--ignore-partitions'])[1] == ['2']

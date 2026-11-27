@@ -7,16 +7,6 @@ Configuration
 
 .. include:: _include/config_intro.rst
 
-The `edit` command makes it easy to open the correct configuration file path for your platform
-using the default editor. Set the ``EDITOR`` environment variable (or ``VISUAL`` on `Windows`).
-
-.. admonition:: Open global user-level configuration file for editing
-    :class: note
-
-    .. code-block:: shell
-
-        hs config edit --user
-
 ------
 
 Filesystem Paths
@@ -94,6 +84,8 @@ Runtime Package Resolution
 
 ------
 
+.. _config_params:
+
 Parameter Reference
 -------------------
 
@@ -102,6 +94,8 @@ Parameter Reference
 .. include:: _include/config_param_ref.rst
 
 ------
+
+.. _config_task_env:
 
 Task Environment
 ----------------

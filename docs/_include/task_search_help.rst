@@ -8,6 +8,14 @@ FIELD
 Options
 ^^^^^^^
 
+``--all``
+    Dump all matching tasks, imposing no limit.
+
+    As a guard against accidentally dumping an entire database, ``hs list`` refuses to return
+    more than 1,000 results unless the intent is made explicit. ``--all`` dumps them all,
+    ``--limit`` *N* bounds the result, and ``--count`` only counts them; the three are mutually
+    exclusive (e.g. ``hs list --all`` or ``hs list --all --csv``).
+
 ``-w``, ``--where`` *COND...*
     List of conditional statements to filter results (e.g., ``-w 'duration >= 600'``).
 
@@ -22,6 +30,15 @@ Options
 
 ``-g``, ``--group`` *GROUP*
     Filter results to a single task group.
+
+``--part`` *N*
+    Filter results to a single database partition.
+
+    After ``hs initdb --rotate``, completed tasks are moved into numbered partition files and
+    stamped with that partition's index in their ``part`` column. ``--part`` *N* restricts the
+    listing to a single partition (``--part 0`` is the main database). The filter is a plain
+    column comparison and works on any backend, though only the SQLite provider populates
+    ``part`` via rotation.
 
 ``-s``, ``--order-by`` *FIELD* ``[--desc]``
     Order results by field. Optionally, in descending order.
@@ -40,15 +57,28 @@ Options
 ``-R``, ``--remaining``
     Alias for ``-w 'exit_status == null'``.
 
+``-X``, ``--cancelled``
+    Alias for ``-w 'exit_status == -1'`` (tasks that were cancelled).
+
 ``--retries``
     Alias for ``-w 'attempt > 1'`` (tasks that have been retried).
 
+``--signal`` *NAME*
+    Match tasks whose process was terminated by signal *NAME* (e.g. ``TERM``, ``KILL``, ``HUP``).
+
+    A task killed by signal *N* is recorded with ``exit_status = -N`` (the convention used by
+    Python's subprocess module). The ``SIG`` prefix is optional and the name is case-insensitive.
+    A task terminated by ``HUP`` lands on -1 and is therefore treated as cancelled
+    (see ``--cancelled``).
+
 ``-f``, ``--format`` *FORMAT*
-    Specify output format (either ``normal``, ``plain``, ``table``, ``csv``, ``json``).
+    Specify output format (either ``normal``, ``card``, ``plain``, ``table``, ``csv``, ``json``).
 
     Default is ``normal`` for whole-task output. If any *FIELD* names are given, output is
     formatted in simple ``plain`` text; use ``csv`` for compliant output. The pretty-printed
-    ``table`` formatting is good for presentation on wide screens.
+    ``table`` formatting is good for presentation on wide screens. The ``card`` format renders
+    each task as a richly-formatted, bordered panel that adapts to the terminal width and shows a
+    color-coded status badge; like ``normal`` it needs the whole task (not a subset of *FIELD* s).
 
     See ``--csv``, ``--json``, and ``--delimiter``.
 

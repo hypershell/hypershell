@@ -23,11 +23,15 @@ from sqlalchemy import event
 
 # Internal libs
 from hypershell.core.config import config, DEFAULT_DATABASE_FILE
-from hypershell.core.logging import stream_handler
+from hypershell.core.logging import Logger, stream_handler
 from hypershell.core.exceptions import display_critical, write_traceback
 
 # Public interface
-__all__ = ['DatabaseURL', 'engine', 'Session', 'config', 'in_memory', 'schema', 'providers']
+__all__ = ['DatabaseURL', 'engine', 'Session', 'config', 'in_memory', 'schema', 'providers',
+           'TIMESCALE_ALIASES', 'timescale_config']
+
+# Initialize logger
+log = Logger.with_name(__name__)
 
 
 class DatabaseURL(dict):
@@ -175,7 +179,15 @@ providers = {
     'sqlite': 'sqlite',
     'postgres': 'postgresql+psycopg',
     'postgresql': 'postgresql+psycopg',
+    'timescale': 'postgresql+psycopg',
+    'timescaledb': 'postgresql+psycopg',
 }
+
+# TimescaleDB is PostgreSQL under the hood; these aliases route to the postgres backend, and
+# `hs initdb` converts the `task` table to a hypertable partitioned by its id (data/timescale.py).
+# They also gate the optional `uuid7` extra (below) so `uuid()` yields a time-ordered UUIDv7:
+# chunk routing rejects any other UUID version, so every process that mints ids needs it.
+TIMESCALE_ALIASES = ('timescale', 'timescaledb')
 
 
 # Parse full configuration into local copy and allow for simple config
@@ -190,6 +202,7 @@ schema = config.pop('schema', None)
 engine_echo = config.pop('echo', False)
 connect_args = config.pop('connect_args', {})
 pragmas = config.pop('pragmas', {})
+timescale_config = config.pop('timescale', None)  # Settings for the hypertable pass, never a URL parameter
 
 
 # Additional parameters for engine creation
@@ -212,6 +225,15 @@ if config.provider == 'turso':
         sys.exit(exit_status.runtime_error)
 
 
+if config.provider in TIMESCALE_ALIASES:
+    try:
+        import uuid_utils  # noqa: F401 (guarantees uuid() -> UUIDv7, the hypertable's partition key)
+    except ImportError:
+        display_critical('Missing optional dependency "uuid-utils" (the "uuid7" extra) needed for TimescaleDB',
+                         module=__name__)
+        sys.exit(exit_status.runtime_error)
+
+
 def get_url() -> DatabaseURL | str:
     """Wraps parsing within function."""
     if 'url' in config:
@@ -224,7 +246,7 @@ def get_url() -> DatabaseURL | str:
         raise ConfigurationError(f'Unsupported database \'{config.provider}\'')
     try:
         params = Namespace({**config, 'provider': providers[config.provider]})
-        if config.provider == 'postgres' and config.file == DEFAULT_DATABASE_FILE:
+        if config.provider in ('postgres', *TIMESCALE_ALIASES) and config.file == DEFAULT_DATABASE_FILE:
             params.pop('file', None)  # Injected automatically from preload
         return DatabaseURL.from_namespace(params)
     except AttributeError as err:

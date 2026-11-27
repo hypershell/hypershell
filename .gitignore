@@ -139,7 +139,7 @@ dmypy.json
 
 # Local-only security review notes (not for publication)
 .security/
+.local/
 
-# Agent memory not committed to project
-AGENTS.md
-CLAUDE.md
+# Personal Claude Code settings (permission allowlist etc.); not for publication
+.agents/settings.local.json

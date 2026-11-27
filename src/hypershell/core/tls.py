@@ -6,7 +6,7 @@
 
 # Type annotations
 from __future__ import annotations
-from typing import List, Mapping, Optional, Tuple, Final
+from typing import List, Mapping, Optional, Tuple, Final, Union
 
 # Standard libs
 import os
@@ -25,12 +25,14 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 
 # Internal libs
 from hypershell.core.logging import Logger
+from hypershell.core.config_schema import SETTINGS, SettingError, TIME_FORMS
 
 # Public interface
 __all__ = [
     'TLSConfig', 'TLSError',
     'PARAM_AUTO', 'PARAM_NONE',
     'DEFAULT_MIN_VERSION', 'DEFAULT_CERT_VALIDITY_DAYS', 'DEFAULT_CERT_DIRNAME',
+    'HANDSHAKE_KEY', 'DEFAULT_HANDSHAKE', 'MAX_HANDSHAKE', 'handshake_seconds',
     'build_server_context', 'build_client_context',
     'install_process_context', 'clear_process_context',
     'get_server_context', 'get_client_context', 'get_tls_config',
@@ -56,6 +58,13 @@ DEFAULT_CERT_DIRNAME: Final[str] = 'tls'
 DEFAULT_CERT_FILENAME: Final[str] = 'server.crt'
 DEFAULT_KEY_FILENAME: Final[str] = 'server.key'
 
+# Seconds a server gives a connection to complete its TLS handshake, counted from accept, the most it
+# accepts (one day), and the configuration key that sets it
+DEFAULT_HANDSHAKE: Final[int] = 30
+HANDSHAKE = SETTINGS['server.tls.handshake']
+MAX_HANDSHAKE: Final[int] = HANDSHAKE.high
+HANDSHAKE_KEY: Final[str] = 'server.tls.handshake'
+
 # RFC 5280 caps X.520 ``commonName`` at 64 UTF-8 characters. ``socket.getfqdn()`` can return
 # an IPv6 reverse-DNS PTR (e.g. ``...ip6.arpa``, 72 chars) on hosts without a configured FQDN,
 # which would otherwise crash :func:`_generate_self_signed`.
@@ -78,8 +87,9 @@ class TLSConfig:
     """
     Picklable description of a TLS configuration.
 
-    Carries every value needed to rebuild a :class:`ssl.SSLContext` inside a freshly spawned
-    server subprocess. Paths must be absolute. Use :meth:`is_active` to detect a disabled config.
+    Carries every value needed to rebuild a :class:`ssl.SSLContext` in whichever process serves or
+    connects, including a freshly spawned one. Paths must be absolute. Use :meth:`is_active` to
+    detect a disabled config.
     """
 
     enabled: bool = False
@@ -92,6 +102,7 @@ class TLSConfig:
     ciphers: Optional[str] = None
     servername: Optional[str] = None   # Override SNI / hostname check on client side
     sans: List[str] = field(default_factory=list)  # SANs to embed on auto-generated certs
+    handshake: Union[int, float, str] = DEFAULT_HANDSHAKE  # Server handshake deadline, as configured (see handshake_seconds)
 
     def is_active(self: TLSConfig) -> bool:
         """True when this config should actually wire TLS into the queue transport."""
@@ -145,6 +156,26 @@ def _apply_protocol_floor(ctx: ssl.SSLContext, min_version: str) -> None:
     except KeyError:
         raise TLSError(f'Unsupported min_version {min_version!r}; expected one of '
                        f'{sorted(_MIN_VERSION_MAPPING)}')
+
+
+def handshake_seconds(value: Union[int, float, str]) -> int:
+    """The server handshake deadline in whole seconds from a configured `value` in any duration form
+    (``30``, ``'30s'``, ``'1m'``), rounded up, greater than zero and at most one day.
+
+    Only servers read it: a client builds its :class:`TLSConfig` from the same section and never
+    parses the value.
+
+    Raises:
+        TLSError: `value` is not a duration, or is outside the range of ``server.tls.handshake`` in
+            the table (1 to :data:`MAX_HANDSHAKE` seconds). The message names the key, its range and
+            the accepted forms.
+    """
+    text = value if isinstance(value, int) and not isinstance(value, bool) else str(value)
+    try:
+        return HANDSHAKE.parse(text, HANDSHAKE_KEY)
+    except SettingError as error:
+        forms = f'; a duration is {TIME_FORMS}' if error.out_of_range else ''
+        raise TLSError(f'{error}{forms}') from None
 
 
 def build_server_context(cfg: TLSConfig) -> ssl.SSLContext:
@@ -211,7 +242,8 @@ def verify_peer_fingerprint(ssl_sock: ssl.SSLSocket, cfg: TLSConfig) -> None:
 
 
 # Process-local state populated by install_process_context().
-# The server subprocess and each client process call install_process_context() once.
+# Each client and a forked manager child call install_process_context(). An in-process queue server
+# keeps its own context on its listener and neither reads nor writes this state.
 _PROCESS_CONFIG: Optional[TLSConfig] = None
 _PROCESS_SERVER_CONTEXT: Optional[ssl.SSLContext] = None
 _PROCESS_CLIENT_CONTEXT: Optional[ssl.SSLContext] = None
@@ -221,9 +253,10 @@ def install_process_context(cfg: Optional[TLSConfig]) -> None:
     """
     Stash `cfg` for use by :func:`get_server_context` / :func:`get_client_context`.
 
-    Called once per process: by the server subprocess as part of its initializer and by each
-    client process before connecting. Passing ``None`` (or a config with ``enabled=False``)
-    leaves TLS disabled in this process.
+    Called by each client before connecting and by a forked manager child before it serves. An
+    in-process queue server holds its own context and does not use this one. Repeat calls drop the
+    cached contexts, which are rebuilt from the new configuration on next use. Passing ``None`` (or
+    a config with ``enabled=False``) leaves TLS disabled in this process.
     """
     global _PROCESS_CONFIG, _PROCESS_SERVER_CONTEXT, _PROCESS_CLIENT_CONTEXT
     _PROCESS_SERVER_CONTEXT = None
@@ -462,5 +495,6 @@ def from_namespace(ns: Optional[Mapping] = None,
         min_version=ns.get('min_version') or DEFAULT_MIN_VERSION,
         ciphers=ns.get('ciphers'),
         servername=ns.get('servername'),
+        handshake=ns.get('handshake', DEFAULT_HANDSHAKE),
     )
     return resolve_auto_paths(cfg, directory if directory is not None else default_directory())

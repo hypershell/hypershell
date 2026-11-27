@@ -19,20 +19,14 @@ Options
     This is an arbitrary choice and simply must be an available port. The default option chosen
     here is typically available on most platforms and is not expected by any known major software.
 
-``-k``, ``--auth`` *KEY*
-    Cryptographic authentication key to connect with server (default: <not secure>).
-
-    The default *KEY* used by the server and client is not secure and only a place holder.
-    It is expected that the user choose a secure *KEY*. The `cluster` automatically generates
-    a secure one-time *KEY*.
-
 ``-b``, ``--bundlesize`` *NUM*
     Size of task bundle (default: 1).
 
     The default value allows for greater concurrency and responsiveness on small scales. This is
     used by the `submit` thread to accumulate bundles for either database commits and/or publishing
     to the queue. If a database is in use, the scheduler thread selects tasks from the database in
-    batches of this size.
+    batches of this size. It is also the size of the bundle given to a client that advertises no
+    size of its own (a client's ``-b`` is its advertised size).
 
     Using larger bundles is a good idea for large distributed workflows; specifically, it is best
     to coordinate bundle size with the number of executors in use by each client.
@@ -40,7 +34,12 @@ Options
     See also ``--num-threads`` and ``--bundlewait``.
 
 ``-w``, ``--bundlewait`` *SEC*
-    Seconds to wait before flushing tasks (default: 5).
+    Time to wait before flushing tasks (default: 5).
+
+    Specify a number of seconds, units ``d``, ``h``, ``m`` and ``s`` in that order, whole or
+    fractional (e.g., ``30s``, ``5m``, ``1h30m``, ``1.5h``), or a Slurm time ``MM:SS``,
+    ``HH:MM:SS``, ``D-HH``, ``D-HH:MM`` or ``D-HH:MM:SS`` (e.g., ``1:30``). A fraction of a
+    second is rounded up to the next whole second.
 
     This is used by both the `submit` thread and forwarded to each `client`. The `client` collector
     thread that accumulates finished task bundles to return to the `server` will push out a bundle
@@ -48,13 +47,19 @@ Options
 
     See also ``--bundlesize``.
 
-``-Q``, ``--poll`` *NUM*
-    Polling interval in seconds between database queries if no tasks are available (default: 5).
+``-Q``, ``--poll`` *SEC*
+    Polling interval between database queries if no tasks are available (default: 30).
+
+    Specify a number of seconds, units ``d``, ``h``, ``m`` and ``s`` in that order, whole or
+    fractional (e.g., ``30s``, ``5m``, ``1h30m``, ``1.5h``), or a Slurm time ``MM:SS``,
+    ``HH:MM:SS``, ``D-HH``, ``D-HH:MM`` or ``D-HH:MM:SS`` (e.g., ``1:30``). A fraction of a
+    second is rounded up to the next whole second.
 
     This controls how frequently the scheduler checks the database for new tasks when idle.
     Lower values (e.g., 1-2 seconds) provide faster responsiveness but may increase database
     query load. Higher values (e.g., 10-30 seconds) reduce query frequency, useful for
-    workflows with infrequent task submission.
+    workflows with infrequent task submission. The result that finishes a run ends the
+    scheduler's wait at once.
 
 ``-r``, ``--max-retries`` *NUM*
     Auto-retry failed tasks (default: 0).
@@ -63,6 +68,10 @@ Options
     task is considered to have failed if it has a non-zero exit status. Setting this value greater
     than zero defines the number of attempts for the task. The original is not over-written, a new
     task is submitted and later scheduled.
+
+    A task whose template does not expand (-1001) or that needs more cores or memory than its
+    client has (-1002) is never retried: it did not run, and its group fails at once.
+    A retry keeps its task's cores, memory and walltime.
 
     See also ``--eager``.
 
@@ -111,14 +120,17 @@ Options
 
     By default, a scheduler thread selects tasks from a database that were previously submitted.
     With ``--no-db`` enabled, there is no scheduler and instead the `submit` thread publishes
-    bundles directly to the queue.
+    bundles directly to the queue. The configured database is not opened at all, so it need not
+    exist or be initialized.
 
 ``--initdb``
     Auto-initialize database.
 
-    If a database is configured for use with the workflow (e.g., PostgreSQL), auto-initialize
-    tables if they don't already exist. This is a short-hand for pre-creating tables with the
-    ``hs initdb`` command. This happens by default with SQLite databases.
+    Initialize the configured database at launch as the ``hs initdb`` command does, without
+    asking for confirmation: create the tables if they don't already exist, upgrade existing ones
+    in place, and with the ``timescale`` provider check the server and give the ``task`` table its
+    hypertable shape. This happens by default with SQLite databases. Without ``--initdb``, a
+    PostgreSQL database that was never initialized stops the server.
 
     Mutually exclusive to ``--no-db``. See ``hs initdb`` command.
 
@@ -149,6 +161,43 @@ Options
     it can easily continue where it left off, halting if nothing to be done.
 
     Conflicts with ``--no-db`` and mutually exclusive to ``--forever``.
+
+``-A``, ``--autoscaling`` [*MODE*]
+    Publish client targets for relay sites (default: disabled).
+
+    The server schedules forever (as with ``--forever``) and launches nothing itself. Each relay
+    connected with the server's key advertises the zones it serves and, for each, its ``min``,
+    ``max`` and ``init`` clients. Each ``--period`` the server computes each zone's demand from
+    its tasks in the active *task group*, splits it over the live sites that serve the zone by
+    ``autoscale.distribution`` (*spread* or *fill*), and publishes the result, which each relay
+    fetches and launches with its own launcher.
+
+    The *policy* can be specified directly here as either *fixed* or *dynamic* (e.g.,
+    ``--autoscaling=dynamic``); the default is the configured ``autoscale.policy``. Under *fixed*,
+    a zone with work gets one client when none runs, and otherwise keeps the floor its relays
+    advertise. Under *dynamic*, a zone grows by one client per check while its task pressure is
+    high, up to the sum of its sites' ``max``. Clients leave only by their idle timeout.
+
+    Conflicts with `FILE`, ``--restart``, ``--no-db`` and ``--no-confirm``.
+
+    See also ``--factor`` and ``--period``.
+
+``-F``, ``--factor`` *VALUE*
+    Scaling factor (default: 1).
+
+    The dimensionless multiple of the average task duration that ``--autoscaling=dynamic`` compares
+    each zone's estimated time to completion against (its *task pressure*), as for the `cluster`.
+
+``-P``, ``--period`` *SEC*
+    Scaling period, greater than zero (default: 60).
+
+    Specify a number of seconds, units ``d``, ``h``, ``m`` and ``s`` in that order, whole or
+    fractional (e.g., ``30s``, ``5m``, ``1h30m``, ``1.5h``), or a Slurm time ``MM:SS``,
+    ``HH:MM:SS``, ``D-HH``, ``D-HH:MM`` or ``D-HH:MM:SS`` (e.g., ``1:30``). A fraction of a
+    second is rounded up to the next whole second. A period of zero or less, here or in
+    ``autoscale.period``, is refused.
+
+    The server waits this long between checks and publishes a new topology only when it changes.
 
 ``--print``
     Print failed task args to <stdout>.

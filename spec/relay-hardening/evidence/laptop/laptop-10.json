@@ -1,0 +1,74 @@
+{
+  "commit": "475334c",
+  "complete": true,
+  "direct": {
+    "completed": 2000,
+    "last_task": "01a1d865-28be-73e2-9d17-fb46212e1176",
+    "site": "<scratch>/relay-throughput-direct-orcnsc24",
+    "status": 0,
+    "t_exit": 1794631888.83,
+    "t_last": 1794631887.184963,
+    "tail": 1.645,
+    "tail_poll": 2.021,
+    "wall": 20.252
+  },
+  "kind": "relay-hardening-tail",
+  "label": "post-fix",
+  "level": "TRACE",
+  "r8_size": true,
+  "relay": {
+    "completed": 2000,
+    "counts": {
+      "relay": {
+        "CRITICAL": 0,
+        "ERROR": 0,
+        "WARNING": 2
+      },
+      "server": {
+        "CRITICAL": 0,
+        "ERROR": 0,
+        "WARNING": 0
+      }
+    },
+    "last_task": "01a1d865-76fd-7e31-94ce-7097c721056a",
+    "segments": {
+      "s1": 5.035,
+      "s2": 0.075,
+      "s3": 0.002,
+      "s4": 0.771,
+      "s5": 0.0,
+      "s6": 0.001,
+      "s7": 0.071,
+      "s8": 0.916,
+      "s9": 0.005
+    },
+    "site": "<scratch>/relay-throughput-relay-qoqvnv6u",
+    "stamps": {
+      "collected": 1794631917.693,
+      "exit": 1794631919.534,
+      "final": 1794631919.529,
+      "heard": 1794631918.542,
+      "landed": 1794631917.77,
+      "last": 1794631912.658354,
+      "returned": 1794631917.768,
+      "scheduler": 1794631918.541,
+      "signal": 1794631918.541,
+      "site_stop": 1794631918.613
+    },
+    "status": 0,
+    "t_exit": 1794631919.534,
+    "t_last": 1794631912.658354,
+    "tail": 6.876,
+    "tail_poll": 7.457,
+    "wall": 29.364
+  },
+  "run_id": "laptop-10",
+  "scrubbed": 0,
+  "sizes": {
+    "clients": 4,
+    "sleep": "0.2",
+    "tasks": 2000,
+    "threads": 8
+  },
+  "src_changed": true
+}

@@ -1,0 +1,48 @@
+zone-queue-primitive: multi-node drive, run B (GOAL R9, multi-node clause)
+
+Harness: one job on a test cluster, 4 whole nodes. Server on node 0 bound to 16 CPUs; clients on
+nodes 1-3, one executor each (T=1), placed cyclically. TLS on, SQLite, M=10000 tasks per run with
+every 100th failing, bundle size 1 both ways. Driven by tests/cluster/drive.sh at f45a5cf; archives
+from tests/cluster/build_archive.sh with Python 3.13.18 (fork start method).
+
+Labels:
+  2.8.3    = 4d5771b (hypershell 2.8.3), the baseline
+  b819de6  = develop before writeback (hypershell 2.9.0a1), the attribution control
+  feature  = f45a5cf (hypershell 2.9.0a2), Z1's final head with develop through #75 merged
+Labels interleaved within each (N, rep); 3 reps per label per N; 18 runs, all exit 0.
+
+Command:
+  compare.py spec/zone-queue-primitive/evidence/cluster --baseline 2.8.3 --candidate feature --control b819de6
+  (run with a standalone Python 3.13.18 interpreter in place of `uv run python`: uv could not
+  sync in the build sandbox, and compare.py is standard library only)
+Exit status: 0. Verdict: PASS.
+
+Throughput, p10-p90 tasks/s from DB timestamps (per run in rep order r1 r2 r3)
+
+  N    label    r1     r2     r3     median  spread  vs 2.8.3        verdict
+  16   2.8.3    171.5  175.1  175.2  175.1   3.7     -               baseline
+  16   feature  171.9  167.4  173.1  171.9   5.7     -3.2 (-1.8%)    PASS (tolerance 8.8)
+  16   b819de6  165.2  168.4  166.6  166.6   3.2     -8.5 (-4.9%)    control
+  256  2.8.3    172.5  172.5  167.8  172.5   4.7     -               baseline
+  256  feature  171.1  170.0  168.3  170.0   2.8     -2.5 (-1.4%)    PASS (tolerance 8.6)
+  256  b819de6  163.7  163.1  163.7  163.7   0.6     -8.8 (-5.1%)    control
+
+  Tolerance = max(baseline spread, candidate spread, 5% of baseline median); the 5% floor binds
+  at both N. feature vs b819de6: +5.3 tasks/s at N=16, +6.3 at N=256.
+  The gap to 2.8.3 is smaller at N=256 than at N=16: no high-N regression.
+
+Results: identical across all 18 runs and 3 labels, exit histogram {"0": 9900, "3": 100},
+rows = M, 0 incomplete, server and every client rc 0, one client record per client -> PASS.
+
+Footprint, peak over runs, server process tree (gated: tree children and tree FDs <= 2.8.3)
+
+  N    label    tree children  tree fds  tree threads  tree rss MB  verdict
+  16   2.8.3    1              84        60            157          baseline
+  16   feature  0              58        56            95           PASS
+  16   b819de6  1              84        60            160          control
+  256  2.8.3    1              803       780           218          baseline
+  256  feature  0              779       776           161          PASS
+  256  b819de6  1              803       780           221          control
+
+  The feature has no manager child: its queue sockets and handler threads live in the server
+  process itself, so its own FDs and threads (778 and 776 at N=256) equal its tree totals.

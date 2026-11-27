@@ -1,0 +1,23 @@
+{
+ "clients_scanned": 2,
+ "env_unreadable": 0,
+ "executions": 1602,
+ "fenced_names_seen": 0,
+ "hosts_relay": true,
+ "key_hits": 0,
+ "key_probe_seen": 0,
+ "launchers_scanned": 4,
+ "node": 1,
+ "procs_scanned": 1184,
+ "role": "leaf",
+ "run_id": "relay-d4a2ec8-45133930-r1-kill",
+ "samples": 115,
+ "schema": 2,
+ "site": "A",
+ "site_key_argv": 0,
+ "site_key_clients": 2,
+ "site_key_tasks": 0,
+ "tasks_scanned": 1178,
+ "untokened_clients": 0,
+ "upstream_conns_max": 0
+}

@@ -1,0 +1,78 @@
+# hardening_drive zones: launches (epoch, label, pid, zone, launch number, HYPERSHELL_ZONE, client --zone)
+launch t=1794628171 site=relay pid=36636 word=gpu n=1 env=gpu client=gpu
+launch t=1794628171 site=relay pid=36637 word=cpu n=1 env=cpu client=cpu
+launch t=1794628171 site=relay pid=36643 word=cpu n=2 env=cpu client=cpu
+launch t=1794628176 site=relay pid=36709 word=gpu n=2 env=gpu client=gpu
+hold t=1794628176 word=gpu n=2
+launch t=1794628178 site=relay pid=36724 word=cpu n=3 env=cpu client=cpu
+launch t=1794628179 site=relay pid=36738 word=cpu n=4 env=cpu client=cpu
+launch t=1794628183 site=relay pid=36779 word=cpu n=5 env=cpu client=cpu
+launch t=1794628188 site=relay pid=36829 word=cpu n=6 env=cpu client=cpu
+launch t=1794628191 site=relay pid=36858 word=cpu n=7 env=cpu client=cpu
+launch t=1794628192 site=relay pid=36871 word=cpu n=8 env=cpu client=cpu
+release t=1794628194 word=gpu n=2
+launch t=1794628196 site=relay pid=36922 word=cpu n=9 env=cpu client=cpu
+launch t=1794628197 site=relay pid=36940 word=cpu n=10 env=cpu client=cpu
+# server-1.log: start, restarts seen, shutdown, exit
+2026-11-14 03:49:30.564 <host>    DEBUG [01a1d82c-b282-71e2-9397-764dc3b485e0] [hypershell.server] Started
+2026-11-14 03:49:30.564 <host>    DEBUG [01a1d82c-b282-71e2-9397-764dc3b485e0] [hypershell.server] Started (confirm)
+2026-11-14 03:49:30.564 <host>    DEBUG [01a1d82c-b282-71e2-9397-764dc3b485e0] [hypershell.server] Started (heartbeat)
+2026-11-14 03:49:30.564 <host>    DEBUG [01a1d82c-b282-71e2-9397-764dc3b485e0] [hypershell.server] Started (scheduler)
+2026-11-14 03:49:30.564 <host>    DEBUG [01a1d82c-b282-71e2-9397-764dc3b485e0] [hypershell.server] Started (receiver)
+2026-11-14 03:49:30.573 <host>     INFO [01a1d82c-b282-71e2-9397-764dc3b485e0] [hypershell.server] Reverted 0 previously interrupted tasks
+2026-11-14 03:49:51.580 <host>  WARNING [01a1d82c-b282-71e2-9397-764dc3b485e0] [hypershell.server] Signal interrupt (SIGUSR1)
+2026-11-14 03:49:52.209 <host>    DEBUG [01a1d82c-b282-71e2-9397-764dc3b485e0] [hypershell.server] Signaling clients (2 connected)
+2026-11-14 03:49:59.592 <host>    DEBUG [01a1d82c-b282-71e2-9397-764dc3b485e0] [hypershell.server] Done
+# relay: identity, link, TLS, zones at the shutdown, site clients, final beat, exit
+2026-11-14 03:49:31.801 <host>  WARNING [01a1d82c-b75a-7553-a20b-bc585c8c943a] [hypershell.relay] TLS to upstream server is disabled - this is not recommended for production!
+2026-11-14 03:49:31.808 <host>     INFO [01a1d82c-b75a-7553-a20b-bc585c8c943a] [hypershell.relay] Upstream identity a03c0ff3-081d-52a4-95a5-d4f8cda1eadf for zone cpu at site drive
+2026-11-14 03:49:31.808 <host>     INFO [01a1d82c-b75a-7553-a20b-bc585c8c943a] [hypershell.relay] Upstream identity c2bc6977-dc0c-5367-af40-be1dff905e38 for zone gpu at site drive
+2026-11-14 03:49:31.817 <host>     INFO [01a1d82c-b75a-7553-a20b-bc585c8c943a] [hypershell.core.reconnect] Connected to upstream server 127.0.0.1:61514
+2026-11-14 03:49:31.924 <host>     INFO [01a1d82c-b75a-7553-a20b-bc585c8c943a] [hypershell.relay] Relay-local server ready on 127.0.0.1:61538
+2026-11-14 03:49:32.232 <host>  WARNING [01a1d82c-b8f6-7b63-8b7b-b47209478b53] [hypershell.client] TLS is disabled - this is not recommended for production!
+2026-11-14 03:49:32.232 <host>  WARNING [01a1d82c-b8f7-7ff1-87ba-2a532bfba5e9] [hypershell.client] TLS is disabled - this is not recommended for production!
+2026-11-14 03:49:32.243 <host>  WARNING [01a1d82c-b901-7b03-b25c-33cc69463acd] [hypershell.client] TLS is disabled - this is not recommended for production!
+2026-11-14 03:49:38.310 <host>  WARNING [01a1d82c-d0c0-7c30-aeb5-5bcca7039234] [hypershell.client] TLS is disabled - this is not recommended for production!
+2026-11-14 03:49:39.335 <host>  WARNING [01a1d82c-d4c8-7382-813a-c5b41dae7842] [hypershell.client] TLS is disabled - this is not recommended for production!
+2026-11-14 03:49:43.397 <host>  WARNING [01a1d82c-e4a5-7c11-a165-8095a8627956] [hypershell.client] TLS is disabled - this is not recommended for production!
+2026-11-14 03:49:48.460 <host>  WARNING [01a1d82c-f86d-7e61-8fc2-721510066ed6] [hypershell.client] TLS is disabled - this is not recommended for production!
+2026-11-14 03:49:51.514 <host>  WARNING [01a1d82d-0451-7751-b6f0-33f2f289eeb6] [hypershell.client] TLS is disabled - this is not recommended for production!
+2026-11-14 03:49:52.534 <host>  WARNING [01a1d82d-0857-75f2-8c1a-9326531ef746] [hypershell.client] TLS is disabled - this is not recommended for production!
+2026-11-14 03:49:53.616 <host>    DEBUG [01a1d82c-b75a-7553-a20b-bc585c8c943a] [hypershell.relay.upstream] Upstream server is shutting down - no more requests for zone cpu (a03c0ff3-081d-52a4-95a5-d4f8cda1eadf)
+2026-11-14 03:49:53.616 <host>     INFO [01a1d82c-b75a-7553-a20b-bc585c8c943a] [hypershell.relay.upstream] Upstream server is shutting down - holding 1 task for zone gpu, which has no site client, until one runs them (c2bc6977-dc0c-5367-af40-be1dff905e38)
+2026-11-14 03:49:54.555 <host>  WARNING [01a1d82d-103a-7be1-8571-dfe69fdd8b86] [hypershell.client] TLS is disabled - this is not recommended for production!
+2026-11-14 03:49:56.548 <host>  WARNING [01a1d82d-17fa-70b3-9559-33b685ce6d81] [hypershell.client] TLS is disabled - this is not recommended for production!
+2026-11-14 03:49:56.732 <host>     INFO [01a1d82c-b75a-7553-a20b-bc585c8c943a] [hypershell.relay.upstream] Upstream server is shutting down - no more upstream requests
+2026-11-14 03:49:57.559 <host>  WARNING [01a1d82d-1beb-7ba0-a6e1-3c9d622e58d4] [hypershell.client] TLS is disabled - this is not recommended for production!
+2026-11-14 03:49:59.589 <host>    DEBUG [01a1d82c-b75a-7553-a20b-bc585c8c943a] [hypershell.relay.upstream] Upstream heartbeat - final (a03c0ff3-081d-52a4-95a5-d4f8cda1eadf, c2bc6977-dc0c-5367-af40-be1dff905e38)
+# hardening_drive zones: facts
+mode=zones
+source_server=<repo>/src/hypershell
+source_relay=<repo>/src/hypershell
+total=21
+server_1_started_at=1794628170
+relay_started_at=1794628171.484
+drained_at=1794628190
+cpu_shutdown_seen_at=1794628194
+released_at=1794628194.071
+server_exit=0
+server_exited_at=1794628200.221
+relay_exit=0
+relay_exited_at=1794628200.272
+servers=1
+# hardening_drive zones: judgment
+PASS         relay exited 0 by itself (exit 0)
+PASS         server exited 0 by itself (exit 0)
+PASS         the relay logged no traceback
+PASS         the relay logged no CRITICAL line
+PASS         21 tasks submitted
+PASS         every task completed upstream with exit status 0
+PASS         every task ran at the site
+PASS         every task ran once (0 more than once)
+PASS         every task ran in its own zone
+PASS         the cpu zone heard the shutdown
+PASS         the gpu zone, with no site client, took a staged task at the shutdown
+PASS         the gpu client was held after its first one exited (1 held launch)
+PASS         in order: cpu heard the shutdown, gpu held a task (+0.000 s), then the gpu client came back (+0.455 s)
+NOTE         5 gpu tasks in all, 3 of them run at the site once the gpu client came back
+PASS

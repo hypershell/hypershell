@@ -1,3 +1,5 @@
+:orphan:
+
 Manual Page
 ===========
 
@@ -18,6 +20,9 @@ hs server [-h] FILE ...
 
 hs client [-h] ...
     Run stand-alone client.
+
+hs relay [-h] [-H ADDR] [-p NUM] [--zone NAME] ...
+    Run relay for one site.
 
 hs submit [-h] [ARGS... | -f FILE] ...
     Submit one or more tasks.
@@ -75,6 +80,10 @@ Server Usage
 
 .. include:: _include/server_desc.rst
 
+.. versionchanged:: 2.9.0
+   :pr:`104`: a key on the command line is refused; the server takes it from the environment or a
+   configuration file.
+
 .. include:: _include/server_help.rst
 
 
@@ -85,7 +94,21 @@ Client Usage
 
 .. include:: _include/client_desc.rst
 
+.. versionchanged:: 2.9.0
+   :pr:`104`: a key on the command line is refused; the client takes it from the environment or a
+   configuration file.
+
 .. include:: _include/client_help.rst
+
+
+Relay Usage
+-----------
+
+.. include:: _include/relay_usage.rst
+
+.. include:: _include/relay_desc.rst
+
+.. include:: _include/relay_help.rst
 
 
 Submit Usage
@@ -94,6 +117,10 @@ Submit Usage
 .. include:: _include/submit_usage.rst
 
 .. include:: _include/submit_desc.rst
+
+.. versionchanged:: 2.9.0
+   :pr:`104`: a key on the command line is refused; ``--queue`` takes it from the environment or a
+   configuration file.
 
 .. include:: _include/submit_help.rst
 
@@ -247,13 +274,21 @@ Security
 Environment Variables
 ---------------------
 
-As stated for configuration, any environment variable prefixed as ``HYPERSHELL_``
-where the name aligns to the path to some option, delimited by underscores,
-will set that option. Example, ``HYPERSHELL_CLIENT_TIMEOUT`` maps to the
-corresponding configuration option.
+As stated for configuration, an environment variable named ``HYPERSHELL_`` followed by an
+option's path, with each ``.`` written as ``_``, sets that option; the rest of the name may be in
+any letter case. Example, ``HYPERSHELL_CLIENT_TIMEOUT`` sets ``client.timeout`` and
+``HYPERSHELL_SERVER_TLS_MIN_VERSION`` sets ``server.tls.min_version``. Past a table whose entries
+are named by the user (``database.connect_args``, ``database.pragmas``, ``ssh.nodelist``,
+``export``), the rest of the name is one entry; a relay zone is set by
+``HYPERSHELL_RELAY_ZONE_<ZONE>_<KEY>``. ``_ENV`` and ``_EVAL`` work as ``_env`` and ``_eval`` do
+in a file. A value is kept as written for an option that takes text, except that an empty value
+for an optional one (or a bind address, the database host or the task directory) is not given,
+so its default applies; a whole number, a number or a boolean that does not convert stops the
+command with a configuration error naming the variable.
+The configuration guide gives the full rule and what cannot be reached from the environment.
 
 The following environment variables must be specified as such and cannot be configurable
-within files.
+within files; neither can ``HYPERSHELL_ZONE``, which a launched client is given.
 
 .. include:: _include/config_site_vars.rst
 

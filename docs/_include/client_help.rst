@@ -17,7 +17,14 @@ Options
     See section on `templates`.
 
 ``-b``, ``--bundlesize`` *SIZE*
-    Size of task bundle (default: 1).
+    Size of task bundle to request from the server and to return results in (default: the
+    server's).
+
+    When given (on the command line, by ``HYPERSHELL_CLIENT_BUNDLESIZE``, or in a configuration
+    file as ``client.bundlesize``), the client advertises this size and the server replies with
+    up to this many tasks, never more than its cap (``server.bundlemax``). When not given, the
+    client advertises no size and the server uses its own ``--bundlesize``; finished tasks are then
+    returned in bundles of the built-in default (1).
 
     Using larger bundles is a good idea for large distributed workflows; specifically, it is best
     to coordinate bundle size with the number of executors in use by each client.
@@ -25,39 +32,55 @@ Options
     See also ``--num-threads`` and ``--bundlewait``.
 
 ``-w``, ``--bundlewait`` *SEC*
-    Seconds to wait before flushing tasks (default: 5).
+    Time to wait before flushing tasks (default: 5, or ``client.bundlewait``).
+
+    Specify a number of seconds, units ``d``, ``h``, ``m`` and ``s`` in that order, whole or
+    fractional (e.g., ``30s``, ``5m``, ``1h30m``, ``1.5h``), or a Slurm time ``MM:SS``,
+    ``HH:MM:SS``, ``D-HH``, ``D-HH:MM`` or ``D-HH:MM:SS`` (e.g., ``1:30``). A fraction of a
+    second is rounded up to the next whole second.
 
     The `client` collector thread that accumulates finished task bundles to return to
     the `server` will push out a bundle after this period of time regardless of whether
-    it has reached the preferred bundle size.
+    it has reached the preferred bundle size. A client with nothing left to run returns what it
+    holds at once.
 
     See also ``--bundlesize``.
 
+``--zone`` *NAME*
+    Run only tasks of this zone (default: none, tasks without a zone).
+
+    The client names its zone when it requests work, and the server replies with tasks of that
+    zone only. A client given no ``--zone`` (or ``--zone default``) runs only tasks submitted
+    without one. See ``--zone`` on `submit`.
+
 ``-H``, ``--host`` *ADDR*
-    Hostname or IP address to connect with server (default: localhost).
+    Hostname or IP address to connect with server (default: ``server.host``).
+
+    With no ``-H``, the client dials ``server.host`` when the configuration gives it, else
+    ``server.advertise``, else ``server.bind`` when it is one specific address, else *localhost*.
 
 ``-p``, ``--port`` *NUM*
     Port number to connect with server (default: 50001).
 
-``-k``, ``--auth`` *KEY*
-    Cryptographic authentication key to connect with server (default: <not secure>).
-
-    The default *KEY* used by the server and client is not secure and only a place holder.
-    It is expected that the user choose a secure *KEY*. The `cluster` automatically generates
-    a secure one-time *KEY*.
-
 ``-d``, ``--delay-start`` *SEC*
-    Delay time in seconds before connecting to server (default: 0).
+    Delay time before connecting to server (default: 0).
+
+    Specify a number of seconds, units ``d``, ``h``, ``m`` and ``s`` in that order, whole or
+    fractional (e.g., ``30s``, ``10m``, ``1h30m``, ``1.5h``), or a Slurm time ``MM:SS``,
+    ``HH:MM:SS``, ``D-HH``, ``D-HH:MM`` or ``D-HH:MM:SS`` (e.g., ``1:30``). Fractions of a second
+    are kept (``--delay-start=1.5s`` waits one and a half seconds).
 
     At larger scales it can be advantageous to uniformly delay the client launch sequence.
     Hundreds or thousands of clients connecting to the server all at once is a challenge.
     Even if the server could handle the load, your task throughput would be unbalanced,
     coming in waves.
 
-    Use ``--delay-start`` with a negative number to impose a uniform random delay up to the
-    magnitude specified (e.g., ``--delay-start=-600`` would delay the client up to ten minutes).
-    This also has the effect of staggering the workload. If your tasks take on the order of 30
-    minutes and you have 1000 nodes, choose ``--delay-start=-1800``.
+    Write the value with a leading ``-`` to impose a uniform random delay up to the magnitude
+    specified (e.g., ``--delay-start=-10m`` or ``--delay-start=-600`` would delay the client up to
+    ten minutes). This also has the effect of staggering the workload. If your tasks take on the
+    order of 30 minutes and you have 1000 nodes, choose ``--delay-start=-30m``. Attach a value
+    with a leading ``-`` to the option with ``=`` as shown; given as a separate word, only a plain
+    number (e.g., ``-d -600``) is read as a value on every version of Python.
 
 ``--no-confirm``
     Disable client confirmation of task bundle received.
@@ -134,11 +157,16 @@ Options
     See also ``--capture``.
 
 ``-R``, ``--ratelimit`` *NUM*
-    Maximum allowed tasks per second per client. (default: none).
+    Maximum allowed tasks per second per client; a number, e.g. 0.5 (default: none).
     Individual tasks are throttled if exceeding this average limit.
 
 ``-S``, ``--signalwait`` *SEC*
-    Task-level signal escalation wait period in seconds (default: 10).
+    Task-level signal escalation wait period (default: 10).
+
+    Specify a number of seconds, units ``d``, ``h``, ``m`` and ``s`` in that order, whole or
+    fractional (e.g., ``30s``, ``5m``, ``1h30m``, ``1.5h``), or a Slurm time ``MM:SS``,
+    ``HH:MM:SS``, ``D-HH``, ``D-HH:MM`` or ``D-HH:MM:SS`` (e.g., ``1:30``). A fraction of a
+    second is rounded up to the next whole second.
 
     When tasks fail to halt following an initial SIGINT, the program waits
     this interval in seconds before escalating to the next level of interrupt.

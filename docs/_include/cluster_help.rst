@@ -22,6 +22,11 @@ Modes
     case you would specify ``--launcher=srun``; however, the *ARGS* are not merely the executable
     but the full listing, e.g., ``--launcher='srun --mpi=pmi2'``.
 
+    With ``--autoscaling``, each launch names the zone of the client it starts: ``{zone}`` in
+    *ARGS* is replaced by the zone's name (``default`` for the default zone), and the launched
+    process has the name in its ``HYPERSHELL_ZONE`` environment variable. The client's own
+    ``--template`` is never changed. See ``--autoscaling`` for an example.
+
 Options
 ^^^^^^^
 
@@ -43,11 +48,39 @@ Options
 
     See section on `templates`.
 
+``--from-json`` *SPEC*
+    Read tasks from a JSON file (``FILE[@path]``).
+
+    The optional dotted ``path`` after ``@`` locates the list of task objects inside the
+    document (e.g. ``plan.json@chunks``); with no ``@`` the file's top level must be the
+    list. Each task object's keys become named ``{key}`` fields in the ``--template`` and
+    task tags. In this mode the template is expanded when tasks are ingested (submit-side),
+    not by the clients.
+
+    A record's ``group``, ``zone``, ``cores``, ``memory`` and ``timeout`` keys set those fields of
+    its task, over the options, and are not stored as tags; a ``zone`` must be a JSON string.
+
 ``-H``, ``--bind`` *ADDR*
     Bind address (default: localhost, or 0.0.0.0 for remote clients).
 
     Sets the address the server binds to. When launching clients on remote hosts
-    (``--ssh``, ``--mpi``, or ``--launcher``), bind to *0.0.0.0* so they can connect.
+    (``--ssh``, ``--mpi``, or ``--launcher``, with or without ``--autoscaling``), the default
+    *localhost* becomes *0.0.0.0* so they can connect. The clients are told to dial the bind
+    address when it is one specific address, and this host's own name when it is *0.0.0.0*,
+    unless ``--advertise`` names another.
+
+``--advertise`` *ADDR*
+    Address remote clients dial (default: by ``-H``, as above).
+
+    Tells every launched client to dial *ADDR*, whatever the bind address: a name the clients
+    can reach the server by that differs from it, such as the name on the server's certificate.
+    Also set by ``server.advertise``; this option takes precedence. Not allowed with a local
+    cluster, whose clients are not launched.
+
+    Under TLS the advertised address must be one the client's certificate check accepts: with a
+    certificate from the system's trusted authorities (no ``cafile`` and no ``servername``),
+    clients check it against the address they dial, so advertise a name the certificate carries,
+    or set ``server.tls.servername``.
 
 ``-p``, ``--port`` *PORT*
     Port number (default: 50001).
@@ -69,21 +102,35 @@ Options
     See also ``--num-threads`` and ``--bundlewait``.
 
 ``-w``, ``--bundlewait`` *SEC*
-    Seconds to wait before flushing tasks (default: 5).
+    Time to wait before flushing tasks (default: 5).
+
+    Specify a number of seconds, units ``d``, ``h``, ``m`` and ``s`` in that order, whole or
+    fractional (e.g., ``30s``, ``5m``, ``1h30m``, ``1.5h``), or a Slurm time ``MM:SS``,
+    ``HH:MM:SS``, ``D-HH``, ``D-HH:MM`` or ``D-HH:MM:SS`` (e.g., ``1:30``). A fraction of a
+    second is rounded up to the next whole second.
 
     This is used by both the `submit` thread and forwarded to each `client`. The `client` collector
     thread that accumulates finished task bundles to return to the `server` will push out a bundle
     after this period of time regardless of whether it has reached the preferred bundle size.
+    A client with nothing left to run returns what it holds at once. The `submit` thread does not:
+    it checks this period only when another task arrives, so it holds tasks until a bundle is
+    full, a task arrives after the period, or the input ends.
 
     See also ``--bundlesize``.
 
-``-Q``, ``--poll`` *NUM*
-    Polling interval in seconds between database queries if no tasks are available (default: 5).
+``-Q``, ``--poll`` *SEC*
+    Polling interval between database queries if no tasks are available (default: 30).
+
+    Specify a number of seconds, units ``d``, ``h``, ``m`` and ``s`` in that order, whole or
+    fractional (e.g., ``30s``, ``5m``, ``1h30m``, ``1.5h``), or a Slurm time ``MM:SS``,
+    ``HH:MM:SS``, ``D-HH``, ``D-HH:MM`` or ``D-HH:MM:SS`` (e.g., ``1:30``). A fraction of a
+    second is rounded up to the next whole second.
 
     This controls how frequently the scheduler checks the database for new tasks when idle.
     Lower values (e.g., 1-2 seconds) provide faster responsiveness but may increase database
     query load. Higher values (e.g., 10-30 seconds) reduce query frequency, useful for
-    workflows with infrequent task submission.
+    workflows with infrequent task submission. The result that finishes a run ends the
+    scheduler's wait at once.
 
 ``-r``, ``--max-retries`` *NUM*
     Auto-retry failed tasks (default: 0).
@@ -92,6 +139,10 @@ Options
     task is considered to have failed if it has a non-zero exit status. Setting this value greater
     than zero defines the number of attempts for the task. The original is not over-written, a new
     task is submitted and later scheduled.
+
+    A task whose template does not expand (-1001) or that needs more cores or memory than its
+    client has (-1002) is never retried: it did not run, and its group fails at once.
+    A retry keeps its task's cores, memory and walltime.
 
     See also ``--eager``.
 
@@ -105,7 +156,22 @@ Options
 
     By default, a scheduler thread selects tasks from a database that were previously submitted.
     With ``--no-db`` enabled, there is no scheduler and instead the `submit` thread publishes
-    bundles directly to the queue.
+    bundles directly to the queue. The configured database is not opened at all, so it need not
+    exist or be initialized.
+
+``--zone`` *NAME*
+    Zone of the submitted tasks and of every client the cluster launches; the own zone with
+    ``--autoscaling`` (default: none).
+
+    The tasks read from *FILE* (or ``--from-json``) are placed in this zone, and each client is
+    launched with the same ``--zone``, so it runs them. A zone named in the input (``zone:NAME``
+    or ``zone=NAME`` inline, or a record's ``zone``) wins over ``--zone`` for its tasks; without
+    ``--autoscaling``, one warning names each such zone the clients do not serve. Zones are recorded in the database, so
+    ``--zone`` cannot be used with ``--no-db``.
+
+    With ``--autoscaling``, this is the cluster's own zone: the one that ``--init-size`` and
+    ``--min-size`` apply to. Any other zone with tasks in the active *task group* gets clients
+    of its own, each launched with ``--zone`` set to that zone.
 
 ``--initdb``
     Auto-initialize database.
@@ -132,17 +198,39 @@ Options
     Conflicts with ``--no-db`` and mutually exclusive to ``--restart``.
 
 ``--restart``
-    Start scheduling from last completed task.
+    Start scheduling from where a prior run left off.
 
-    Instead of pulling a new list of tasks from some input `FILE`, with ``--restart`` enabled the
-    `cluster` will restart scheduling tasks where it left off. Any task in the database that was
-    previously scheduled but not completed will be reverted.
+    With no *FILE*, ``--restart`` resumes purely from the database: any task previously
+    scheduled but not completed is reverted, scheduling continues, and the `cluster` halts when
+    nothing is left to do. This is the classic "populate with ``submit``, then requeue" strategy
+    for very large workflows — if the `cluster` is interrupted it can gracefully continue where
+    it left off.
 
-    For very large workflows, an effective strategy is to first use the ``submit`` workflow to
-    populate the database, and then to use ``--restart`` so that if the `cluster` is interrupted,
-    it can easily continue where it left off, halting if nothing to be done.
+    When a *FILE* is given, ``--restart`` becomes file-aware and idempotent. The file is read
+    upfront (a content fingerprint and task count), and only tasks whose identity is not already
+    present from a prior submission of that same path are submitted; the revert-interrupted flow
+    re-runs anything that was mid-flight. Requeuing the same ``hsx <FILE> --restart`` job as many
+    times as needed therefore never double-submits work. If the file's content has changed since
+    it was last seen, the run is refused with a suggestion to use ``--update --restart``.
 
-    Conflicts with ``--no-db`` and mutually exclusive to ``--forever``.
+    Conflicts with ``--no-db`` and ``--repeat``, and mutually exclusive to ``--forever``.
+
+``--repeat``
+    Re-submit a known file's tasks again as a new source.
+
+    Re-submitting a file that has already been ingested is normally refused. ``--repeat``
+    overrides that: the file is recorded as a brand-new source and *all* of its tasks are
+    submitted again, even if an identical prior submission exists. Combine with ``-t``/tags to
+    represent a new phase or trial of the same work.
+
+``--update``
+    Submit only the tasks that are new since a file was last seen.
+
+    Used together with ``--restart`` (``hsx <FILE> --update --restart``): the file is recorded as
+    a new source and only tasks whose identity is not already present in the prior same-path
+    lineage are submitted — novel tasks run while previously-submitted tasks are skipped. On its
+    own (without ``--restart``) it is ambiguous and refused; it also cannot be combined with
+    ``--repeat``.
 
 ``--ssh-args`` *ARGS*...
     Command-line arguments for SSH. For example, ``--ssh-args '-i ~/.ssh/my_key'``.
@@ -167,17 +255,24 @@ Options
     This option is necessary for clients with a different install path on client hosts.
 
 ``-d``, ``--delay-start`` *SEC*
-    Delay time in seconds for launching clients (default: 0).
+    Delay time for launching clients (default: 0).
+
+    Specify a number of seconds, units ``d``, ``h``, ``m`` and ``s`` in that order, whole or
+    fractional (e.g., ``30s``, ``10m``, ``1h30m``, ``1.5h``), or a Slurm time ``MM:SS``,
+    ``HH:MM:SS``, ``D-HH``, ``D-HH:MM`` or ``D-HH:MM:SS`` (e.g., ``1:30``). Fractions of a second
+    are kept (``--delay-start=1.5s`` waits one and a half seconds).
 
     At larger scales it can be advantageous to uniformly delay the client launch sequence.
     Hundreds or thousands of clients connecting to the server all at once is a challenge.
     Even if the server could handle the load, your task throughput would be unbalanced,
     coming in waves.
 
-    Use ``--delay-start`` with a negative number to impose a uniform random delay up to the
-    magnitude specified (e.g., ``--delay-start=-600`` would delay the client up to ten minutes).
-    This also has the effect of staggering the workload. If your tasks take on the order of 30
-    minutes and you have 1000 nodes, choose ``--delay-start=-1800``.
+    Write the value with a leading ``-`` to impose a uniform random delay up to the magnitude
+    specified (e.g., ``--delay-start=-10m`` or ``--delay-start=-600`` would delay the client up to
+    ten minutes). This also has the effect of staggering the workload. If your tasks take on the
+    order of 30 minutes and you have 1000 nodes, choose ``--delay-start=-30m``. Attach a value
+    with a leading ``-`` to the option with ``=`` as shown; given as a separate word, only a plain
+    number (e.g., ``-d -600``) is read as a value on every version of Python.
 
 ``--capture``
     Capture individual task <stdout> and <stderr>.
@@ -274,11 +369,16 @@ Options
     See also ``--capture``.
 
 ``-R``, ``--ratelimit`` *NUM*
-    Maximum allowed tasks per second per client. (default: none).
+    Maximum allowed tasks per second per client; a number, e.g. 0.5 (default: none).
     Individual tasks are throttled if exceeding this average limit.
 
 ``-S``, ``--signalwait`` *SEC*
-    Task-level signal escalation wait period in seconds (default: 10).
+    Task-level signal escalation wait period (default: 10).
+
+    Specify a number of seconds, units ``d``, ``h``, ``m`` and ``s`` in that order, whole or
+    fractional (e.g., ``30s``, ``5m``, ``1h30m``, ``1.5h``), or a Slurm time ``MM:SS``,
+    ``HH:MM:SS``, ``D-HH``, ``D-HH:MM`` or ``D-HH:MM:SS`` (e.g., ``1:30``). A fraction of a
+    second is rounded up to the next whole second.
 
     When tasks fail to halt following an initial SIGINT, the program waits
     this interval in seconds before escalating to the next level of interrupt.
@@ -286,7 +386,7 @@ Options
     See also ``--task-timeout``.
 
 ``-A``, ``--autoscaling`` [*MODE*]
-    Enable autoscaling (default: disabled). Used with ``--launcher``.
+    Enable autoscaling per zone (default: disabled). Used with ``--launcher``.
 
     Specifying this option on its own triggers the use of the autoscaler, with the default
     *policy* or the configured policy. The *policy* can be specified directly here
@@ -299,10 +399,36 @@ Options
 
     A *fixed* policy will seek to maintain a definite size and allows for recovery in the
     event that clients halt for some reason (e.g., due to expected faults or timeouts).
+    A launch that keeps failing is not repeated forever, under either policy: once
+    ``autoscale.failed_launches`` launched clients in a row (default: 3) exit non-zero while no
+    client is registered, the cluster stops and exits non-zero, naming them.
 
     A *dynamic* policy maintains a ``--min-size`` (default: 0) and grows up to some
     ``--max-size`` depending on the observed *task pressure* given the specified scaling
     ``--factor``.
+
+    Clients are scaled per zone. Each zone with tasks in the active *task group* has a fleet of
+    its own, sized by the same policy and the same values of ``--factor`` and ``--max-size``,
+    with its own task pressure. ``--init-size`` and ``--min-size`` apply only to the cluster's
+    own zone (``--zone``, else the default zone); every other zone gets clients only while it
+    has work in the active group, so a zone whose tasks wait in a later group gets none yet.
+    Each ``--period``, at most one client is added per zone, so several zones can each add one
+    at once. Clients of a zone whose work is done leave by ``--timeout`` as usual.
+
+    Each launch names its zone to the launcher, as ``{zone}`` in the ``--launcher`` arguments
+    and as ``HYPERSHELL_ZONE`` in its environment, so one launcher can send the clients of each
+    zone to the resource that serves it. When partitions are named after zones, the launcher
+    alone can do it (``--launcher='srun -p {zone} -n1'``). Otherwise a small script given as
+    ``--launcher='sh launch.sh'`` can choose, for example::
+
+        #!/bin/sh
+        # Start one client on the partition that serves its zone.
+        case "$HYPERSHELL_ZONE" in
+            gpu)   partition=gpu ;;
+            himem) partition=himem ;;
+            *)     partition=cpu ;;
+        esac
+        exec srun -p "$partition" -n1 "$@"
 
     See also ``--factor``, ``--period``, ``--init-size``, ``--min-size``, and ``--max-size``.
 
@@ -330,7 +456,13 @@ Options
     See also ``--period``.  Only valid with ``--autoscaling``.
 
 ``-P``, ``--period`` *SEC*
-    Scaling period in seconds (default: 60).
+    Scaling period, greater than zero (default: 60).
+
+    Specify a number of seconds, units ``d``, ``h``, ``m`` and ``s`` in that order, whole or
+    fractional (e.g., ``30s``, ``5m``, ``1h30m``, ``1.5h``), or a Slurm time ``MM:SS``,
+    ``HH:MM:SS``, ``D-HH``, ``D-HH:MM`` or ``D-HH:MM:SS`` (e.g., ``1:30``). A fraction of a
+    second is rounded up to the next whole second. A period of zero or less, here or in
+    ``autoscale.period``, is refused.
 
     The autoscaler waits for this period of time in between checks and scaling events.
     A shorter period makes the scaling behavior more responsive but can effect database

@@ -18,32 +18,109 @@ concurrency:
 jobs:
   tests:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # The serial suite takes 45-60 minutes on CI since the typed update tests (update-typed-columns); 90 leaves room.
+    timeout-minutes: 90
     strategy:
       fail-fast: false          # run the whole matrix so every Python version's result is visible
       matrix:
         python-version: [ '3.11', '3.12', '3.13', '3.14' ]
     steps:
-      - uses: actions/checkout@v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       # The checkout is shallow and has no tags, so the client compatibility tests in
-      # tests/test_cluster_launch.py (they read the 2.8.4 client) would skip. Fetch that one tag.
+      # tests/test_cluster_launch.py (they read the 2.9.0a4 client) would skip. Fetch that one tag.
       # An origin without it (a fork whose tags predate it) gets a notice, and those tests skip.
-      - name: Fetch the 2.8.4 tag for the client compatibility tests
+      - name: Fetch the 2.9.0a4 tag for the client compatibility tests
         run: |
-          git fetch --no-tags --depth=1 origin +refs/tags/2.8.4:refs/tags/2.8.4 \
-            || echo "::notice::Tag 2.8.4 is not in origin; the client compatibility tests will skip"
+          git fetch --no-tags --depth=1 origin +refs/tags/2.9.0a4:refs/tags/2.9.0a4 \
+            || echo "::notice::Tag 2.9.0a4 is not in origin; the client compatibility tests will skip"
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v8.3.0
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
           cache-dependency-glob: "uv.lock"
 
       - name: Run tests
         run: uv run --python ${{ matrix.python-version }} pytest -v
+
+  # Upgrades PostgreSQL databases that released hypershell versions created (2.8.3, and the
+  # half-upgraded state 2.9.0a1 leaves) in place, and matches returned results to their dispatch
+  # on PostgreSQL. The PostgreSQL tests skip without HS_TEST_POSTGRES and fail if a listed
+  # template is missing, so a green run here means every one of them ran.
+  #
+  # The TimescaleDB entries run the same upgrade and writeback tests on TimescaleDB servers, plus
+  # the TimescaleDB scenarios in tests/test_timescale.py (hypertable, columnstore and policy under
+  # the `timescale` provider). HS_TEST_TIMESCALE names the edition the server must report
+  # (community or apache); with it set, a server without TimescaleDB or with another edition
+  # fails the scenarios rather than skipping them. The plain entries run tests/test_timescale.py
+  # too: its unit tests and the three integration tests that need a server but not TimescaleDB
+  # (test_server_matches_entry, test_absent_fails_before_schema and test_invalid_setting_exits);
+  # its TimescaleDB scenarios skip there. tests/test_server_initdb.py launches the real `hs server`
+  # with --initdb and --no-db on fresh databases: its `postgres`-provider cases run on every entry,
+  # its `timescale`-provider cases on the TimescaleDB entries only. tests/test_update_group.py checks
+  # the group `hs update` writes on PostgreSQL's 32-bit column; tests/test_update_numbers.py,
+  # tests/test_update_kinds.py, tests/test_update_datetime.py and tests/test_update_tags.py check
+  # every other column it writes, by kind, against PostgreSQL's column types. Images are pinned by tag and
+  # index digest (Docker Hub tag API,
+  # https://hub.docker.com/v2/repositories/timescale/timescaledb/tags/<tag>, read 2026-11-02).
+  postgres:
+    name: PostgreSQL (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    # The PostgreSQL-aware files take 30-50 minutes on CI since update-typed-columns; 75 leaves room.
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: pg13, image: 'postgres:13', timescale: '' }   # oldest supported server
+          - { name: pg18, image: 'postgres:18', timescale: '' }   # current release
+          # TimescaleDB 2.31.0 (current release), Community edition.
+          - name: timescale
+            image: 'timescale/timescaledb:2.31.0-pg18@sha256:0fcff5761363809d1242f2261a3482197b5a5337407f8b97a976fb174206d579'
+            timescale: community
+          # TimescaleDB 2.31.0, Apache-only build: hypertables without the columnstore.
+          - name: timescale-oss
+            image: 'timescale/timescaledb:2.31.0-pg18-oss@sha256:cc00b0ede968b0c6e55212bd55a9a195726afe5a9e19dcf8af49a13334e92ff3'
+            timescale: apache
+          # The last release before the compression-policy fix for UUID hypertables (2.25.0):
+          # the highest 2.24.x tag, 2.24.0-pg17 (no 2.24 patch release exists), read 2026-11-02.
+          - name: timescale-floor
+            image: 'timescale/timescaledb:2.24.0-pg17@sha256:8ab414f7f73fd47dfa643097f1a753e2ac009c70fcb0de5717d0e79d21e7b7d6'
+            timescale: community
+    services:
+      postgres:
+        image: ${{ matrix.image }}
+        env:
+          POSTGRES_PASSWORD: postgres
+          TIMESCALEDB_TELEMETRY: 'off'   # ignored by the plain postgres images
+        ports: [ '5432:5432' ]
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      HS_TEST_POSTGRES: postgresql+psycopg://postgres:postgres@localhost:5432/postgres
+      HS_TEST_POSTGRES_TEMPLATES: hs283,hs290a1
+      HS_TEST_TIMESCALE: ${{ matrix.timescale }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Build template databases with hypershell 2.8.3 and 2.9.0a1
+        run: bash tests/fixtures/make-legacy-postgres.sh
+        env:
+          PG_CONTAINER: ${{ job.services.postgres.id }}
+
+      - name: Run PostgreSQL tests
+        run: uv run --python 3.14 --extra postgres pytest -v -rs tests/test_upgrade_postgres.py tests/test_writeback_postgres.py tests/test_timescale.py tests/test_contended_write.py tests/test_zone_postgres.py tests/test_server_initdb.py tests/test_update_group.py tests/test_update_numbers.py tests/test_update_kinds.py tests/test_update_datetime.py tests/test_update_tags.py
 
   # Guards zero-conflict installability: a full install of the default extras must succeed using
   # ONLY pre-built wheels (no compiler). This catches stale/native pins (e.g., greenlet, pyyaml) that
@@ -57,12 +134,12 @@ jobs:
       matrix:
         python-version: [ '3.11', '3.12', '3.13', '3.14' ]
     steps:
-      - uses: actions/checkout@v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v8.3.0
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
 
       - name: Build wheel
         run: uv build --wheel --no-sources --out-dir dist
@@ -79,12 +156,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v8.3.0
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
           cache-dependency-glob: "uv.lock"
@@ -120,3 +197,25 @@ jobs:
               sys.exit("MISSING from wheel shared-data: " + ", ".join(missing))
           print("OK: all shell completions and man pages present in wheel")
           PY
+
+  # Builds the documentation as Read the Docs does, and fails on any Sphinx warning. The published
+  # site builds from develop, so a broken page, include or reference stops here instead of reaching
+  # it. Python-independent, so no matrix; 3.12 matches .readthedocs.yaml. No extras are installed:
+  # autodoc needs only the base package.
+  docs:
+    name: Docs build (warnings are errors)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Build HTML with warnings as errors
+        run: uv run --python 3.12 --group docs sphinx-build -W --keep-going -q -E -b html docs docs/_build/html

@@ -55,10 +55,21 @@ A few common environment variables are defined for every task.
 ``TASK_ERRPATH``
     Absolute file path where standard error is directed (if defined).
 
+``TASK_SLOT``
+    Zero-based execution slot of the task's executor (``0 .. N-1`` for a client
+    running ``N`` tasks in parallel). Stable for the executor's lifetime; use it to
+    pin resources (cores, GPUs) without colliding with sibling tasks. Defaults to ``0``.
+
+``TASK_SLOT_COUNT``
+    Number of concurrent executors on the client (``N``). Defaults to ``1``.
+
 Further, any environment variable starting with ``HYPERSHELL_EXPORT_`` will be injected
-into the task environment sans prefix; e.g., ``HYPERSHELL_EXPORT_FOO`` would define
-``FOO`` in the task environment. You can also define such variables in the ``export``
-section of your configuration file(s); e.g.,
+into the task environment sans prefix, its name and value as written; e.g.,
+``HYPERSHELL_EXPORT_FOO`` would define ``FOO``, and ``HYPERSHELL_EXPORT_RunId=007`` would define
+``RunId=007``, in the task environment. You can also define such variables in the ``export``
+section of your configuration file(s), whose names are upper-cased (as below). For the same task
+variable name, the environment's value wins over a file's; ``HYPERSHELL_EXPORT_foo`` beside a
+file's ``foo`` gives a task both ``foo`` and ``FOO``. For example,
 
 .. code-block:: toml
 

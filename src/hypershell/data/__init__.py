@@ -17,7 +17,7 @@ import functools
 from cmdkit.app import Application, exit_status
 from cmdkit.cli import Interface, ArgumentError
 from cmdkit.config import ConfigurationError
-from sqlalchemy import inspect, text, type_coerce
+from sqlalchemy import inspect, text
 from sqlalchemy.orm import close_all_sessions, sessionmaker, Session as SessionType
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.engine import create_engine
@@ -25,14 +25,17 @@ from sqlalchemy.engine import create_engine
 # Internal libs
 from hypershell.core.logging import Logger
 from hypershell.core.config import config
-from hypershell.core.exceptions import handle_exception, DatabaseUninitialized, get_shared_exception_mapping
+from hypershell.core.exceptions import (handle_exception, display_critical, DatabaseUninitialized,
+                                        get_shared_exception_mapping, ReadingMixin)
 from hypershell.core.pretty_print import format_bytes
-from hypershell.data.core import Session, engine, in_memory, schema, providers
-from hypershell.data.model import Entity, Task, JSON
+from hypershell.data.core import Session, engine, in_memory, schema, providers, TIMESCALE_ALIASES, timescale_config
+from hypershell.data.model import Entity, Task
+from hypershell.data.upgrade import upgrade_schema
+from hypershell.data import timescale
 
 # Public interface
 __all__ = [
-    'initdb', 'truncatedb', 'checkdb', 'ensuredb', 'vacuumdb', 'rotatedb',
+    'initdb', 'upgradedb', 'truncatedb', 'checkdb', 'ensuredb', 'vacuumdb', 'rotatedb',
     'DATABASE_ENABLED', 'DATABASE_PROVIDER', 'DATABASE_DIALECT',
     'InitDBApp',
 ]
@@ -50,6 +53,19 @@ DATABASE_PROVIDER: Final[str] = config.database.provider
 DATABASE_DIALECT: Final[str] = 'sqlite' if DATABASE_PROVIDER in ['sqlite', 'turso'] else 'postgres'
 """Either sqlite or postgres."""
 
+TIMESCALE: Final[bool] = DATABASE_PROVIDER in TIMESCALE_ALIASES
+"""Set if the provider is a TimescaleDB alias (PostgreSQL with the hypertable pass)."""
+
+TIMESCALE_SETTINGS: timescale.Settings = timescale.DEFAULTS
+"""Target shape of the `task` hypertable, from `[database.timescale]` (TimescaleDB only)."""
+
+if TIMESCALE:
+    try:
+        TIMESCALE_SETTINGS = timescale.Settings.from_config(timescale_config)
+    except ConfigurationError as error:
+        display_critical(str(error), module=__name__)
+        sys.exit(exit_status.bad_config)
+
 DATABASE_HOST: Final[str] = config.database.get('host', 'localhost')
 """Database server hostname (default: localhost)."""
 
@@ -60,9 +76,21 @@ DATABASE_INFO: Final[str] = f'{config.database.provider} ({DATABASE_SITE})'
 """Concise connection info for database."""
 
 
+def upgradedb() -> list[str]:
+    """
+    Bring the database schema current in place: create missing tables, columns, and indexes.
+    Returns the changes made (empty if the schema was already current).
+    """
+    return upgrade_schema(engine)
+
+
 def initdb(optimize: bool = False) -> None:
-    """Initialize database tables."""
-    Entity.metadata.create_all(engine)
+    """Initialize database tables, or upgrade existing ones in place."""
+    if TIMESCALE:
+        timescale.prepare(engine)
+    upgradedb()
+    if TIMESCALE:
+        timescale.converge(engine, schema, TIMESCALE_SETTINGS)
     if optimize and DATABASE_DIALECT == 'sqlite':
         log.info(f'Optimizing database {DATABASE_SITE}')
         Session.execute(text('PRAGMA optimize'))
@@ -70,19 +98,24 @@ def initdb(optimize: bool = False) -> None:
 
 def truncatedb() -> None:
     """Truncate database tables."""
+    if TIMESCALE:
+        timescale.prepare(engine)  # Refuse an unusable server before anything is dropped.
     # NOTE: We still might hang here if other sessions exist outside this app instance
     close_all_sessions()
     log.trace('Dropping all tables')
     Entity.metadata.drop_all(engine)
     log.trace('Creating all tables')
     Entity.metadata.create_all(engine)
+    if TIMESCALE:
+        timescale.converge(engine, schema, TIMESCALE_SETTINGS)
     log.warning('Truncated database')
 
 
 def checkdb() -> None:
-    """Ensure database connection and tables exist."""
+    """Ensure database connection and tables exist, and upgrade the schema in place if needed."""
     if not inspect(engine).has_table('task', schema=schema):
         raise DatabaseUninitialized('Use \'initdb\' to initialize the database')
+    upgradedb()
 
 
 def ensuredb(auto_init: bool = False) -> None:
@@ -130,13 +163,13 @@ def rotatedb() -> None:
     part_id, part_path = next_rotate_path()
     log.info(f'Rotating database {DATABASE_SITE} into {part_path}')
 
-    # Mark completed tasks as having part:N
+    # Stamp completed tasks with this partition's index in the `part` column.
     # We cannot simply drop completed tasks naively as more tasks may be updated in the
     # time between vacuuming to the new partition and the drop step
     (
         Session.query(Task)
             .filter(Task.exit_status.isnot(None))
-            .update({Task.tag: text('json_set(task.tag, :k, :v)').params({'k': '$.part', 'v': part_id})})
+            .update({Task.part: part_id})
     )
     Session.commit()
 
@@ -144,7 +177,7 @@ def rotatedb() -> None:
     # Previously marked tasks as part:N can then be dropped from main database
     log.debug(f'Vacuuming into {part_path}')
     Session.execute(text(f'VACUUM INTO :path'), params={'path': part_path})
-    count_deleted = Session.query(Task).filter(Task.tag['part'] == type_coerce(part_id, JSON)).delete()
+    count_deleted = Session.query(Task).filter(Task.part == part_id).delete()
     Session.commit()
     log.debug(f'Dropped {count_deleted} completed tasks from main ({DATABASE_SITE})')
 
@@ -154,7 +187,7 @@ def rotatedb() -> None:
 
     # Now we can drop anything in the new partition not belonging to part:N
     with sessionmaker(bind=create_engine(f'{providers[DATABASE_PROVIDER]}:///{part_path}'))() as external_session:
-        count_deleted = external_session.query(Task).filter(Task.tag['part'] != type_coerce(part_id, JSON)).delete()
+        count_deleted = external_session.query(Task).filter(Task.part != part_id).delete()
         external_session.commit()
         external_session.execute(text('VACUUM'))
         log.debug(f'Dropped {count_deleted} remaining tasks from partition ({part_path})')
@@ -185,11 +218,12 @@ Usage:
 INITDB_HELP = f"""\
 {INITDB_USAGE}
   For SQLite this happens automatically.
+  An existing database from an earlier release is upgraded in place on first use.
   See also --initdb for the `hs cluster` command.
 
   The available special actions are mutually exclusive.
-  The --rotate operation migrates completed tasks to the next database partition,
-  and applies a special purpose `part:N` tag to the new partition and remaining tasks.
+  The --rotate operation migrates completed tasks into the next database partition,
+  recording that partition's index in each moved task's `part` column.
 
 Actions:
   -v, --vacuum             Vacuum an existing database.
@@ -203,8 +237,8 @@ Options:
 """
 
 
-class InitDBApp(Application):
-    """Initialize database (not needed for SQLite/Turso)."""
+class InitDBApp(ReadingMixin, Application):
+    """Initialize or upgrade database (automatic for SQLite/Turso)."""
 
     interface = Interface(INITDB_PROGRAM, INITDB_USAGE, INITDB_HELP)
     ALLOW_NOARGS = True
@@ -237,10 +271,12 @@ class InitDBApp(Application):
             if self.confirm_action(f'Backup {DATABASE_INFO} into \'{self.backup_path}\''):
                 vacuumdb(self.backup_path)
         elif self.rotate_mode:
+            checkdb()
             part_id, part_path = next_rotate_path()
             if self.confirm_action(f'Rotate {DATABASE_INFO} to \'{part_path}\''):
                 rotatedb()
         elif self.truncate_mode:
+            checkdb()
             if self.confirm_action(f'Truncate {DATABASE_INFO}: {Task.count()} tasks'):
                 truncatedb()
         else:

@@ -262,7 +262,10 @@ def test_late_lower_group_warns_after_text_group_started_first(task_db: Engine,
 
 @mark.unit
 def test_ascending_input_below_zero_runs_in_order(task_db: Engine, caplog: pytest.LogCaptureFixture) -> None:
-    """Groups committed after an empty-database start run in ascending order, with no warning."""
+    """Groups committed after an empty-database start run in ascending order, with no warning.
+
+    Rows below 0 are no longer taken from input, but a 2.8 database may hold them: they still run first.
+    """
     caplog.set_level(logging.DEBUG, logger='hypershell')
     scheduler = make_scheduler()
     commit_tasks(-1, -1, 0)
@@ -413,7 +416,7 @@ def task_times(groups: List[int]) -> Dict[int, Tuple[List[datetime], List[dateti
 
 
 @mark.integration
-@mark.parametrize('layout', [[1, 0, 1, 0], [0, -1, 0, -1]], ids=['1-0', '0-(-1)'])
+@mark.parametrize('layout', [[1, 0, 1, 0], [2, 1, 2, 1]], ids=['1-0', '2-1'])
 def test_cluster_runs_unsorted_file_in_group_order(temp_site: Path, layout: List[int]) -> None:
     """A task file that lists a higher group first still runs its groups in ascending order."""
     tasks = [f'echo {n}  #HYPERSHELL: n:{n} group:{group}' for n, group in enumerate(layout)]
@@ -455,16 +458,17 @@ def test_cluster_clients_with_timeout_wait_for_file(temp_site: Path) -> None:
 
 
 @mark.integration
-def test_cluster_runs_group_stored_as_text(temp_site: Path) -> None:
-    """A group SQLite stores as text, which cannot be ordered against an integer group, still runs."""
+def test_cluster_refuses_group_stored_as_text(temp_site: Path) -> None:
+    """A group that is not an integer, which SQLite would store as text, refuses the file: nothing inserted, exit 5."""
     taskfile = create_taskfile(temp_site, ['echo 0  # HYPERSHELL: group:0',
                                            'echo x  # HYPERSHELL: group:x'])
     try:
-        proc = run(['hs', 'cluster', str(taskfile), '-N1', '--no-tls'],
+        proc = run(['hs', 'cluster', str(taskfile), '-N1', '--no-tls', '-H', '127.0.0.1'],
                    stdout=PIPE, stderr=PIPE, env=os.environ, timeout=120)
     except TimeoutExpired:
         pytest.fail('hs cluster did not finish within 120 seconds')
-    assert proc.returncode == exit_status.success
+    assert proc.returncode == exit_status.runtime_error
+    assert b'must be an integer' in proc.stderr
 
-    rc, stdout, _ = main(['hs', 'list', '-c', '-S'])
-    assert rc == exit_status.success and stdout == '2'
+    rc, stdout, _ = main(['hs', 'list', '-c'])
+    assert rc == exit_status.success and stdout == '0'

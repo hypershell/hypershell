@@ -1,0 +1,19 @@
+{
+ "action": "pause",
+ "backlog_samples": 63,
+ "identities": 1,
+ "key_in_logs": 0,
+ "leaves_launched": 2,
+ "local_rows_left": 0,
+ "peak_backlog": 128,
+ "peak_bound": 128,
+ "primary_db_created": false,
+ "rc": 0,
+ "results_pending": 0,
+ "results_returned": 778,
+ "role": "relay",
+ "run_id": "relay-d4a2ec8-45133930-r2-pause",
+ "schema": 2,
+ "site": "B",
+ "upstream_conns_peak": 3
+}

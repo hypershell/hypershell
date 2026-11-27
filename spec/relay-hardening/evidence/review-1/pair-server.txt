@@ -1,0 +1,46 @@
+# hardening_drive pair-server: launches (epoch, label, pid, zone, launch number, HYPERSHELL_ZONE, client --zone)
+launch t=1794635630 site=relay pid=63120 word=default n=1 env=default client=-
+launch t=1794635630 site=relay pid=63121 word=default n=2 env=default client=-
+# server-1.log: start, restarts seen, shutdown, exit
+2026-11-14 05:53:48.860 <host>    DEBUG [01a1d89e-807c-7411-b12f-405fc06d083b] [hypershell.server] Started
+2026-11-14 05:53:48.860 <host>    DEBUG [01a1d89e-807c-7411-b12f-405fc06d083b] [hypershell.server] Started (confirm)
+2026-11-14 05:53:48.860 <host>    DEBUG [01a1d89e-807c-7411-b12f-405fc06d083b] [hypershell.server] Started (receiver)
+2026-11-14 05:53:48.860 <host>    DEBUG [01a1d89e-807c-7411-b12f-405fc06d083b] [hypershell.server] Started (scheduler)
+2026-11-14 05:53:48.860 <host>    DEBUG [01a1d89e-807c-7411-b12f-405fc06d083b] [hypershell.server] Started (heartbeat)
+2026-11-14 05:53:48.869 <host>     INFO [01a1d89e-807c-7411-b12f-405fc06d083b] [hypershell.server] Reverted 0 previously interrupted tasks
+2026-11-14 05:53:57.248 <host>    DEBUG [01a1d89e-807c-7411-b12f-405fc06d083b] [hypershell.server] Signaling clients (1 connected)
+2026-11-14 05:53:59.567 <host>    DEBUG [01a1d89e-807c-7411-b12f-405fc06d083b] [hypershell.server] Done
+# relay: identity, link, TLS, zones at the shutdown, site clients, final beat, exit
+2026-11-14 05:53:50.061 <host>  WARNING [01a1d89e-8530-7b01-8e5e-c3cb94867c4a] [hypershell.relay] TLS to upstream server is disabled - this is not recommended for production!
+2026-11-14 05:53:50.067 <host>     INFO [01a1d89e-8530-7b01-8e5e-c3cb94867c4a] [hypershell.relay] Upstream identity d7b4da45-744e-551a-bd3f-b5f97b7b0ee9 for zone default at site drive
+2026-11-14 05:53:50.076 <host>     INFO [01a1d89e-8530-7b01-8e5e-c3cb94867c4a] [hypershell.core.reconnect] Connected to upstream server 127.0.0.1:53441
+2026-11-14 05:53:50.185 <host>     INFO [01a1d89e-8530-7b01-8e5e-c3cb94867c4a] [hypershell.relay] Relay-local server ready on 127.0.0.1:53444
+2026-11-14 05:53:50.478 <host>  WARNING [01a1d89e-86c8-7703-baa4-5860a1841a51] [hypershell.client] TLS is disabled - this is not recommended for production!
+2026-11-14 05:53:50.478 <host>  WARNING [01a1d89e-86c9-7372-8a94-599ee2fb68e2] [hypershell.client] TLS is disabled - this is not recommended for production!
+2026-11-14 05:53:57.249 <host>     INFO [01a1d89e-8530-7b01-8e5e-c3cb94867c4a] [hypershell.relay.upstream] Upstream server is shutting down - no more upstream requests
+2026-11-14 05:53:59.557 <host>    DEBUG [01a1d89e-8530-7b01-8e5e-c3cb94867c4a] [hypershell.relay.upstream] Upstream heartbeat - final (d7b4da45-744e-551a-bd3f-b5f97b7b0ee9)
+# hardening_drive pair-server: facts
+mode=pair-server
+base_src=<site>/base/src
+source_server=<site>/base/src/hypershell
+source_relay=<repo>/src/hypershell
+total=40
+server_1_started_at=1794635628
+relay_started_at=1794635629.752
+server_exit=0
+server_exited_at=1794635639.928
+relay_exit=0
+relay_exited_at=1794635639.970
+servers=1
+# hardening_drive pair-server: judgment
+PASS         the server ran the earlier build
+PASS         the relay ran this build
+PASS         relay exited 0 by itself (exit 0)
+PASS         server exited 0 by itself (exit 0)
+PASS         the relay logged no traceback
+PASS         the relay logged no CRITICAL line
+PASS         40 tasks submitted
+PASS         every task completed upstream with exit status 0
+PASS         every task ran at the site
+PASS         every task ran once (0 more than once)
+PASS

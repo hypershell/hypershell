@@ -53,6 +53,12 @@ the package directly from the package index, the following optional `extras` are
   intended for production deployments.
 * ``uuid7``: install `uuid-utils <https://pypi.org/project/uuid-utils/>`_ to auto-enable
   UUIDv7 task identifiers. Without this extra, task IDs use the standard-library UUIDv4.
+  The TimescaleDB provider requires it on every host that submits tasks, not only the server
+  (see the TimescaleDB section of :ref:`database <database>`).
+
+  .. versionchanged:: 2.9.0
+     :pr:`71`: the TimescaleDB provider requires this extra.
+
 * ``zstd``: enable `Zstandard <https://facebook.github.io/zstd/>`_ as a log-rotation
   compression option (``logging.compress = "zstd"``).
 * ``cron``: enable cron-style, time-based log-rotation schedules via
@@ -222,6 +228,8 @@ the ``hs`` command is renamed to ``hsh`` (though this is not ideal and may chang
 
 -------------------
 
+.. _install_containers:
+
 Docker and Apptainer
 --------------------
 
@@ -241,6 +249,37 @@ with much better throughput and responsiveness.
 
 The fact that your configuration can be entirely defined in terms of environment variables
 makes it easy to setup your deployment without needing to embed the configuration.
+
+Container images for tagged releases are published to the
+`GitHub Container Registry <https://github.com/hypershell/hypershell/pkgs/container/hypershell>`_
+as a multi-architecture image (``linux/amd64`` and ``linux/arm64``), so the correct variant is
+selected automatically for your host.
+
+.. admonition:: Pull the published image
+    :class: note
+
+    .. code-block:: shell
+
+        docker pull ghcr.io/hypershell/hypershell:latest
+
+Each image is signed with `cosign <https://docs.sigstore.dev>`_ and carries a signed
+`SLSA <https://slsa.dev>`_ build-provenance attestation. Both are keyless (bound to the
+release workflow's identity, with no long-lived signing key) and can be verified before use.
+
+.. admonition:: Verify signature and provenance
+    :class: note
+
+    .. code-block:: shell
+
+        gh attestation verify oci://ghcr.io/hypershell/hypershell:latest -R hypershell/hypershell
+
+        cosign verify \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            --certificate-identity-regexp 'https://github.com/hypershell/hypershell/.*' \
+            ghcr.io/hypershell/hypershell:latest
+
+.. versionadded:: 2.9.0
+   Published, signed container images (:commit:`ee03014`).
 
 
 -------------------
@@ -431,12 +470,15 @@ subcommand accepts, e.g. ``--bind <tab>`` offering ``localhost`` or ``0.0.0.0``)
 * ``hs config get <tab>`` completes configuration keys.
 * ``hs config set OPT <tab>`` suggests the current value for ``OPT``.
 * ``hs client ... --host <tab>`` parses your host files for known hosts.
-* ``hs server ... --auth <tab>`` generates a secure random key.
 * ``hs server ... --port <tab>`` selects an available port on your machine.
 * ``hs list <tab>`` completes known task fields.
 * ``hs list ... -t <tab>`` completes tag keys present in the database.
 * ``hs list ... -t key:<tab>`` completes known values for that tag key.
 * ``hsx ... --ssh-group <tab>`` completes SSH nodelist groups from your config.
+
+.. versionchanged:: 2.9.0
+   :pr:`104`: the completions for ``hs server``, ``hs client`` and ``hs submit`` no longer offer a
+   key option, since those commands refuse a key on the command line.
 
 .. admonition:: Completions that query the database
     :class: note

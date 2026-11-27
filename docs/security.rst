@@ -30,26 +30,37 @@ Architecture
 
 |
 
+.. _security_components:
+
 Components
 ^^^^^^^^^^
 
-*HyperShell* is built on Python's :class:`multiprocessing.managers.BaseManager` and
-:class:`multiprocessing.JoinableQueue` infrastructure. The runtime decomposes into three
-roles:
+.. versionchanged:: 2.9.0
+   :pr:`76`: the server process serves the queues itself, with no separate manager process.
+
+*HyperShell* is built on Python's :class:`multiprocessing.managers.BaseManager` infrastructure,
+serving threading :class:`queue.Queue` objects from within the server process. The runtime
+decomposes into three roles:
 
 * **Submit** ingests shell commands from ``stdin`` or files and writes them to the database
   (SQLite or PostgreSQL) with stable UUIDs.
 
-* **Server** pulls pending tasks from the database, bundles them, and exposes four
-  ``JoinableQueue`` instances to clients via RPC over TCP:
+* **Server** pulls pending tasks from the database, stages them for dispatch, and exposes four
+  queues and a dispatch service to clients via RPC over TCP. The server process itself accepts
+  and handles these connections (there is no separate manager process):
 
-  * ``scheduled`` — task bundles awaiting execution
+  * ``scheduled`` — tasks staged for dispatch
   * ``completed`` — results returned from clients
   * ``heartbeat`` — periodic liveness reports from clients
   * ``confirmed`` — explicit acknowledgement of received bundles
 
-* **Client** connects to the server, pulls bundles from the ``scheduled`` queue, spawns
-  shell subprocesses, and returns results on the ``completed`` queue.
+* **Client** connects to the server and, whenever it is ready for work, requests a bundle of
+  tasks, which the server answers from the tasks staged for the client's zone. It spawns shell
+  subprocesses and returns results on the ``completed`` queue.
+
+  .. versionchanged:: 2.9.0
+     :pr:`78`: a client requests each bundle from the server instead of pulling it from the
+     ``scheduled`` queue.
 
 The ``cluster`` command (``hsx``) composes the three roles in a single process group for
 local-only or SSH-distributed workflows.
@@ -69,8 +80,8 @@ channel:
 2. **Data exposure.** Task definitions, exit status, timing, and heartbeat data travel
    through the queue. Task ``stdout`` and ``stderr`` do *not* — they are written to disk
    on the client (locally, or on a shared filesystem if one is configured) and retrieved
-   on demand over SFTP via :class:`~hypershell.cluster.ssh.SSHConnection` when the
-   operator runs ``hs task info --stdout`` or similar. Without transport encryption, the
+   on demand over SFTP via :class:`~hypershell.core.remote.SSHConnection` when the
+   operator runs ``hs info --stdout`` or similar. Without transport encryption, the
    metadata that *does* flow over the queue (including the authentication handshake) is
    readable on the wire.
 
@@ -83,9 +94,15 @@ channel:
    can reach.
 
 5. **Denial of service.** Neither connection flooding nor application-level resource
-   exhaustion is mitigated by cryptography. The queue transport imposes no handshake timeout,
-   frame-size cap, or connection limit of its own (see the Built-in TLS *Limitations* below),
+   exhaustion is mitigated by cryptography. A TLS queue server closes a connection that does not
+   complete its TLS handshake within ``server.tls.handshake`` (default 30 seconds), and keeps
+   accepting other clients meanwhile. Beyond that the queue transport imposes no frame-size cap
+   or connection limit of its own (see the Built-in TLS *Limitations* below),
    so DoS resistance must come from firewall and rate-limit controls at the network layer.
+
+   .. versionchanged:: 2.9.0
+      :pr:`108`: a TLS queue server closes a connection that does not complete its handshake within
+      ``server.tls.handshake``.
 
 The defenses below address (1)–(3) directly and partially address (4). DoS mitigation is
 provided at the network perimeter, not by the queue transport.
@@ -129,9 +146,14 @@ TLS.
 The :class:`hypershell.core.queue.SecureManager` class selects this serializer when an active
 :class:`hypershell.core.tls.TLSConfig` is supplied. If TLS is disabled (or no configuration
 is found), ``SecureManager`` selects the ``'hypershell-plain'`` serializer instead. Its pair is
-the stock listener and client, with ``TCP_NODELAY`` set on each TCP connection where the
-platform allows it. The framing, the handshake, and every byte on the wire are those of a stock
-``BaseManager``, so cleartext deployments remain supported for constrained environments.
+a cleartext listener and client, with ``TCP_NODELAY`` set on each TCP connection where the
+platform allows it, so cleartext deployments remain supported for constrained environments.
+
+On both pairs the message framing (a length prefix on each message) and the authentication
+handshake are those of a stock ``BaseManager``. Each message inside that framing — every request,
+reply and proxy reference — is encoded by *HyperShell*'s own codec, as JSON over a closed set of
+plain values (see :ref:`Limitations <security-limitations>`, item 2); neither end ever unpickles
+what its peer sends.
 
 |
 
@@ -159,8 +181,16 @@ networks, so the key is exchanged only with the intended server.
 For ``LocalCluster``, ``RemoteCluster``, ``SSHCluster``, and autoscaling invocations,
 *HyperShell* generates a fresh random key for every invocation via ``secrets.token_hex(64)``,
 scoped to that single cluster lifetime; the operator never sees or configures it. For
-standalone ``hs server`` / ``hs client`` deployments, the operator supplies the key via
-configuration, environment, or the ``--auth`` CLI option.
+standalone ``hs server`` / ``hs client`` deployments, the operator supplies the key in the
+``HYPERSHELL_SERVER_AUTH`` environment variable or as ``server.auth`` in the configuration (or its
+``auth_env`` and ``auth_eval`` forms). ``hs server``, ``hs client`` and ``hs submit`` take no key
+on their command lines, which a process listing shows to every user on the host: a key given to one
+of them there is refused with a usage error that does not repeat it, and the command does nothing
+else.
+
+.. versionchanged:: 2.9.0
+   :pr:`104`: a key on the command line is refused; ``hs server``, ``hs client`` and ``hs submit``
+   take it from the environment or the configuration.
 
 To keep the shared secret meaningful, ``hs server`` **refuses to start** with the built-in
 placeholder key and enforces a minimum key policy: the key must be at least 16 characters and
@@ -173,7 +203,7 @@ key generators used in the deployment guides below satisfy this policy.
     When ``hs cluster`` starts its clients as separate processes (``--launcher``, ``--mpi``,
     ``--autoscaling`` and ``--ssh``), the per-invocation key is on no command line, either on
     the launching host or on the client hosts. Every client reads its key from the
-    ``HYPERSHELL_SERVER_AUTH`` environment variable when no ``-k`` is given, and the launch
+    ``HYPERSHELL_SERVER_AUTH`` environment variable (or the configuration), and the launch
     delivers it there.
 
     * **Launcher modes** (``--launcher``, ``--mpi`` and ``--autoscaling``). The launcher is
@@ -192,7 +222,9 @@ key generators used in the deployment guides below satisfy this policy.
       and ``--autoscaling`` with no launcher. If such a launcher needs Open MPI to forward
       the variable, add ``-x HYPERSHELL_SERVER_AUTH`` (the name only) to ``--launcher``. A
       launcher set to drop the environment, such as ``srun --export=NONE``, leaves its
-      clients without the key, so they cannot authenticate.
+      clients without the key, so they cannot authenticate. The launched environment holds no
+      other key variable (see below), so however the key was given to ``hs cluster``, the key
+      the launch sets is the only one its clients see.
       Such a client exits with a ``CRITICAL`` error that names ``HYPERSHELL_SERVER_AUTH`` and
       the launcher not passing the environment as the likely cause. With TLS on, where the
       dropped environment also held the client's TLS settings, the client fails to verify the
@@ -205,8 +237,8 @@ key generators used in the deployment guides below satisfy this policy.
       line there either. With ``--env``, the other ``HYPERSHELL_*`` variables of the launching
       environment are still passed on ssh's command line, one ``NAME=value`` word each, with
       the value quoted for a POSIX shell, so a POSIX login shell on the remote host reads back
-      exactly that value, and no value can run into another word. ``HYPERSHELL_SERVER_AUTH`` is left out by name before any
-      word is built, so it is never among them, whatever the other values hold. (A name that
+      exactly that value, and no value can run into another word. Every key variable is left out by name before any
+      word is built, so none is among them, whatever the other values hold. (A name that
       is not a valid shell variable name is left out too, with a warning.) The launch owns ssh's standard input and always passes ``-T``, so no remote
       terminal is allocated. A ``-t`` or ``-tt`` in ``--ssh-args`` or ``ssh.args``
       therefore has no effect on client launches, and a bare ``-n`` there is dropped with a
@@ -216,8 +248,17 @@ key generators used in the deployment guides below satisfy this policy.
 
     The key is also redacted from *HyperShell*'s own launch logs, at every level.
 
-    Tasks run with their client's environment, except that the client does not pass
-    ``HYPERSHELL_SERVER_AUTH`` to them, and takes that name out of
+    A key variable is any form of ``server.auth`` or ``relay.upstream.auth`` that the
+    configuration reads from the environment (``HYPERSHELL_SERVER_AUTH``, its ``_ENV`` and
+    ``_EVAL`` forms, and the same for ``HYPERSHELL_RELAY_UPSTREAM_AUTH``): key variables are
+    recognised by the matcher wherever *HyperShell* handles them by name.
+
+    .. versionchanged:: 2.9.0
+       :pr:`113`: key variables and relay variables are recognised by the matcher wherever
+       *HyperShell* handles them by name.
+
+    Tasks run with their client's environment, except that the client passes no key variable
+    to them, and takes ``HYPERSHELL_SERVER_AUTH`` out of
     ``OMPI_MCA_mca_base_env_list`` (keeping any other names, and dropping the variable if none
     is left). The client runs the shell commands of ``{% %}`` template patterns, once per
     task, with that same environment. So, whatever the launch mode, neither a task's
@@ -234,9 +275,12 @@ key generators used in the deployment guides below satisfy this policy.
       ``HYPERSHELL_EXPORT_HYPERSHELL_SERVER_AUTH`` variable) hands every task a key the
       operator holds, such as the key of a hand-started ``hs server``. Its values are taken
       literally, so it cannot carry the key an ``hs cluster`` run mints, which no one is shown.
-    * A ``{= =}`` lambda pattern is Python the client evaluates itself, with ``os`` exposed,
-      so ``os.environ`` there is the client's own environment, key included. A template that
-      reads it does so on purpose.
+    * A ``{= =}`` lambda pattern is Python evaluated, with ``os`` exposed, in the process that
+      expands the template, so ``os.environ`` there is that process's own environment. For a
+      client that ``hs cluster`` starts as a process of its own (through a launcher, ``--mpi``,
+      ``--ssh`` or autoscaling), that includes ``HYPERSHELL_SERVER_AUTH``; under the default
+      local mode it holds the variable only if the environment that started ``hs cluster`` set
+      it (see :ref:`templates <templates>`). A template that reads it does so on purpose.
 
     A task that runs a nested ``hs cluster`` needs neither: that run mints its own key for
     its own server and clients.
@@ -338,7 +382,20 @@ modes are supported, in decreasing strength:
 When both ``cafile`` and ``fingerprint`` are set, ``fingerprint`` takes precedence and
 ``cafile`` is ignored.
 
+A `cluster` tells the clients it launches, and a `relay` its site clients, which address to dial:
+its bind address, this host's own name when it binds every interface, or the address given by
+``--advertise`` (or ``server.advertise``; for a `relay`, ``relay.advertise``, since
+``server.advertise`` does not reach a relay). That address must be one the client's certificate
+check accepts. With the system CA bundle, clients check the certificate against the address they
+dial, so advertise a name the certificate carries, or set ``servername``. With CA verification the
+certificate is checked against ``servername`` instead, and fingerprint pinning checks no name.
+
+.. versionadded:: 2.9.0
+   ``--advertise`` and ``server.advertise`` (:pr:`107`); ``relay.advertise`` (:pr:`116`).
+
 |
+
+.. _security-limitations:
 
 Limitations
 ^^^^^^^^^^^
@@ -349,12 +406,39 @@ Understanding these properties matters most for deployments on untrusted network
    authentication key authenticates the *client* to the server; TLS authenticates the
    *server* to the client. There is no certificate-based client identity.
 
-2. **Pickle-serialized RPC.** The queue is built on Python's multiprocessing managers, whose
-   RPC serializes objects with ``pickle`` in both directions. The authentication key and
-   (non-``insecure``) TLS peer verification are the controls that gate this channel: a party
-   that holds the key and reaches the server — or, in ``insecure`` mode, an active
-   man-in-the-middle — can do more than enqueue tasks. Keep the key secret, keep peer
+2. **Closed RPC vocabulary.** The queue is built on Python's multiprocessing managers, but its
+   messages are not pickled. Each end decodes every message it receives into a small, closed set
+   of plain values — ``None``, booleans, numbers, text, bytes, tuples, lists, text-keyed
+   dictionaries, the manager's object references, and the two queue exceptions (empty and full)
+   and remote errors — and refuses anything else: a message outside that set closes its
+   connection (a server logs one warning naming the peer and goes on serving its other
+   clients; a client stops with a version error). A server refuses in the same way a connection
+   whose first request is not one of the manager's public requests, under any interpreter flags. A
+   client also stops with a version error at a server that offers any method outside its own lists
+   of the queue's methods. Neither end
+   unpickles bytes its peer sends, and a client builds its proxies from its own method lists, so
+   neither can make the other run code through the transport itself.
+
+   This bounds what a peer can do, without making it trustworthy. A party that holds the key and
+   reaches the server — or, in ``insecure`` mode, an active man-in-the-middle — can still call the
+   operations the queue exposes: put tasks on the queue, take tasks from it, and report results.
+   A server (or whoever can act as one) still hands its clients the commands they run. The
+   vocabulary gives no per-peer identity beyond the one shared key, does not bind authentication to
+   the TLS channel, adds no transport-level denial-of-service controls (item 4), and does not make
+   a client safe against a compromised server's commands. Keep the key secret, keep peer
    verification enabled, and treat every host that holds the key as inside the trust boundary.
+
+   .. versionchanged:: 2.9.0
+      :pr:`123`: the queue's messages are encoded as a closed vocabulary of plain values, no longer
+      pickled. A server or client of 2.9.0a10 or later cannot connect to one of 2.9.0a9 or earlier,
+      in either direction: a newer server logs one warning naming the older peer, which exits at
+      once with a message naming the version mismatch; a newer client, relay or ``hs submit`` exits
+      at once with one error naming the older server's framing. Run matching versions on every host.
+      A client builds its proxies from its own method lists and stops with a version error at a
+      server that offers any other method. :class:`hypershell.core.queue.SecureManager` accepts only
+      its own two serializers. The client-side refusals above belong to HyperShell's own queue
+      client: code that uses ``SecureManager`` directly as a client should register each type with
+      an explicit proxy type and list of methods.
 
 3. **Self-signed by default; single-leaf trust.** The auto-generated certificate is
    self-signed (not chained to a public CA), valid for ten years, and has no revocation path;
@@ -367,12 +451,19 @@ Understanding these properties matters most for deployments on untrusted network
    this with ``insecure`` mode). Rotating the auto-generated certificate requires
    redistributing the new certificate or fingerprint to clients.
 
-4. **No transport-level DoS controls.** The queue sets no per-connection handshake timeout, no
-   inbound frame-size cap, and no limit on concurrent connections or worker threads. A peer
+4. **No transport-level DoS controls.** Beyond a deadline on the TLS handshake, the queue sets no
+   inbound frame-size cap, and no limit on concurrent connections or worker threads. A TLS queue
+   server closes a connection that has not completed its TLS handshake within
+   ``server.tls.handshake`` (default 30 seconds) counted from when it was accepted, whatever the
+   peer sends meanwhile, and keeps accepting other clients while handshakes are pending. A peer
    that reaches the listener — including a slow peer that stalls before authenticating — can
    consume server resources, and failed authentication/handshake attempts are handled by the
-   underlying multiprocessing layer without surfacing in *HyperShell*'s logs. Denial-of-service
+   underlying multiprocessing layer without surfacing in *HyperShell*'s logs, except that a
+   connection closed at the handshake deadline is logged. Denial-of-service
    protection must come from the network layer (see the deployment guides).
+
+   .. versionchanged:: 2.9.0
+      :pr:`108`: the ``server.tls.handshake`` deadline.
 
 5. **IPv4 only.** The built-in TLS queue listener binds ``AF_INET`` (IPv4). On IPv6-only or
    IPv6-preferred networks, clients must reach the server over an IPv4 address.
@@ -476,10 +567,11 @@ SSH for Cluster Distribution and Output Retrieval
 Two *HyperShell* features rely on SSH:
 
 * :class:`~hypershell.cluster.ssh.SSHCluster` distributes client processes to remote hosts
-  via ``paramiko``. The host list, key material, and remote shell are all configured
-  through the user's standard ``~/.ssh/config``.
+  by invoking the system ``ssh`` binary (one ``subprocess`` per host); the host list, key
+  material, and remote shell are configured through the user's standard ``~/.ssh/config``.
 * ``hs info <task> --stdout`` / ``--stderr`` fetches the captured task output from the
-  client host via SFTP (also ``paramiko``), since output is *not* sent through the queue.
+  client host over SFTP — via ``paramiko`` (:class:`~hypershell.core.remote.SSHConnection`) —
+  since output is *not* sent through the queue.
 
 Security for these paths is provided entirely by SSH itself — host key verification, key
 rotation, ``authorized_keys`` policy, ``StrictHostKeyChecking``, and so on. *HyperShell*
@@ -487,6 +579,62 @@ does not bypass or weaken any of these controls. Treat the SSH configuration tha
 *HyperShell* uses with the same care you would treat any other SSH-based automation:
 prefer key-based authentication, disable password auth, keep ``known_hosts`` populated,
 and audit ``authorized_keys`` for unexpected entries.
+
+-------------------
+
+.. _security_relays:
+
+Relays
+------
+
+|
+
+.. versionadded:: 2.9.0
+   :pr:`82`
+
+A relay (``hs relay``, see :ref:`cli_relay`) joins a site to an upstream *server* across a wide-area
+network. It is a *client* upstream and a *server* at its site, so it stands between two
+authentication domains, and each keeps its own key.
+
+* **Upstream.** The relay authenticates to the upstream *server* with the upstream key, read from
+  ``[relay.upstream]`` (``auth``, or its ``auth_env`` and ``auth_eval`` forms), never from
+  ``[server]`` and never from the relay's command line, which has no key option. The
+  connection uses TLS, configured by ``[relay.upstream.tls]`` alone, so the site keeps the relay's
+  own ``[server.tls]``. Across a wide-area hop, verify the upstream *server*: give
+  ``relay.upstream.tls.cafile`` (a certificate authority, or the upstream *server*'s own
+  certificate) or pin its ``relay.upstream.tls.fingerprint``. ``--no-tls`` turns TLS off on this
+  hop only, with a warning; do not use it outside a trusted network.
+
+* **At the site.** The relay-local *server* mints a fresh key for each run, as an autoscaling
+  ``hs cluster`` does, and hands it to each site *client* in its environment
+  (``HYPERSHELL_SERVER_AUTH``), never on its command line, as described under
+  *How cluster launches hand the key to their clients* above. The launcher must pass the
+  environment through. A site *client* passes that key to none of its tasks.
+
+* **The upstream key stays in the relay process.** Site *clients* inherit the relay's environment,
+  and tasks their *client*'s, so before the first site *client* starts the relay removes from its own
+  environment every relay setting (``HYPERSHELL_RELAY_*``, and any other name the configuration
+  reads as a relay setting) and every variable whose name or value holds the upstream key. When ``HYPERSHELL_CONFIG_FILE`` names a file with relay settings or the key
+  in it, the site is given a copy without them (readable by its owner only, beside the relay
+  database, and removed when the relay ends; a relay ended by SIGKILL, or by a second SIGTERM while
+  it ends, leaves it behind, and the next relay on that database writes over it). The relay refuses
+  to start if a site *client*'s command line (launcher, launcher arguments or template), or a
+  variable exported to tasks (``[export]``), would carry the upstream key. This holds for every zone
+  a relay serves: each zone's *clients* are launched the same way.
+
+* **What the fence cannot cover.** It governs what the relay hands on: command lines and
+  environments. A site *client* on a host that reads the same user or system configuration file as
+  the relay reads whatever ``[relay.upstream]`` holds there. Keep a literal upstream key out of a
+  shared configuration file: use ``auth_env`` or ``auth_eval``, or give the relay a configuration
+  file of its own through ``HYPERSHELL_CONFIG_FILE``.
+
+* **The roster.** A relay lists its site *clients* upstream by id and host only. Upstream they are
+  attributed to the relay's site and the relay; a roster never claims a *client* of another relay.
+
+A relay keeps its own SQLite database (see :ref:`database`); it holds the tasks the relay received
+and their results until they are handed back, so protect it as you would the task database.
+
+|
 
 -------------------
 
@@ -902,7 +1050,8 @@ Independent of the deployment style above:
 
 * **Monitor connection patterns.** *HyperShell* does not itself log failed authentication or
   failed TLS handshakes — they are handled by the underlying multiprocessing / TLS layer and
-  not surfaced in the application log — so watch for probes and connection surges at the
+  not surfaced in the application log, except that a connection closed at the TLS handshake
+  deadline (``server.tls.handshake``) is logged — so watch for probes and connection surges at the
   network layer (firewall counters, ``fail2ban``, flow logs) rather than expecting them in
   *HyperShell*'s output.
 

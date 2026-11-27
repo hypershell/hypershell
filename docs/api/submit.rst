@@ -14,6 +14,11 @@ or using one of the provided high-level functions, :meth:`submit_from`, :meth:`s
 All of the parameters used below are largely the same in each instance. Configuration files have
 no impact when using the library; i.e., default values are not overridden by configuration.
 
+.. versionchanged:: 2.9.0
+   :pr:`125`: the ranges the configuration and each command's options are held to (see the
+   :ref:`parameter reference <config_params>`) do not apply here: a value passed as an explicit
+   argument is used as given.
+
 -------------------
 
 Functions
@@ -22,6 +27,9 @@ Functions
 |
 
 .. autofunction:: submit_from
+
+.. versionchanged:: 2.9.0
+   :pr:`48`: ``source`` may yield dictionaries as well as strings, as ``--from-json`` does.
 
 |
 
@@ -33,6 +41,9 @@ Classes
 -------
 
 |
+
+.. versionchanged:: 2.9.0
+   :pr:`48`: ``source`` on both classes may yield dictionaries as well as strings.
 
 .. autoclass:: SubmitThread
     :show-inheritance:

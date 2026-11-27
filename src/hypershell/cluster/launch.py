@@ -10,33 +10,50 @@ hand the key to the client in the launched process's environment, as
 :const:`AUTH_ENV`, which every client reads as the default for its key. SSH launches
 write the key to ssh's standard input, and a POSIX `sh` step on the remote host reads
 it into :const:`AUTH_ENV` before it starts the client.
+
+An autoscaling cluster starts clients zone by zone through a :class:`LaunchActuator`, which
+builds one launch per zone; a launch built with `expose_zone` names its zone to the launcher.
+
+Every launch mode tells its clients the address :func:`advertised_host` gives: an address the
+user names, else the bind address when the server binds one address, else this host's own name.
 """
 
 
 # Type annotations
 from __future__ import annotations
-from typing import Tuple, List, Dict, FrozenSet, Iterable, Mapping, Sequence, Optional, Final
+from typing import Tuple, List, Dict, Set, FrozenSet, Iterable, Mapping, Sequence, Callable, Optional, Final
 
 # Standard libs
 import io
 import os
 import re
+import sys
 import shlex
+from decimal import Decimal
 from dataclasses import dataclass, field
 from subprocess import Popen, PIPE
 
 # Internal libs
-from hypershell.core.config import load_task_env
-from hypershell.core.logging import Logger
+from hypershell.core.config import load_task_env, is_key_variable, WILDCARD_BINDS
+from hypershell.core.logging import Logger, HOSTNAME
 from hypershell.client import AUTH_ENV, OMPI_ENV_LIST
+from hypershell.data.model import DEFAULT_ZONE_NAME
+from hypershell.cluster.demand import ZoneRef
 
 # Public interface
-__all__ = ['AUTH_ENV', 'OMPI_ENV_LIST', 'MPI_LAUNCHERS', 'SSH_NO_KEY_MESSAGE', 'ClientLaunch', 'client_launch',
+__all__ = ['AUTH_ENV', 'OMPI_ENV_LIST', 'ZONE_ENV', 'ZONE_WORD', 'MPI_LAUNCHERS', 'SSH_NO_KEY_MESSAGE',
+           'WILDCARD_BINDS', 'ClientLaunch', 'LaunchActuator', 'advertised_host', 'client_launch',
            'is_mpi_launcher', 'ssh_env_exports', 'ssh_launch_args', 'ssh_remote_script', 'redact_secrets']
 
 # Initialize logger
 log = Logger.with_name('hypershell.cluster')
 
+
+ZONE_ENV: Final[str] = 'HYPERSHELL_ZONE'
+"""Variable that names the zone of a launch to the launcher, in the launched process's environment."""
+
+ZONE_WORD: Final[str] = '{zone}'
+"""Text replaced by the zone's name in the launcher and its arguments of a launch that exposes its zone."""
 
 MPI_LAUNCHERS: Final[FrozenSet[str]] = frozenset({'mpirun', 'mpiexec', 'orterun', 'prterun'})
 """Program names of launchers that Open MPI may provide, which forward the key variable only by name."""
@@ -66,6 +83,27 @@ SSH_OPTIONS_WITH_VALUE: Final[str] = 'BbcDEeFIiJLlmOoPpQRSWw'
 """Letters of the ssh options that take a value."""
 
 
+def advertised_host(bind: str, advertise: Optional[str] = None) -> str:
+    """
+    The address launched clients are told to dial, for a server bound to `bind`.
+
+    A non-empty `advertise` is the address, whatever the bind. Otherwise a server bound to one
+    address is dialed there, and a server bound to every interface (:const:`WILDCARD_BINDS`) is
+    dialed by this host's own name (:const:`~hypershell.core.logging.HOSTNAME`).
+
+    Example:
+        >>> advertised_host('10.0.0.5')
+        '10.0.0.5'
+        >>> advertised_host('0.0.0.0') == HOSTNAME
+        True
+        >>> advertised_host('0.0.0.0', advertise='head.cluster')
+        'head.cluster'
+    """
+    if advertise:
+        return advertise
+    return HOSTNAME if bind in WILDCARD_BINDS else bind
+
+
 @dataclass(frozen=True)
 class ClientLaunch:
     """
@@ -86,11 +124,16 @@ class ClientLaunch:
 
         The launched process gets the inherited environment, the task environment
         from configuration, and the additions in `env`, in that order; or, with
-        `inherit_env`, exactly the inherited environment. The environment of the
-        calling process is never modified. When there is `stdin`, it is written to
-        the process's standard input, which is then closed.
+        `inherit_env`, the inherited environment alone. Every variable that gives a key
+        (see :func:`~hypershell.core.config.is_key_variable`) is left out of the first two,
+        so the key this launch sets in `env` is the only one the process is given. The
+        environment of the calling process is never modified. When there is `stdin`, it is
+        written to the process's standard input, which is then closed.
         """
-        env = None if self.inherit_env else {**os.environ, **load_task_env(), **self.env}
+        given = os.environ if self.inherit_env else {**os.environ, **load_task_env()}
+        env = {name: value for name, value in given.items() if not is_key_variable(name)}
+        if not self.inherit_env:
+            env.update(self.env)
         if self.stdin is None:
             return Popen(self.argv, env=env, **popen_options)
         proc = Popen(self.argv, env=env, stdin=PIPE, **popen_options)
@@ -111,9 +154,9 @@ class ClientLaunch:
         """
         Shell-quoted command line for logging, with any key option value redacted.
 
-        A word that assigns :const:`AUTH_ENV` shows the name only: each word is parsed as a
-        shell would parse it, and any `NAME=value` it holds whose name is :const:`AUTH_ENV`
-        redacts the whole word, however the word is quoted. The last word of an SSH launch
+        A word that assigns a key variable is shown as `AUTH_ENV=***`: each word is parsed as a
+        shell would parse it, and any `NAME=value` it holds whose name gives a key
+        (:func:`assigns_key`) redacts the whole word, however the word is quoted. The last word of an SSH launch
         (the one with `stdin`) is already quoted for the remote shell and ssh sends it as it
         is, so it is shown as it is.
         """
@@ -144,8 +187,10 @@ def client_launch(remote_exe: str,
                   client_memory: int = None,
                   client_timeout: int = None,
                   task_timeout: int = None,
-                  ratelimit: int = None,
-                  tls_enabled: bool = True) -> ClientLaunch:
+                  ratelimit: float = None,
+                  tls_enabled: bool = True,
+                  zone: Optional[str] = None,
+                  expose_zone: bool = False) -> ClientLaunch:
     """
     Build the client invocation for a cluster launch.
 
@@ -161,10 +206,19 @@ def client_launch(remote_exe: str,
     With `ssh_host`, the command line is `launcher` and `launcher_args`, then `-T` (no
     remote terminal, whatever those arguments or the ssh configuration ask for), the host,
     one `NAME=value` word for each of `ssh_exports` (see :func:`ssh_env_exports`, which never
-    exports :const:`AUTH_ENV`), and a remote `sh -c` step (see :func:`ssh_remote_script`).
-    The key is the launch's standard input, and ssh gets the caller's environment unchanged.
+    exports a key variable), and a remote `sh -c` step (see :func:`ssh_remote_script`).
+    The key is the launch's standard input, and ssh gets the caller's environment without any
+    variable that gives a key.
     The launch owns that input, so a bare `-n` among the ssh arguments is dropped (see
     :func:`ssh_launch_args`).
+
+    With `expose_zone` (launcher mode only; SSH launches refuse it), the launch names its zone
+    to the launcher: :const:`ZONE_WORD` in any word of `launcher` or `launcher_args` is replaced by
+    the zone's name, and the environment gets :const:`ZONE_ENV` set to it. The name is `zone`, or
+    `default` when `zone` is None. Words are replaced after splitting, so a name with a space stays
+    one word and other braces are untouched. The client's own options, its template included, are
+    never replaced, and Open MPI is not asked to forward :const:`ZONE_ENV`: the launcher reads it
+    where it starts, and the client gets its zone from `--zone` alone.
 
     The calling process's environment is read, never modified.
 
@@ -180,20 +234,133 @@ def client_launch(remote_exe: str,
                              no_confirm=no_confirm, capture=capture, monitor=monitor,
                              client_cores=client_cores, client_memory=client_memory,
                              client_timeout=client_timeout, task_timeout=task_timeout, ratelimit=ratelimit,
-                             tls_enabled=tls_enabled)
+                             tls_enabled=tls_enabled, zone=zone)
     if ssh_host is not None:
+        if expose_zone:
+            raise ValueError('An SSH launch does not expose its zone (a launcher mode does)')
         script = ssh_remote_script(remote_exe, options)
         exports = ssh_env_exports(ssh_exports or {})
         return ClientLaunch(argv=[*launcher[:1], *ssh_launch_args([*launcher[1:], *launcher_args]),
                                   '-T', ssh_host, *exports, 'sh', '-c', shlex.quote(script)],
                             env={}, stdin=auth + '\n', inherit_env=True)
     launcher_words, env = [*launcher, *launcher_args], {AUTH_ENV: auth}
+    if expose_zone:
+        name = DEFAULT_ZONE_NAME if zone is None else zone
+        launcher_words = [word.replace(ZONE_WORD, name) for word in launcher_words]
+        env[ZONE_ENV] = name
     if launcher and is_mpi_launcher(launcher[0]):
         if any(is_forward_option(word) for word in launcher_words[1:]):
             launcher_words.extend([OMPI_FORWARD, AUTH_ENV])
         else:
             env[OMPI_ENV_LIST] = ompi_env_list()
     return ClientLaunch(argv=[*launcher_words, remote_exe, 'client', *options], env=env)
+
+
+class LaunchActuator:
+    """
+    Starts clients zone by zone and keeps the processes it started. It never terminates one.
+
+    The launch of the `own` zone (the default zone if not given) is `launch`. The launch of any
+    other zone is built by `launch_for` at the zone's first client and kept for every later one;
+    its description is logged once, then. Without `launch_for`, every client is started with
+    `launch`, whatever zone is asked for.
+
+    `clients` is the flat list of started processes that have not yet been cleaned, every zone
+    together. It may be assigned; a process the actuator did not start counts in the own zone.
+    """
+
+    launch: ClientLaunch
+    own: ZoneRef
+    launch_for: Optional[Callable[[ZoneRef], ClientLaunch]]
+
+    def __init__(self: LaunchActuator, launch: ClientLaunch, own: Optional[ZoneRef] = None,
+                 launch_for: Optional[Callable[[ZoneRef], ClientLaunch]] = None) -> None:
+        """Initialize with the own zone's launch and the builder of every other zone's."""
+        self.launch = launch
+        self.own = own if own is not None else ZoneRef.from_name(None)
+        self.launch_for = launch_for
+        self.launches: Dict[str, ClientLaunch] = {self.own.id: launch}
+        self.described: Set[str] = set()
+        self._clients: List[Popen] = []
+        self.zones: Dict[int, str] = {}
+        self.names: Dict[str, str] = {self.own.id: self.own.name}
+
+    @property
+    def clients(self: LaunchActuator) -> List[Popen]:
+        """Started processes not yet cleaned, every zone together."""
+        return self._clients
+
+    @clients.setter
+    def clients(self: LaunchActuator, value: List[Popen]) -> None:
+        """Replace the started processes; zones are kept for those the actuator started."""
+        self._clients = value
+        kept = {id(proc) for proc in value}
+        self.zones = {key: zone for key, zone in self.zones.items() if key in kept}
+
+    def launched(self: LaunchActuator) -> Dict[str, int]:
+        """Started processes not yet cleaned, per zone id."""
+        counts: Dict[str, int] = {}
+        for proc in self._clients:
+            zone = self.zones.get(id(proc), self.own.id)
+            counts[zone] = counts.get(zone, 0) + 1
+        return counts
+
+    def zone_of(self: LaunchActuator, proc: Popen) -> ZoneRef:
+        """The zone `proc` was started in (the own zone for a process the actuator did not start), while not cleaned."""
+        zone = self.zones.get(id(proc), self.own.id)
+        return ZoneRef(zone, self.names.get(zone, self.own.name))
+
+    def launch_of(self: LaunchActuator, zone: ZoneRef) -> ClientLaunch:
+        """The launch of `zone`, built at its first use and kept."""
+        if zone.id not in self.launches:
+            self.launches[zone.id] = self.launch if self.launch_for is None else self.launch_for(zone)
+        return self.launches[zone.id]
+
+    def describe(self: LaunchActuator, zone: Optional[ZoneRef] = None) -> None:
+        """Log the launch of `zone` (the own zone if not given), once."""
+        zone = zone if zone is not None else self.own
+        if zone.id not in self.described:
+            self.described.add(zone.id)
+            log.debug(f'Autoscale launcher (zone {zone.name}): ' + self.launch_of(zone).describe())
+
+    def launch_one(self: LaunchActuator, zone: Optional[ZoneRef] = None) -> Popen:
+        """Start one client in `zone` (the own zone if not given)."""
+        zone = zone if zone is not None else self.own
+        self.describe(zone)
+        proc = self.launch_of(zone).start(stdout=sys.stdout, stderr=sys.stderr, bufsize=0, universal_newlines=True)
+        log.info(f'Autoscale adding client ({proc.pid}, zone: {zone.name})')
+        self._clients.append(proc)
+        self.zones[id(proc)] = zone.id
+        self.names[zone.id] = zone.name
+        return proc
+
+    def apply(self: LaunchActuator, desired: Mapping[ZoneRef, int]) -> int:
+        """Start the clients each zone lacks to reach its `desired` count; return how many were started."""
+        launched = self.launched()
+        started = 0
+        for zone, count in desired.items():
+            for _ in range(count - launched.get(zone.id, 0)):
+                self.launch_one(zone)
+                started += 1
+        return started
+
+    def clean(self: LaunchActuator) -> List[Popen]:
+        """Drop the processes that have exited, and return them; each non-zero exit is warned about, naming its pid and zone."""
+        exited = []
+        for i, client in enumerate(self._clients):
+            log.trace(f'Autoscale clean ({i+1}: {client.pid})')
+            status = client.poll()
+            if status is not None:
+                exited.append(client)
+                if status != 0:
+                    zone = self.zone_of(client)
+                    log.warning(f'Autoscale client ({client.pid}, zone: {zone.name}) exited with status {status}')
+                else:
+                    log.info(f'Autoscale client disconnected ({client.pid})')
+        if exited:
+            gone = {id(client) for client in exited}
+            self.clients = [client for client in self._clients if id(client) not in gone]
+        return exited
 
 
 def is_mpi_launcher(program: str) -> bool:
@@ -220,9 +387,11 @@ def ssh_env_exports(env: Mapping[str, str]) -> List[str]:
     """
     One `NAME=value` word per variable in `env`, for the remote shell of an SSH launch.
 
-    :const:`AUTH_ENV` is left out by name before anything is quoted. Each value is quoted
-    with :func:`shlex.quote`, so a POSIX shell reads it back as exactly that value, and
-    no value can join or split words. A name that a shell cannot assign is left out.
+    Every variable that gives a key, in any form the matcher recognises (see
+    :func:`~hypershell.core.config.is_key_variable`), is left out by name before anything is
+    quoted. Each value is quoted with :func:`shlex.quote`, so a POSIX shell reads it back as
+    exactly that value, and no value can join or split words. A name that a shell cannot assign
+    is left out.
 
     Example:
         >>> ssh_env_exports({'HYPERSHELL_A': 'a b', AUTH_ENV: 'secret', 'HYPERSHELL_B': 'b'})
@@ -230,7 +399,7 @@ def ssh_env_exports(env: Mapping[str, str]) -> List[str]:
     """
     words = []
     for name, value in env.items():
-        if name == AUTH_ENV:
+        if is_key_variable(name):
             continue
         if not SHELL_NAME.fullmatch(name):
             log.warning(f'Not exporting {name!r} to remote clients: not a shell variable name')
@@ -240,12 +409,12 @@ def ssh_env_exports(env: Mapping[str, str]) -> List[str]:
 
 
 def assigns_key(word: str) -> bool:
-    """True if `word`, parsed as a shell parses it, holds a `NAME=value` whose name is :const:`AUTH_ENV`."""
+    """True if `word`, parsed as a shell parses it, holds a `NAME=value` whose name gives a key (`is_key_variable`)."""
     try:
         tokens = shlex.split(word)
     except ValueError:  # Unbalanced quotes: look at the word as it is
         tokens = word.split()
-    return any(token.split('=', 1)[0] == AUTH_ENV and '=' in token for token in tokens)
+    return any('=' in token and is_key_variable(token.split('=', 1)[0]) for token in tokens)
 
 
 def ssh_launch_args(args: Sequence[str]) -> List[str]:
@@ -285,7 +454,7 @@ def ssh_remote_script(remote_exe: str, options: List[str]) -> str:
     so the key is on no command line on the remote host either. If no key arrives it prints
     :const:`SSH_NO_KEY_MESSAGE` and exits 1 before any client starts. Otherwise it exports
     the variable and replaces itself with the client. The options are shell-quoted, so any
-    template survives; `remote_exe` is not, so `~` and variables in it still expand.
+    template or name survives; `remote_exe` is not, so `~` and variables in it still expand.
 
     The launch passes the script as one single-quoted word to `sh -c`, so the remote
     account's login shell only has to parse that one word, whatever shell it is.
@@ -299,6 +468,35 @@ def ssh_remote_script(remote_exe: str, options: List[str]) -> str:
             f'case ${AUTH_ENV} in "") echo "{SSH_NO_KEY_MESSAGE}" >&2; exit 1;; esac; '
             f'export {AUTH_ENV}; '
             f'exec {remote_exe} client {shlex.join(options)}')
+
+
+def plain_seconds(value: float) -> str:
+    """
+    Seconds written as a plain decimal, never with an exponent.
+
+    A client of an earlier release reads the word with float(), and a client of this release with
+    the duration forms, which take no exponent. A value str() writes without one is written the same.
+
+    Example:
+        >>> plain_seconds(-600.0), plain_seconds(0), plain_seconds(1e-05)
+        ('-600.0', '0', '0.00001')
+    """
+    return format(Decimal(repr(value)), 'f')
+
+
+def plain_rate(value: int | float) -> str:
+    """
+    Tasks per second as a word a client reads back exactly: a whole rate as an integer, any other as
+    a plain decimal.
+
+    A client of an earlier release reads the word with int(), so a whole rate keeps that form; a
+    fractional rate needs a client of this release.
+
+    Example:
+        >>> plain_rate(5), plain_rate(5.0), plain_rate(0), plain_rate(0.5), plain_rate(1e-05)
+        ('5', '5', '0', '0.5', '0.00001')
+    """
+    return str(int(value)) if float(value).is_integer() else plain_seconds(float(value))
 
 
 def client_options(address: Tuple[str, int],
@@ -316,12 +514,13 @@ def client_options(address: Tuple[str, int],
                    client_memory: Optional[int],
                    client_timeout: Optional[int],
                    task_timeout: Optional[int],
-                   ratelimit: Optional[int],
-                   tls_enabled: bool) -> List[str]:
+                   ratelimit: Optional[float],
+                   tls_enabled: bool,
+                   zone: Optional[str]) -> List[str]:
     """The `hs client` options shared by every launch mode (never the key)."""
     host, port = address
-    options = ['-H', host, '-p', str(port), '-N', str(num_threads), '-b', str(bundlesize), '-w', str(bundlewait),
-               '-t', template, '-d', str(delay_start), '-S', str(task_signalwait)]
+    options = ['-H', host, '-p', str(port), '-N', str(num_threads), '-b', str(bundlesize),
+               '-w', plain_seconds(bundlewait), '-t', template, '-d', plain_seconds(delay_start), '-S', str(task_signalwait)]
     if no_confirm:
         options.append('--no-confirm')
     if capture:
@@ -333,15 +532,17 @@ def client_options(address: Tuple[str, int],
     if client_memory is not None:
         options.extend(['-M', str(client_memory)])
     if client_timeout is not None:
-        options.extend(['-T', str(client_timeout)])
+        options.extend(['-T', plain_seconds(client_timeout)])
     if task_timeout is not None:
         options.extend(['-W', str(task_timeout)])
     if ratelimit is not None:
-        options.extend(['-R', str(ratelimit)])
+        options.extend(['-R', plain_rate(ratelimit)])
     if not tls_enabled:
         # TLS material is resolved by each client from its own site/config (identical to
         # the server's on a shared filesystem); only the disabled state must be propagated.
         options.append('--no-tls')
+    if zone is not None:
+        options.extend(['--zone', zone])
     return options
 
 

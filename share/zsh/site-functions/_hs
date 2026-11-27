@@ -119,7 +119,7 @@ _hs_cached() {
 (( $+functions[_hs_update_args] )) || _hs_update_args() {
     local -a assigns f k
     f=( ${=$(_hs_cached fields hs list --fields)} )
-    for k in $f; do [[ $k != id ]] && assigns+=( "${k}=" ); done
+    for k in $f; do [[ $k != id && $k != tag ]] && assigns+=( "${k}=" ); done
     k=( ${(f)"$(_hs_cached tagkeys hs list --tag-keys)"} )
     local key; for key in $k; do assigns+=( "${key}:" ); done
     compadd -S '' -- $assigns
@@ -144,6 +144,7 @@ function _hs() {
         'cluster:Run managed cluster'
         'server:Run server in stand-alone mode'
         'client:Run individual client directly'
+        'relay:Run relay for one site'
         'submit:Submit tasks to the database'
         'initdb:Initialize database'
         'info:Get metadata/status/outputs of task'
@@ -170,6 +171,7 @@ function _hs() {
                 cluster) _hs_cluster ;;
                 server)  _hs_server ;;
                 client)  _hs_client ;;
+                relay)   _hs_relay ;;
                 submit)  _hs_submit ;;
                 initdb)  _hs_initdb ;;
                 config)  _hs_config ;;
@@ -270,6 +272,8 @@ function _hs_config_set() {
                 server.bind)       _values 'bind address' localhost 127.0.0.1 0.0.0.0 ;;
                 server.auth)       _hs_authkey ;;
                 autoscale.policy)  _values 'autoscale policy' fixed dynamic ;;
+                autoscale.distribution) _values 'autoscale distribution' spread fill ;;
+                relay.min|relay.max|relay.init) _values 'site clients per zone' 0 1 2 4 8 16 ;;
                 console.theme)     _hs_themes ;;
                 *)
                     local current_value
@@ -341,6 +345,7 @@ function _hs_task_submit() {
     _arguments -s -S \
         '(-h --help)'{-h,--help}'[Show this message and exit]' \
         '*'{-t,--tag}'[Assign tags as key:value]:tag:_hs_tags' \
+        '--zone[Zone of the task]:zone:' \
         '(-)--[End of options; task arguments follow]' \
         '*::task arguments:_normal'
 }
@@ -352,7 +357,7 @@ function _hs_task_submit() {
 function _hs_info() {
     _arguments -s \
         '(-h --help)'{-h,--help}'[Show this message and exit]' \
-        '(-f --format --json --yaml)'{-f,--format}'[Format task info]:format:(normal json yaml)' \
+        '(-f --format --json --yaml)'{-f,--format}'[Format task info]:format:(normal card json yaml)' \
         '(-f --format --json --yaml)--json[Format task metadata as JSON]' \
         '(-f --format --json --yaml)--yaml[Format task metadata as YAML]' \
         '(--stdout --stderr --perf -x --extract)'{-x,--extract}'[Print a single field]:field:_hs_fields' \
@@ -370,11 +375,11 @@ function _hs_info() {
 function _hs_wait() {
     _arguments -s \
         '(-h --help)'{-h,--help}'[Show this message and exit]' \
-        '(-n --interval)'{-n,--interval}'[Seconds between polling (default: 5)]:seconds:(5 10 30 60)' \
+        '(-n --interval)'{-n,--interval}'[Time between polling; seconds, 30s, 5m, 1h30m, or a Slurm time (default: 5)]:seconds:(5 10 30 60 1m)' \
         '(-i --info -s --status -r --return)'{-i,--info}'[Print info on task]' \
         '(-i --info -s --status -r --return)'{-s,--status}'[Print exit status for task]' \
         '(-i --info -s --status -r --return)'{-r,--return}'[Use exit status from task]' \
-        '(-f --format --json --yaml)'{-f,--format}'[Format task info]:format:(normal json yaml)' \
+        '(-f --format --json --yaml)'{-f,--format}'[Format task info]:format:(normal card json yaml)' \
         '(-f --format --json --yaml)--json[Format info as JSON]' \
         '(-f --format --json --yaml)--yaml[Format info as YAML]' \
         '1:task UUID:_hs_task_ids'
@@ -387,7 +392,7 @@ function _hs_wait() {
 function _hs_run() {
     _arguments -s -S \
         '(-h --help)'{-h,--help}'[Show this message and exit]' \
-        '(-n --interval)'{-n,--interval}'[Seconds between polling (default: 5)]:seconds:(5 10 30 60)' \
+        '(-n --interval)'{-n,--interval}'[Time between polling; seconds, 30s, 5m, 1h30m, or a Slurm time (default: 5)]:seconds:(5 10 30 60 1m)' \
         '*'{-t,--tag}'[Assign tags as key:value]:tag:_hs_tags' \
         '(-)--[End of options; task command follows]' \
         '*::task command:_normal'
@@ -400,22 +405,26 @@ function _hs_run() {
 function _hs_list() {
     _arguments -s \
         '(-h --help)'{-h,--help}'[Show this message and exit]' \
+        '(--all -l --limit -c --count)--all[Dump all results (required past 1000 tasks)]' \
         '*'{-w,--where}'[Filter on conditional expression]:condition:_hs_fields' \
         '*'{-t,--with-tag}'[Filter by tag]:tag:_hs_tags' \
         '(-g --group)'{-g,--group}'[Filter by group]:group:' \
+        '--part[Filter by partition (0 is the main database)]:partition:' \
         '(-s --order-by)'{-s,--order-by}'[Order output by field]:field:_hs_fields' \
         '--desc[Descending order (requires --order-by)]' \
-        '(-F --failed -C --completed -S --succeeded -R --remaining)'{-F,--failed}'[Alias for -w "exit_status != 0"]' \
-        '(-F --failed -C --completed -S --succeeded -R --remaining)'{-S,--succeeded}'[Alias for -w "exit_status == 0"]' \
-        '(-F --failed -C --completed -S --succeeded -R --remaining)'{-C,--completed}'[Alias for -w "exit_status != null"]' \
-        '(-F --failed -C --completed -S --succeeded -R --remaining)'{-R,--remaining}'[Alias for -w "exit_status == null"]' \
+        '(-F --failed -C --completed -S --succeeded -R --remaining -X --cancelled)'{-F,--failed}'[Alias for -w "exit_status != 0"]' \
+        '(-F --failed -C --completed -S --succeeded -R --remaining -X --cancelled)'{-S,--succeeded}'[Alias for -w "exit_status == 0"]' \
+        '(-F --failed -C --completed -S --succeeded -R --remaining -X --cancelled)'{-C,--completed}'[Alias for -w "exit_status != null"]' \
+        '(-F --failed -C --completed -S --succeeded -R --remaining -X --cancelled)'{-R,--remaining}'[Alias for -w "exit_status == null"]' \
+        '(-F --failed -C --completed -S --succeeded -R --remaining -X --cancelled)'{-X,--cancelled}'[Alias for -w "exit_status == -1"]' \
         '--retries[Alias for -w "attempt > 1"]' \
-        '(-f --format --json --csv)'{-f,--format}'[Format output]:format:(normal plain table csv json)' \
+        '--signal[Match tasks killed by signal NAME]:signal:(HUP INT QUIT ABRT KILL TERM)' \
+        '(-f --format --json --csv)'{-f,--format}'[Format output]:format:(normal card plain table csv json)' \
         '(-f --format --json --csv)--json[Format output as JSON]' \
         '(-f --format --json --csv)--csv[Format output as CSV]' \
         '(-d --delimiter)'{-d,--delimiter}'[Field separator for plain/csv formats]:delimiter:(, \; \|)' \
-        '(-l --limit -c --count)'{-l,--limit}'[Limit the number of results]:limit:(10 20 50 100 500 1000)' \
-        '(-l --limit -c --count)'{-c,--count}'[Show count of results]' \
+        '(-l --limit -c --count --all)'{-l,--limit}'[Limit the number of results]:limit:(10 20 50 100 500 1000)' \
+        '(-l --limit -c --count --all)'{-c,--count}'[Show count of results]' \
         '(-i --ignore-partitions)'{-i,--ignore-partitions}'[Suppress auto-union feature (SQLite only)]' \
         '(--tag-keys --tag-values)--tag-keys[Show all distinct tag keys]' \
         '(--tag-keys --tag-values)--tag-values[Show all distinct values for a tag key]:tag key:_hs_tags' \
@@ -439,11 +448,13 @@ function _hs_update() {
         '(--revert --cancel --delete)--cancel[Cancel specified tasks]' \
         '(--revert --cancel --delete)--delete[Delete specified tasks]' \
         '*--remove-tag[Remove specified tags by name]:tag:_hs_tags' \
-        '(-F --failed -C --completed -S --succeeded -R --remaining)'{-F,--failed}'[Alias for -w "exit_status != 0"]' \
-        '(-F --failed -C --completed -S --succeeded -R --remaining)'{-S,--succeeded}'[Alias for -w "exit_status == 0"]' \
-        '(-F --failed -C --completed -S --succeeded -R --remaining)'{-C,--completed}'[Alias for -w "exit_status != null"]' \
-        '(-F --failed -C --completed -S --succeeded -R --remaining)'{-R,--remaining}'[Alias for -w "exit_status == null"]' \
+        '(-F --failed -C --completed -S --succeeded -R --remaining -X --cancelled)'{-F,--failed}'[Alias for -w "exit_status != 0"]' \
+        '(-F --failed -C --completed -S --succeeded -R --remaining -X --cancelled)'{-S,--succeeded}'[Alias for -w "exit_status == 0"]' \
+        '(-F --failed -C --completed -S --succeeded -R --remaining -X --cancelled)'{-C,--completed}'[Alias for -w "exit_status != null"]' \
+        '(-F --failed -C --completed -S --succeeded -R --remaining -X --cancelled)'{-R,--remaining}'[Alias for -w "exit_status == null"]' \
+        '(-F --failed -C --completed -S --succeeded -R --remaining -X --cancelled)'{-X,--cancelled}'[Alias for -w "exit_status == -1"]' \
         '--retries[Alias for -w "attempt > 1"]' \
+        '--signal[Match tasks killed by signal NAME]:signal:(HUP INT QUIT ABRT KILL TERM)' \
         '(-l --limit)'{-l,--limit}'[Limit matches]:limit:(1 10 100 1000)' \
         '(-f --no-confirm)'{-f,--no-confirm}'[Do not ask for confirmation]' \
         '*:update argument:_hs_update_args'
@@ -456,11 +467,11 @@ function _hs_update() {
 function _hs_submit() {
     _arguments -s -S \
         '(-h --help)'{-h,--help}'[Show this message and exit]' \
-        '(-f --task-file)'{-f,--task-file}'[Path to task file ("-" for <stdin>)]:task file:_files' \
+        '(-f --task-file --from-json)'{-f,--task-file}'[Path to task file ("-" for <stdin>)]:task file:_files' \
+        '(-f --task-file --from-json)--from-json[Read tasks from a JSON file ("FILE\[@path\]")]:json spec:_files' \
         '(-q --queue)'{-q,--queue}'[Submit to live queue instead of database]' \
         '(-H --host)'{-H,--host}'[Hostname for server (used with --queue)]:host:_hs_known_hosts' \
         '(-p --port)'{-p,--port}'[Port number for server (used with --queue)]:port:_hs_ports' \
-        '(-k --auth)'{-k,--auth}'[Cryptographic key to connect to server]:auth key:_hs_authkey' \
         '(--no-tls)--no-tls[Disable TLS for queue interface (not recommended)]' \
         '(--no-tls)--tls-key[Path to TLS private key file]:key file:_files' \
         '(--no-tls)--tls-cert[Path to TLS certificate file]:cert file:_files' \
@@ -470,8 +481,11 @@ function _hs_submit() {
         '(-m --memory)'{-m,--memory}'[Required memory per task]:memory:(1GB 2GB 4GB 8GB 16GB 32GB)' \
         '(-W --timeout)'{-W,--timeout}'[Task-level walltime limit]:seconds:(60 300 600 1800 3600)' \
         '(-g --group)'{-g,--group}'[Task group for dependency management]:group:' \
+        '--zone[Zone of the submitted tasks]:zone:' \
         '(-b --bundlesize)'{-b,--bundlesize}'[Number of lines to buffer]:size:(1 10 100 1000)' \
-        '(-w --bundlewait)'{-w,--bundlewait}'[Seconds to wait before flushing tasks]:seconds:(5 10 30 60 600)' \
+        '(-w --bundlewait)'{-w,--bundlewait}'[Time to wait before flushing tasks; seconds, 30s, 5m, 1h30m, or a Slurm time]:seconds:(5 10 30 60 600 30s 1m 10m)' \
+        '(--update)--repeat[Re-submit a known file again as a new source]' \
+        '(--repeat)--update[Submit only tasks not already present from a known file]' \
         '--initdb[Auto-initialize database]' \
         '*'{-t,--tag}'[Assign tags as key:value]:tag:_hs_tags' \
         '(-)--[End of options; task arguments follow]' \
@@ -487,16 +501,16 @@ function _hs_client() {
         '(-h --help)'{-h,--help}'[Show this message and exit]' \
         '(-N --num-threads)'{-N,--num-threads}'[Number executor threads, 0=auto (default: 1)]:threads:_hs_thread_counts' \
         '(-t --template)'{-t,--template}'[Command-line template pattern (default "{}")]:template:' \
-        '(-b --bundlesize)'{-b,--bundlesize}'[Bundle size for finished tasks]:size:(1 10 100 1000)' \
-        '(-w --bundlewait)'{-w,--bundlewait}'[Seconds to wait before flushing tasks]:seconds:(5 10 30 60 600)' \
-        '(-H --host)'{-H,--host}'[Hostname for server (default: localhost)]:host:_hs_known_hosts' \
+        '(-b --bundlesize)'{-b,--bundlesize}'[Bundle size to request and return (default: from server)]:size:(1 10 100 1000)' \
+        '--zone[Run only tasks of this zone]:zone:' \
+        '(-w --bundlewait)'{-w,--bundlewait}'[Time to wait before flushing tasks; seconds, 30s, 5m, 1h30m, or a Slurm time]:seconds:(5 10 30 60 600 30s 1m 10m)' \
+        '(-H --host)'{-H,--host}'[Hostname for server (default: by server.host)]:host:_hs_known_hosts' \
         '(-p --port)'{-p,--port}'[Port number for server (default: 50001)]:port:_hs_ports' \
-        '(-k --auth)'{-k,--auth}'[Cryptographic key to connect to server]:auth key:_hs_authkey' \
         '(--no-tls)--no-tls[Disable TLS for queue interface (not recommended)]' \
         '(--no-tls)--tls-key[Path to TLS private key file]:key file:_files' \
         '(--no-tls)--tls-cert[Path to TLS certificate file]:cert file:_files' \
         '(--no-tls)--tls-ca[Path to TLS CA certificate file]:ca file:_files' \
-        '(-d --delay-start)'{-d,--delay-start}'[Seconds to wait before start-up]:seconds:(30 60 600 -60 -600)' \
+        '(-d --delay-start)'{-d,--delay-start}'[Wait before start-up (seconds, 30s, 1h30m, or a Slurm time; --delay-start=-10m is random)]:seconds:(30 60 600 10m -60 -600)' \
         '--no-confirm[Disable confirmation of task bundle received]' \
         '(--capture)'{-o,--output}'[Redirect task output (default <stdout>)]:output file:_files' \
         '(--capture)'{-e,--errors}'[Redirect task errors (default <stderr>)]:error file:_files' \
@@ -507,7 +521,28 @@ function _hs_client() {
         '(-T --timeout)'{-T,--timeout}'[Shutdown if no tasks received (default: never)]:seconds:(10 30 60 600)' \
         '(-W --task-timeout)'{-W,--task-timeout}'[Task-level walltime limit]:seconds:(60 300 600 1800 3600)' \
         '(-R --ratelimit)'{-R,--ratelimit}'[Maximum allowed tasks per second]:rate:' \
-        '(-S --signalwait)'{-S,--signalwait}'[Task-level signal escalation wait (default: 10)]:seconds:(1 5 10)'
+        '(-S --signalwait)'{-S,--signalwait}'[Task-level signal escalation wait; seconds, 30s, 5m, 1h30m, or a Slurm time (default: 10)]:seconds:(1 5 10 30s)'
+}
+
+# ---------------------------------------------------------------------------
+# relay
+# ---------------------------------------------------------------------------
+
+function _hs_relay() {
+    _arguments -s \
+        '(-h --help)'{-h,--help}'[Show this message and exit]' \
+        '(-H --upstream-host)'{-H,--upstream-host}'[Hostname of upstream server (default: localhost)]:host:_hs_known_hosts' \
+        '(-p --upstream-port)'{-p,--upstream-port}'[Port of upstream server (default: 50001)]:port:_hs_ports' \
+        '--no-tls[Disable TLS to upstream server (not recommended)]' \
+        '*--zone[Zone this relay serves (repeat for more)]:zone:' \
+        '(-N --size)'{-N,--size}'[Number of clients kept launched at the site (default: 1)]:count:' \
+        '--launcher[Command prefix that launches each client]:launcher:_command_names -e' \
+        '--launcher-args[Extra arguments for the launcher]:arguments:' \
+        '--remote-exe[Program site clients are launched as (default: this hs)]:program:_files' \
+        '--bind[Bind address of relay-local server (default: 0.0.0.0)]:address:(0.0.0.0 localhost 127.0.0.1)' \
+        '--advertise[Address site clients dial (default: by --bind)]:address:_hosts' \
+        '--port[Port of relay-local server (default: 50002)]:port:_hs_ports' \
+        '--database[Path to relay database]:database file:_files'
 }
 
 # ---------------------------------------------------------------------------
@@ -519,19 +554,21 @@ function _hs_server() {
         '(-h --help)'{-h,--help}'[Show this message and exit]' \
         '(-H --bind)'{-H,--bind}'[Bind address (default: localhost)]:address:(localhost 127.0.0.1 0.0.0.0)' \
         '(-p --port)'{-p,--port}'[Port number (default: 50001)]:port:_hs_ports' \
-        '(-k --auth)'{-k,--auth}'[Cryptographic key to secure server]:auth key:_hs_authkey' \
         '(--no-tls)--no-tls[Disable TLS for queue interface (not recommended)]' \
         '(--no-tls)--tls-key[Path to TLS private key file]:key file:_files' \
         '(--no-tls)--tls-cert[Path to TLS certificate file]:cert file:_files' \
         '(--no-tls)--tls-ca[Path to TLS CA certificate file]:ca file:_files' \
         '--forever[Schedule forever]' \
         '--restart[Start scheduling from last completed task]' \
+        '(-A --autoscaling)'{-A,--autoscaling}'[Publish client targets for relay sites (implies --forever)]::mode:(fixed dynamic)' \
+        '(-F --factor)'{-F,--factor}'[Scaling factor (default: 1)]:factor:(1 2 3 4 5)' \
+        '(-P --period)'{-P,--period}'[Scaling period, greater than zero; seconds, 30s, 5m, 1h30m, or a Slurm time (default: 60)]:seconds:(30 60 300 600 5m 10m)' \
         '(-c --task-cores)'{-c,--task-cores}'[Number of cores to assign each task]:cores:(1 2 4 8 16 32)' \
         '(-m --task-memory)'{-m,--task-memory}'[Memory to assign each task (K/M/G/T are powers of 1024)]:memory:(1GB 2GB 4GB 8GB 16GB 32GB)' \
         '(-W --task-timeout)'{-W,--task-timeout}'[Task-level walltime limit (seconds, 1h30m, or 1.5h)]:seconds:(60 300 600 1800 3600)' \
         '(-b --bundlesize)'{-b,--bundlesize}'[Size of task bundle]:size:(1 10 100 1000)' \
-        '(-w --bundlewait)'{-w,--bundlewait}'[Seconds to wait before flushing tasks]:seconds:(5 10 30 60 600)' \
-        '(-Q --poll)'{-Q,--poll}'[Polling interval between database queries]:seconds:(1 2 5 10)' \
+        '(-w --bundlewait)'{-w,--bundlewait}'[Time to wait before flushing tasks; seconds, 30s, 5m, 1h30m, or a Slurm time]:seconds:(5 10 30 60 600 30s 1m 10m)' \
+        '(-Q --poll)'{-Q,--poll}'[Polling interval between database queries; seconds, 30s, 5m, 1h30m, or a Slurm time]:seconds:(1 2 5 10 1m)' \
         '(-r --max-retries)'{-r,--max-retries}'[Auto-retry failed tasks (default: 0)]:retries:(1 2 3 4 5 6)' \
         '--eager[Schedule failed tasks before new tasks]' \
         '(--no-db --initdb)--no-db[Disable database (submit directly to clients)]' \
@@ -551,30 +588,35 @@ function _hs_cluster() {
         '(-h --help)'{-h,--help}'[Show this message and exit]' \
         '(-N --num-threads)'{-N,--num-threads}'[Executor threads per client, 0=auto (default: 1)]:threads:_hs_thread_counts' \
         '(-t --template)'{-t,--template}'[Command-line template pattern (default "{}")]:template:' \
+        '(1)--from-json[Read tasks from a JSON file ("FILE\[@path\]")]:json spec:_files' \
         '(-H --bind)'{-H,--bind}'[Special bind address (default localhost/0.0.0.0)]:address:(localhost 127.0.0.1 0.0.0.0)' \
+        '--advertise[Address remote clients dial (default: by -H)]:address:_hosts' \
         '(-p --port)'{-p,--port}'[Port number (default: 50001)]:port:_hs_ports' \
         '(--no-tls)--no-tls[Disable TLS for queue interface (not recommended)]' \
         '(--no-tls)--tls-key[Path to TLS private key file]:key file:_files' \
         '(--no-tls)--tls-cert[Path to TLS certificate file]:cert file:_files' \
         '(--no-tls)--tls-ca[Path to TLS CA certificate file]:ca file:_files' \
         '(-b --bundlesize)'{-b,--bundlesize}'[Size of task bundle]:size:(1 10 100 1000)' \
-        '(-w --bundlewait)'{-w,--bundlewait}'[Seconds to wait before flushing tasks]:seconds:(5 10 30 60 600)' \
+        '(-w --bundlewait)'{-w,--bundlewait}'[Time to wait before flushing tasks; seconds, 30s, 5m, 1h30m, or a Slurm time]:seconds:(5 10 30 60 600 30s 1m 10m)' \
+        '--zone[Zone of the submitted tasks and of every client (own zone with --autoscaling)]:zone:' \
         '(-r --max-retries)'{-r,--max-retries}'[Auto-retry failed tasks (default: 0)]:retries:(1 2 3 4 5 6)' \
         '--eager[Schedule failed tasks before new tasks]' \
-        '(-Q --poll)'{-Q,--poll}'[Polling interval between database queries (default: 30)]:seconds:(1 2 5 10 30)' \
+        '(-Q --poll)'{-Q,--poll}'[Polling interval between database queries; seconds, 30s, 5m, 1h30m, or a Slurm time (default: 30)]:seconds:(1 2 5 10 30 1m)' \
         '(--no-db --initdb)--no-db[Disable database (submit directly to clients)]' \
         '(--no-db --initdb)--initdb[Auto-initialize database]' \
         '--no-confirm[Disable client confirmation of task bundle received]' \
         '--forever[Schedule forever]' \
-        '--restart[Start scheduling from last completed task]' \
+        '(--repeat)--restart[Resume a prior run; with FILE submit only tasks not already present]' \
+        '(--update --restart)--repeat[Re-submit a known file again as a new source]' \
+        '(--repeat)--update[Submit only new tasks from a known file (use with --restart)]' \
         '(--mpi --launcher)--ssh[Launch directly with SSH host(s)]::host:_hs_known_hosts' \
         '(--ssh --launcher)--mpi[Same as --launcher=mpirun]' \
-        '(--ssh --mpi)--launcher[Use specific launch interface]:launcher:_command_names -e' \
+        '(--ssh --mpi)--launcher[Use specific launch interface ({zone} names each autoscaled zone)]:launcher:_command_names -e' \
         '--ssh-args[Command-line arguments for SSH]:ssh args:' \
         '--ssh-group[SSH nodelist group in config]:ssh group:_hs_ssh_groups' \
         '(-E --env)'{-E,--env}'[Send environment variables]' \
         '--remote-exe[Path to executable on remote hosts]:remote exe:_files' \
-        '(-d --delay-start)'{-d,--delay-start}'[Delay time for launching clients]:seconds:(30 60 600 -60 -600)' \
+        '(-d --delay-start)'{-d,--delay-start}'[Delay time for launching clients (seconds, 30s, 1h30m, or a Slurm time; --delay-start=-10m is random)]:seconds:(30 60 600 10m -60 -600)' \
         '(--capture)'{-o,--output}'[File path for task outputs (default <stdout>)]:output file:_files' \
         '(--capture)'{-e,--errors}'[File path for task errors (default <stderr>)]:error file:_files' \
         '(-o --output -e --errors)--capture[Capture individual task <stdout> and <stderr>]' \
@@ -587,14 +629,14 @@ function _hs_cluster() {
         '(-T --timeout)'{-T,--timeout}'[Shutdown clients if no tasks received (default: never)]:seconds:(10 30 60 600)' \
         '(-W --task-timeout)'{-W,--task-timeout}'[Task-level walltime limit]:seconds:(60 300 600 1800 3600)' \
         '(-R --ratelimit)'{-R,--ratelimit}'[Maximum allowed tasks per second per client]:rate:' \
-        '(-S --signalwait)'{-S,--signalwait}'[Task-level signal escalation wait (default: 10)]:seconds:(1 5 10)' \
-        '(-A --autoscaling)'{-A,--autoscaling}'[Enable autoscaling (used with --launcher)]::mode:(fixed dynamic)' \
+        '(-S --signalwait)'{-S,--signalwait}'[Task-level signal escalation wait; seconds, 30s, 5m, 1h30m, or a Slurm time (default: 10)]:seconds:(1 5 10 30s)' \
+        '(-A --autoscaling)'{-A,--autoscaling}'[Enable autoscaling per zone (used with --launcher)]::mode:(fixed dynamic)' \
         '(-F --factor)'{-F,--factor}'[Scaling factor (default: 1)]:factor:(1 2 3 4 5)' \
-        '(-P --period)'{-P,--period}'[Scaling period in seconds (default: 60)]:seconds:(30 60 300 600)' \
+        '(-P --period)'{-P,--period}'[Scaling period, greater than zero; seconds, 30s, 5m, 1h30m, or a Slurm time (default: 60)]:seconds:(30 60 300 600 5m 10m)' \
         '(-I --init-size)'{-I,--init-size}'[Initial size of cluster (default: 1)]:size:(0 1 2 5)' \
         '(-X --min-size)'{-X,--min-size}'[Minimum size of cluster (default: 0)]:size:(0 1)' \
         '(-Y --max-size)'{-Y,--max-size}'[Maximum size of cluster (default: 1)]:size:(1 2 5 10 20)' \
-        '1:input file:_files'
+        '(--from-json)1:input file:_files'
 }
 
 # Autoloaded via the #compdef tag: the file body defines the helpers and

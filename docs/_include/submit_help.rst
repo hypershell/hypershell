@@ -10,6 +10,36 @@ Options
 ``-f``, ``--task-file`` *FILE*
     Input file containing one task per line.
 
+``--from-json`` *SPEC*
+    Read tasks from a JSON file (``FILE[@path]``).
+
+    The optional dotted ``path`` after ``@`` locates the list of task objects inside
+    the document (e.g. ``plan.json@chunks``); with no ``@`` the file's top level must
+    be the list, and a ``FILE`` of ``-`` reads from ``<stdin>``. Each task object's keys
+    become named ``{key}`` template fields and task tags; an optional ``args`` key is the
+    base command (reachable as ``{}``). Every ``{key}`` is validated against all task
+    objects before anything is submitted.
+
+    A record's ``group``, ``zone``, ``cores``, ``memory`` and ``timeout`` keys set those fields of
+    its task, over ``-t`` and the options; a ``zone`` must be a JSON string.
+
+``--repeat``
+    Re-submit a known file's tasks again as a brand-new source.
+
+    By default, submitting a named file whose path and content match a prior submission is
+    refused to guard against accidental double submission. ``--repeat`` overrides that: the
+    file is ingested as a new source and all of its tasks are submitted again, even if
+    identical tasks already exist. May be combined with new ``-t``/``--tag`` values to mark
+    a new phase or trial.
+
+``--update``
+    Submit only the tasks in a known file that are not already present.
+
+    Creates a new source record and submits only tasks whose identity (a stable hash of the
+    pre-template arguments, group, and tags) is absent from the prior same-path submissions;
+    tasks already submitted are skipped. Use this after editing a task file to add only the
+    new work. Cannot be combined with ``--repeat``.
+
 ``-q``, ``--queue``
     Submit directly to live queue instead of database.
 
@@ -17,22 +47,24 @@ Options
     scheduling. This bypasses the database entirely, which is useful for transient
     workflows or when a database is not configured.
 
-    Requires ``-H``, ``-p``, and ``-k`` options to specify the server connection.
+    The server must be running without a database (``--no-db``). A server with a database
+    schedules only from it, so it refuses the submission and the command exits with an error.
+
+    Uses ``-H`` and ``-p`` to name the server. The key to connect to it is taken from the
+    ``HYPERSHELL_SERVER_AUTH`` environment variable or from ``server.auth`` in a configuration
+    file, and must match the server's.
 
 ``-H``, ``--host`` *ADDR*
-    Hostname or IP address for server (default: localhost).
+    Hostname or IP address for server (default: ``server.host``).
 
-    Only used with ``--queue`` mode to specify the server to connect to.
+    Only used with ``--queue`` mode to specify the server to connect to. With no ``-H``, it is
+    ``server.host`` when the configuration gives it, else ``server.advertise``, else
+    ``server.bind`` when it is one specific address, else *localhost*, as for `client`.
 
 ``-p``, ``--port`` *NUM*
     Port number for server (default: 50001).
 
     Only used with ``--queue`` mode to specify the server port.
-
-``-k``, ``--auth`` *KEY*
-    Cryptographic authentication key for server.
-
-    Only used with ``--queue`` mode. The key must match the server's authentication key.
 
 ``--template`` *CMD*
     Command-line template pattern (default: "{}").
@@ -55,7 +87,12 @@ Options
     See also ``--bundlewait``.
 
 ``-w``, ``--bundlewait`` *SEC*
-    Seconds to wait before flushing tasks (default: 5).
+    Time to wait before flushing tasks (default: 5).
+
+    Specify a number of seconds, units ``d``, ``h``, ``m`` and ``s`` in that order, whole or
+    fractional (e.g., ``30s``, ``5m``, ``1h30m``, ``1.5h``), or a Slurm time ``MM:SS``,
+    ``HH:MM:SS``, ``D-HH``, ``D-HH:MM`` or ``D-HH:MM:SS`` (e.g., ``1:30``). A fraction of a
+    second is rounded up to the next whole second.
 
     If this period of time expires since the previous bundle was pushed to the database,
     The current bundle will be pushed regardless of how many tasks have been accumulated.
@@ -95,8 +132,20 @@ Options
     with all tasks in a group completing before the next group begins. This enables simple
     workflow management without requiring explicit DAG-based definitions.
 
-    All tasks default to group 0 for backwards compatibility. Users can organize tasks into
-    multiple groups (e.g., 0, 1, 2, ...) where lower-numbered groups execute first.
+    All tasks default to group 0 for backwards compatibility. A group is a non-negative integer:
+    users can organize tasks into multiple groups (e.g., 0, 1, 2, ...) where lower-numbered groups
+    execute first.
+
+``--zone`` *NAME*
+    Zone of the submitted tasks (default: none, the reserved default zone).
+
+    Only a client launched with the same ``--zone`` runs these tasks; a client given no
+    ``--zone`` runs only tasks without one. Zone names are arbitrary text (``default`` names the
+    default zone). Zones are recorded in the database, so ``--zone`` cannot be used with
+    ``--queue``. Zone is placement only: task groups still run in order across all zones.
+
+    A zone named in the input (``zone:NAME`` or ``zone=NAME`` inline or with ``-t``, or a
+    ``--from-json`` record's ``zone``) wins over ``--zone`` for its tasks.
 
 ``--initdb``
     Auto-initialize database.
@@ -114,5 +163,11 @@ Options
     groups of tasks. They are defined with both a `key` and `value` (e.g., ``--tag file:a``).
     The default `value` for tags is blank. When searching with tags, not specifying a `value`
     will return any task with that `key` defined regardless of `value` (including blank).
+
+    Each item is ``KEY:VALUE``, ``KEY=VALUE`` or a bare ``KEY``, read as an inline directive is.
+    The declarable fields (``group``, ``zone``, ``cores``, ``memory``, ``timeout``) set the task's
+    field with either separator, over its option. With ``=``, a key one edit from a task column is
+    refused as a likely typo and a column task input does not set is refused; with ``:`` both are
+    tags. A refused item exits with status 2 before any input is read.
 
 .. include:: /_include/tls_cli_options.rst

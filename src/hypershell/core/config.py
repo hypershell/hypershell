@@ -6,38 +6,51 @@
 
 # Type annotations
 from __future__ import annotations
-from typing import TypeVar, Union, List, Optional, Protocol, Final, Iterator, Dict
+from typing import TypeVar, Union, List, Optional, Protocol, Final, FrozenSet, Iterator, Dict, Tuple, Any
 
 # Standard libs
 import os
 import re
 import sys
+import math
+import argparse
 import shutil
 import tomlkit
 import logging
 import socket
+import copy
 import functools
 import platform
 import subprocess
 from datetime import datetime
 
 # External libs
-from cmdkit.config import Namespace, Configuration, Environ, ConfigurationError
+from cmdkit.config import Namespace, Configuration, ConfigurationError
 from cmdkit.app import exit_status
+from cmdkit.cli import Interface, ArgumentError
 
 # Internal libs
 from hypershell.core.platform import path, home, default_path
-from hypershell.core.exceptions import write_traceback, display_critical
+from hypershell.core.exceptions import write_traceback, display_critical, SettingRefused
 from hypershell.core.sys import PATH_SEP
+from hypershell.core.config_schema import (KEYS, ZONE_KEYS, NUMERIC, SETTINGS, read_environment, match_name,
+                                           variable_name, setting_for, advise, shown, Kind, SettingError,
+                                           VariableError, VariableRefusal)
 
 # Public interface
 __all__ = [
     'config', 'update', 'default', 'ConfigurationError', 'Namespace', 'blame',
-    'resolve_auth', 'check_auth_forms', 'AUTH_FORMS', 'AUTH_SECTIONS',
+    'resolve_auth', 'check_auth_forms', 'AUTH_FORMS', 'AUTH_SECTIONS', 'AUTH_ENV', 'is_key_variable',
+    'is_relay_variable', 'env_variable',
+    'config_seconds', 'client_host', 'WILDCARD_BINDS', 'check_settings', 'unchecked_config', 'CONFIG_COMMAND',
+    'KEY_OPTION_STRINGS', 'SERVER_KEY_SOURCES', 'RefuseKeyOption', 'refuse_key_option',
     'load', 'reload', 'reload_local', 'load_file', 'reload_file', 'load_env', 'reload_env', 'load_task_env',
+    'ENV_VARIABLES',
     'PARAM_UNSET', 'DEFAULT_DATABASE_NAME', 'DEFAULT_DATABASE_FILE',
     'DEFAULT_LOGGING_LEVEL', 'DEFAULT_LOGGING_STYLE', 'LOGGING_STYLES', 'ACTIVE_CONFIG_VARS', 'SSH_GROUPS',
-    'AUTH_ALLOWED_CHARS', 'AUTH_MINIMUM_LENGTH', 'find_available_ports'
+    'AUTH_ALLOWED_CHARS', 'AUTH_MINIMUM_LENGTH', 'find_available_ports',
+    'RELAY_PROCESS', 'RELAY_MARKER', 'RELAY_PRAGMAS', 'DEFAULT_RELAY_PORT', 'default_relay_database',
+    'relay_database_section',
 ]
 
 
@@ -130,10 +143,12 @@ default = Namespace({
     'server': {
         'bind': 'localhost',   # Used by server
         'host': 'localhost',   # Used by clients
+        'advertise': PARAM_UNSET,  # Address launched clients dial (unset: the bind, or this host's name)
         'port': 50_001,
         'auth': DEFAULT_AUTH,  # Initializes to fixed default value (DO NOT USE THIS)
         'queuesize': 1,        # Only allow a single bundle (scheduler must wait)
         'bundlesize': 1,
+        'bundlemax': 1000,     # Most tasks in one reply to a client's request (never below bundlesize)
         'attempts': 1,
         'eager': False,        # Prefer failed tasks to new tasks
         'poll': 30,            # Max polling interval in seconds between database queries if no tasks
@@ -152,6 +167,7 @@ default = Namespace({
             'min_version': 'TLSv1.2',
             'ciphers': PARAM_UNSET,     # OpenSSL cipher string
             'servername': PARAM_UNSET,  # Override SNI / hostname check on client side
+            'handshake': 30,            # Seconds a connection has to complete its TLS handshake (duration forms)
         },
     },
 
@@ -175,6 +191,9 @@ default = Namespace({
         'factor': 1,
         'period': 60,       # Seconds to wait between checks
         'launcher': '',     # Empty means just 'hs client ...'
+        'distribution': 'spread',  # Relay sites only: either 'spread' or 'fill'
+        'sites': PARAM_UNSET,      # Relay sites only: preferred site order for 'fill' (list or comma string)
+        'failed_launches': 3,      # Stop after this many failed launches in a row with no client (0: never)
         'size': {
             'init': 1,
             'min': 0,
@@ -184,6 +203,47 @@ default = Namespace({
 
     'console': {
         'theme': 'monokai',
+    },
+
+    # The relay is a per-site service: a client upstream and a local server and fleet at its site.
+    # Its own database is always a private SQLite file (see `relay_database_section`).
+    'relay': {
+        'database': PARAM_UNSET,  # Path to the relay database (default: <lib>/relay/<host>.db)
+        'bind': '0.0.0.0',        # Bind address of the relay-local server (site clients connect here)
+        'advertise': PARAM_UNSET,  # Address site clients dial (unset: the bind, or this host's name)
+        'port': 50_002,           # Port of the relay-local server (distinct from the server default)
+        'bundlesize': 1,          # Bundle size of the relay-local server
+        'bundlewait': 5,          # Seconds the relay waits before returning results regardless of size
+        'poll': 0.1,              # Max polling interval of the relay-local scheduler in seconds
+        'retention': 300,         # Seconds a returned result is kept in the relay database
+        'zone': PARAM_UNSET,      # Zone(s) served: a name, a list, or one [relay.zone.<name>] table each
+        'site': PARAM_UNSET,      # Site name the relay gives upstream (default: the relay's host name)
+        'size': 1,                # Number of site clients the relay keeps launched (at least 1)
+        'min': PARAM_UNSET,       # Fewest clients per zone a topology assigns (default: 0)
+        'max': PARAM_UNSET,       # Most clients per zone a topology assigns (default: size)
+        'init': PARAM_UNSET,      # Clients per zone a topology assigns at start (default: min)
+        'launcher': '',           # Command prefix to launch each site client (empty means '<relay's hs> client ...')
+        'launcher_args': '',      # Extra arguments for the launcher
+        'remote_exe': PARAM_UNSET,  # Program site clients are launched as (unset: the relay's own hs)
+        'num_threads': 1,         # Executor threads per site client
+        'template': '{}',         # Command template for site clients
+        'timeout': 0,             # Site client idle timeout in seconds (never if 0)
+        'upstream': {
+            'host': 'localhost',    # Upstream server hostname
+            'port': 50_001,         # Upstream server port
+            'auth': DEFAULT_AUTH,   # Upstream key (use auth_env or auth_eval to keep it out of files)
+            'bundlesize': 1_000,    # Bundle size the relay advertises upstream
+            'heartrate': 10,        # Seconds between upstream heartbeats
+            'evict_hint': 600,      # Upstream eviction period the relay assumes during an outage
+            'deadline': 30,         # Seconds an upstream call may take before the link counts as down
+            'backoff': 60,          # Longest wait in seconds between attempts to reach upstream again
+            'tls': {
+                'enabled': True,            # Use --no-tls to disable on the upstream hop (not recommended)
+                'cert': '<auto>',           # Upstream server certificate or '<auto>'
+                'cafile': '<auto>',         # Trust anchor for the upstream server; '<auto>' mirrors the cert
+                'fingerprint': PARAM_UNSET, # Pin the upstream server fingerprint (e.g. 'SHA256:AB:CD:...')
+            },
+        },
     },
 
     # NOTE: defining HYPERSHELL_EXPORT_XXX defines XXX within task env
@@ -207,14 +267,30 @@ def load_file(filepath: str) -> Namespace:
     return reload_file(filepath)
 
 
-def reload_env() -> Environ:
-    """Force reloading environment variables and expanding hierarchy as namespace."""
-    return Environ(prefix='HYPERSHELL').expand()
+ENV_VARIABLES: Dict[Tuple[str, ...], str] = {}
+"""The variable, as written, that set each key path of the environment layer last read."""
+
+
+def reload_env() -> Namespace:
+    """Force reloading the environment layer: each `HYPERSHELL_*` variable at the key its name matches.
+
+    The names are matched against the documented keys and tables (`hypershell.core.config_schema`),
+    and each value is read by its key's kind. :data:`ENV_VARIABLES` is rebuilt to match.
+    """
+    try:
+        layer, variables = read_environment(os.environ)
+    except VariableRefusal as error:
+        raise SettingRefused(str(error)) from None
+    except VariableError as error:
+        raise ConfigurationError(str(error)) from None
+    ENV_VARIABLES.clear()
+    ENV_VARIABLES.update(variables)
+    return Namespace(layer)
 
 
 @functools.lru_cache(maxsize=None)
-def load_env() -> Environ:
-    """Load environment variables and expand hierarchy as namespace."""
+def load_env() -> Namespace:
+    """Load the environment layer (see :func:`reload_env`)."""
     return reload_env()
 
 
@@ -246,6 +322,17 @@ def partial_reload(system: Optional[str] = path.system.config,
     })
 
 
+def env_variable(*varpath: str) -> str:
+    """The variable, as written, that set `varpath` in the environment layer (for a table, the first under it).
+
+    A path no variable set is named by the guide's rule (see `config_schema.variable_name`).
+    """
+    if (name := ENV_VARIABLES.get(varpath)) is not None:
+        return name
+    beneath = sorted(path for path in ENV_VARIABLES if path[:len(varpath)] == varpath)
+    return ENV_VARIABLES[beneath[0]] if beneath else variable_name('.'.join(varpath))
+
+
 def blame(base: Configuration, *varpath: str) -> Optional[str]:
     """Construct filename or variable assignment string based on precedent of `varpath`."""
     source = base.which(*varpath)
@@ -254,9 +341,220 @@ def blame(base: Configuration, *varpath: str) -> Optional[str]:
     if source in ('system', 'user', 'local'):
         return f'from: {path.get(source).config}'
     elif source == 'env':
-        return 'from: HYPERSHELL_' + '_'.join([node.upper() for node in varpath])
+        return f'from: {env_variable(*varpath)}'
     else:
         return f'from: <{source}>'
+
+
+def config_seconds(*varpath: str, base: Configuration = None, whole: bool = False) -> int | float:
+    """Seconds given by the duration key `varpath`, in any duration form; with `whole`, rounded up.
+
+    A number is used as given. Text takes the forms of the duration options, its exact value an `int`
+    when whole and a `float` otherwise. The key is read by attribute, so its `_env` and `_eval` forms
+    resolve (the configuration loaded at import holds them resolved and checked). A value its entry in
+    the table refuses raises :class:`SettingRefused` in the one form, naming the key and where it came
+    from.
+    """
+    base = config if base is None else base
+    key = '.'.join(varpath)
+    *section, name = varpath
+    table = functools.reduce(lambda parent, part: parent[part], section, base)
+    form = next((given for given in (name, f'{name}_env', f'{name}_eval') if given in table), name)
+    value = _resolved(table, name, form, key, base, section)
+    try:
+        return SETTINGS[setting_for(key)].parse(value, key, source=_source_of(base, *section, form), whole=whole)
+    except SettingError as error:
+        raise SettingRefused(str(error)) from None
+
+
+def _source_of(base: Configuration, *varpath: str) -> Optional[str]:
+    """The file or variable that gives `varpath` (as :func:`blame` names it, without its `from: `)."""
+    try:
+        label = blame(base, *varpath)
+    except KeyError:
+        return None
+    return None if label is None else label.removeprefix('from: ')
+
+
+def _resolved(table: Namespace, name: str, form: str, key: str, base: Configuration, section: List[str]) -> Any:
+    """The value of `name` in `table`, read by attribute so its `_env` or `_eval` `form` resolves.
+
+    A variable that is not set, or a command that fails, raises `ConfigurationError` naming the key
+    and where it came from; only the error's type is named, as its text can carry a command's output.
+    """
+    try:
+        value = getattr(table, name)
+    except Exception as error:
+        raise ConfigurationError(f'{key} could not be resolved: {type(error).__name__} '
+                                 f'({blame(base, *section, form)})') from None
+    if value is None and form == f'{name}_env':
+        raise ConfigurationError(f'{key}_env names {table[form]}, which is not set ({blame(base, *section, form)})')
+    return value
+
+
+def _numeric_paths(base: Configuration) -> Iterator[Tuple[str, ...]]:
+    """The path of every numeric key, and of each numeric key of each `[relay.zone.<name>]` table the view holds."""
+    for key, kind in KEYS.items():
+        if kind in NUMERIC:
+            yield tuple(key.split('.'))
+    zones = base.get('relay', {}).get('zone', None)
+    if isinstance(zones, dict):
+        for zone, table in zones.items():
+            if isinstance(table, dict):
+                for key, kind in ZONE_KEYS.items():
+                    if kind in NUMERIC:
+                        yield 'relay', 'zone', zone, key
+
+
+FILE_LAYERS: Final[Tuple[str, ...]] = ('system', 'user', 'local')
+"""The layers a configuration file gives."""
+
+
+def check_settings(base: Configuration, exempt_files: bool = False) -> Configuration:
+    """The configuration `base` with every numeric key checked against its range, and pinned.
+
+    Each numeric key a file or the environment gives, in any form (`_env` and `_eval` resolved once,
+    here), is read by its entry in the table. Whole numbers and numbers are written back as numbers,
+    durations and sizes as given, into the layer that gave them under the plain key, so `which` and
+    `blame` still name the file or variable. A value past an advisory limit is warned of once. A
+    value the entry refuses raises :class:`SettingRefused`, in the one form and naming its source;
+    with `exempt_files` (`hs config`), a file's refused value, or a file's `_env`/`_eval` that cannot
+    resolve, gives way to the built-in default instead, while the environment's is still refused,
+    and nothing is warned of. `base` itself is
+    left as it was. A refused variable's value is shown, and read, as its text.
+    """
+    layers = {label: copy.deepcopy(dict(layer)) for label, layer in base.namespaces.items()}
+    for varpath in _numeric_paths(base):
+        *section, name = varpath
+        table = base
+        for part in section:
+            table = table.get(part) if isinstance(table, dict) else None
+        if not isinstance(table, dict):
+            continue
+        form = next((given for given in (name, f'{name}_env', f'{name}_eval') if given in table), None)
+        if form is None:
+            continue
+        try:
+            label = base.which(*section, form)
+        except KeyError:
+            continue
+        if label in ('default', 'preload'):
+            continue
+        key = '.'.join(varpath)
+        setting = setting_for(key)
+        source = _source_of(base, *section, form)
+        try:
+            value = _resolved(table, name, form, key, base, section)
+        except ConfigurationError:
+            if exempt_files and label in FILE_LAYERS:  # Unresolvable in a file: as a refused file value
+                for file_label in FILE_LAYERS:
+                    _forget(layers.get(file_label), section, name)
+                continue
+            raise
+        given = value
+        if label == 'env' and form == name and (variable := ENV_VARIABLES.get(tuple(varpath))) in os.environ:
+            given = os.environ[variable]
+        try:
+            checked = SETTINGS[setting].parse(given, key, source=source, whole=False)
+        except SettingError as error:
+            if exempt_files and label in FILE_LAYERS:
+                for file_label in FILE_LAYERS:
+                    _forget(layers.get(file_label), section, name)
+                continue
+            raise SettingRefused(str(error)) from None
+        if not exempt_files:
+            advise(setting, checked, key, given=value)  # As the layer holds it (a variable's number, typed)
+        if SETTINGS[setting].kind in (Kind.INT, Kind.NUMBER, Kind.INT_OR_NONE):
+            value = checked
+        _forget(layers[label], section, name)
+        _place(layers[label], section, name, value)
+        if label == 'env' and form != name:
+            ENV_VARIABLES[tuple(varpath)] = ENV_VARIABLES.pop((*section, form), variable_name(key))
+    return Configuration(**layers)
+
+
+def _forget(layer: Optional[dict], section: List[str], name: str) -> None:
+    """Remove every form of `name` (`name`, `name_env`, `name_eval`) from the table `section` of `layer`."""
+    for part in section:
+        layer = layer.get(part) if isinstance(layer, dict) else None
+    if isinstance(layer, dict):
+        for form in (name, f'{name}_env', f'{name}_eval'):
+            layer.pop(form, None)
+
+
+def _place(layer: dict, section: List[str], name: str, value: Any) -> None:
+    """Set `name` to `value` in the table `section` of `layer`."""
+    for part in section:
+        layer = layer.setdefault(part, {})
+    layer[name] = value
+
+
+WILDCARD_BINDS: Final[FrozenSet[str]] = frozenset({'0.0.0.0', ''})
+"""Bind addresses that listen on every interface, which no client can dial as such."""
+
+
+def _server_form(base: Configuration, name: str) -> Optional[str]:
+    """The form of `server.<name>` in the merged view (`name`, `name_env` or `name_eval`), or None."""
+    table = base['server']
+    return next((form for form in (name, f'{name}_env', f'{name}_eval') if form in table), None)
+
+
+def _given(base: Configuration, name: str) -> Optional[str]:
+    """The form of `server.<name>` that a configuration layer gives, or None when only the defaults hold it.
+
+    The deciding layer is asked of the form held, never of the bare name, which a variant form
+    displaces; a layer decides even when its value equals the default.
+    """
+    form = _server_form(base, name)
+    if form is None:
+        return None
+    try:
+        return None if base.which('server', form) == 'default' else form
+    except KeyError:
+        return None
+
+
+def _server_value(base: Configuration, name: str, form: str) -> Any:
+    """The value of `server.<name>`, read by attribute so its `_env` and `_eval` forms resolve.
+
+    A variable that is not set, or a command that fails, raises `ConfigurationError` naming the key
+    and where it came from.
+    """
+    table = base['server']
+    try:
+        value = getattr(table, name)
+    except Exception as error:
+        # Only the error's type is named: its text can carry part of a command's output.
+        raise ConfigurationError(f'server.{name} could not be resolved: {type(error).__name__} '
+                                 f'({blame(base, "server", form)})') from None
+    if value is None and form == f'{name}_env':
+        raise ConfigurationError(f'server.{form} names {table[form]}, which is not set '
+                                 f'({blame(base, "server", form)})')
+    return value
+
+
+def client_host(base: Configuration = None) -> str:
+    """The address a client given no -H dials (see `server.host` in the configuration reference).
+
+    The first of: `server.host` when a configuration layer gives it, whatever its value;
+    `server.advertise` when a layer gives it a value; `server.bind` when it is one specific address
+    (not one of :const:`WILDCARD_BINDS`); else `localhost`. The marker for an unset value
+    (:const:`PARAM_UNSET`) is never the answer. The configuration is read when this is called.
+    """
+    base = config if base is None else base
+    if form := _given(base, 'host'):
+        host = _server_value(base, 'host', form)
+        if host != PARAM_UNSET:
+            return str(host)
+    if form := _given(base, 'advertise'):
+        advertise = _server_value(base, 'advertise', form)
+        if advertise not in (None, '', PARAM_UNSET):
+            return str(advertise)
+    if form := _server_form(base, 'bind'):
+        bind = _server_value(base, 'bind', form)
+        if bind is not None and bind != PARAM_UNSET and str(bind) not in WILDCARD_BINDS:
+            return str(bind)
+    return 'localhost'
 
 
 def get_logging_style(base: Configuration) -> str:
@@ -344,6 +642,74 @@ def resolve_auth(*section: str, base: Configuration = None) -> str:
     return str(value)
 
 
+AUTH_ENV: Final[str] = 'HYPERSHELL_SERVER_AUTH'
+"""Environment variable that gives `server.auth`; `hs cluster` launchers hand the key over in it."""
+
+
+def is_key_variable(name: str, sections: tuple[tuple[str, ...], ...] = AUTH_SECTIONS) -> bool:
+    """True if the environment variable `name` gives a key: any form of `server.auth` or `relay.upstream.auth`.
+
+    A name is recognised by the matcher, as the environment layer reads it, so every form of the
+    key (:data:`AUTH_FORMS`) counts. `sections` narrows the keys considered (`(('server', ), )` for
+    `server.auth` alone).
+    """
+    try:
+        match = match_name(name)
+    except VariableError:
+        return False
+    return match is not None and match[0][:-1] in sections and match[0][-1] in AUTH_FORMS
+
+
+def is_relay_variable(name: str) -> bool:
+    """True if the environment variable `name` sets a relay setting: a key the matcher maps under `relay`."""
+    try:
+        match = match_name(name)
+    except VariableError:
+        return True  # Only a `relay.zone` name is refused by the matcher.
+    return match is not None and match[0][0] == 'relay'
+
+KEY_OPTION_STRINGS: Final[tuple[str, ...]] = ('-k', '--auth')
+"""Option strings registered on the commands only to be refused (see :func:`refuse_key_option`)."""
+
+KEY_OPTION_REFUSAL: Final[str] = ('{option} is not accepted: '
+                                   'a key on a command line is visible to every user on the host.')
+"""First sentence of the refusal, naming only the option string the parser matched."""
+
+SERVER_KEY_SOURCES: Final[str] = (f'Give the key in the {AUTH_ENV} environment variable '
+                                  f'or as server.auth in a configuration file.')
+"""Where the commands that read `server.auth` take their key from instead."""
+
+
+class RefuseKeyOption(argparse.Action):
+    """Refuse a key option the moment the parser meets it, saying where the key goes instead.
+
+    The message is built from the matched option string and fixed text only. The value is never
+    read, so no message, and no log record of it, can hold the key. Since the parser stops at
+    the refusal, nothing else on the command line is reported either.
+    """
+
+    def __init__(self: RefuseKeyOption, option_strings: List[str], dest: str, advice: str = SERVER_KEY_SOURCES,
+                 **options) -> None:
+        super().__init__(option_strings, dest, **options)
+        self.advice = advice
+
+    def __call__(self: RefuseKeyOption, parser: argparse.ArgumentParser, namespace: argparse.Namespace,
+                 values: Optional[str], option_string: Optional[str] = None) -> None:
+        option = option_string or self.option_strings[0]
+        raise ArgumentError(' '.join([KEY_OPTION_REFUSAL.format(option=option), self.advice.format(option=option)]))
+
+
+def refuse_key_option(interface: Interface, advice: str = SERVER_KEY_SOURCES) -> None:
+    """Register :const:`KEY_OPTION_STRINGS` on `interface`, refused with `advice` (see :class:`RefuseKeyOption`).
+
+    The option takes an optional value, so that a bare option, or one followed by another option,
+    meets the same refusal; and it leaves nothing on the parsed namespace. An `{option}` field in
+    `advice` is the option string given.
+    """
+    interface.add_argument(*KEY_OPTION_STRINGS, action=RefuseKeyOption, advice=advice, nargs='?',
+                           default=argparse.SUPPRESS, dest='key_option')
+
+
 DEFAULT_DATABASE_NAME: Final[str] = 'Main.db' if platform.system() in ['Windows', 'Darwin'] else 'main.db'
 """Either Main.db (Windows/macOS) or main.db on Linux/POSIX."""
 
@@ -387,25 +753,105 @@ def reload_local(filepath: Optional[str] = None) -> Configuration:
     return build_configuration(loader=loader)
 
 
+RELAY_MARKER: Final[str] = '_HYPERSHELL_RELAY'
+"""Private environment variable that marks a process started to run `hs relay`.
+
+It sits outside the `HYPERSHELL_` prefix, so it never reaches the configuration, and it is
+removed as soon as it is read, so no child process inherits it.
+"""
+
+def _relay_requested(argv: List[str] = None) -> bool:
+    """True if this process runs `hs relay`: the private marker is set, or the command line names it."""
+    if os.environ.pop(RELAY_MARKER, None):
+        return True
+    argv = sys.argv if argv is None else argv
+    program = os.path.splitext(os.path.basename(argv[0]))[0] if argv else ''
+    return program in ('hs', 'hyper-shell') and len(argv) > 1 and argv[1] == 'relay'
+
+
+RELAY_PROCESS: Final[bool] = _relay_requested()
+"""Set in a process that runs `hs relay`; its database section is the relay database.
+
+The swap happens here, before `hypershell.data` builds its engine from this configuration, so
+every module that reads the database section sees the relay database (after the configuration
+is loaded, below). One relay per process.
+"""
+
+def _config_requested(argv: List[str] = None) -> bool:
+    """True if this process runs `hs config`, which runs on a file holding a refused value so it can be repaired."""
+    argv = sys.argv if argv is None else argv
+    program = os.path.splitext(os.path.basename(argv[0]))[0] if argv else ''
+    return program in ('hs', 'hyper-shell') and len(argv) > 1 and argv[1] == 'config'
+
+
+CONFIG_COMMAND: Final[bool] = _config_requested()
+"""Set in a process that runs `hs config`: a file's refused value gives way to its default (see `check_settings`)."""
+
+
 try:
     if (local_config := os.getenv('HYPERSHELL_CONFIG_FILE', None)) is not None:
         path.local.config = local_config  # Modified as to not lie to the user
-        config = reload_local(local_config)
+        unchecked_config = reload_local(local_config)
     else:
-        config = load()
+        unchecked_config = load()
+    config = check_settings(unchecked_config, exempt_files=CONFIG_COMMAND)
     check_auth_forms(config)
+except SettingRefused as error:
+    display_critical(str(error), module=__name__)
+    sys.exit(exit_status.bad_config)
 except ConfigurationError as error:
     display_critical(error, module=__name__)
+    sys.exit(exit_status.bad_config)
+except (ValueError, OverflowError) as error:
+    text = str(error).replace('\n', ' - ')
+    display_critical(f'{type(error).__name__}: {text if len(text) <= 200 else shown(text)}', module=__name__)
     sys.exit(exit_status.bad_config)
 except Exception as error:
     write_traceback(error, module=__name__)
     sys.exit(exit_status.bad_config)
 
 
-ACTIVE_CONFIG_VARS: Final[List[str]] = [
-    re.sub(r'_(?!(env|eval))', r'.', name.lower())
-    for name in Namespace(config).to_env().flatten()
-]
+RELAY_PRAGMAS: Final[Dict[str, str]] = {'synchronous': 'FULL'}
+"""SQLite pragmas for the relay database: a committed insert survives a power loss."""
+
+DEFAULT_RELAY_PORT: Final[int] = config.relay.port
+"""Default port of the relay-local server."""
+
+
+def default_relay_database() -> str:
+    """Default relay database path, scoped by host since home directories are shared between hosts."""
+    return os.path.join(default_path.lib, 'relay', f'{socket.gethostname().split(".", 1)[0]}.db')
+
+
+def relay_database_section(base: Namespace) -> Namespace:
+    """The database section a relay process uses in place of the configured one.
+
+    Always SQLite, whatever provider, URL or schema the configured section names, so a relay never
+    opens (or needs a driver for) the configured primary database. The file is `relay.database`,
+    or a host-scoped default under the site lib directory.
+    """
+    path_ = base.get('relay', {}).get('database', None)
+    if not path_ or path_ == PARAM_UNSET:
+        path_ = default_relay_database()
+    return Namespace({'provider': 'sqlite', 'file': os.path.abspath(os.path.expanduser(str(path_))),
+                      'pragmas': dict(RELAY_PRAGMAS)})
+
+
+if RELAY_PROCESS:
+    config['database'] = relay_database_section(config)
+
+
+def _leaf_paths(tree: dict, path: tuple = ()) -> Iterator[str]:
+    """The dotted path of each value in `tree` that is not a table (an empty table counts as one)."""
+    for name, value in tree.items():
+        if isinstance(value, dict) and value:
+            yield from _leaf_paths(value, (*path, name))
+        else:
+            yield '.'.join((*path, name))
+
+
+ACTIVE_CONFIG_VARS: Final[List[str]] = sorted({*KEYS, *_leaf_paths(unchecked_config)})
+"""Every documented key and every key the configuration holds, by dotted path (for completion)."""
 
 
 SSH_GROUPS = []
@@ -436,7 +882,12 @@ DEFAULT_CONFIG_HEADERS: Final[str] = f"""\
 
 
 def update(scope: str, partial: dict) -> None:
-    """Extend the current configuration and commit it to disk."""
+    """Extend the current configuration and commit it to disk.
+
+    The file is read and written as UTF-8 whatever the locale, as every reader decodes it (a backup
+    is a byte-for-byte copy). The new text is made before the file is opened for writing, so a
+    failure to make it leaves the file as it was.
+    """
     config_path = path[scope].config
     os.makedirs(os.path.dirname(config_path), exist_ok=True)
     if os.path.exists(config_path):
@@ -446,13 +897,14 @@ def update(scope: str, partial: dict) -> None:
         shutil.copystat(config_path, config_backup_path)
         log.debug(f'Created backup file ({config_backup_path})')
     else:
-        with open(config_path, mode='w') as stream:
+        with open(config_path, mode='w', encoding='utf-8') as stream:
             stream.write(DEFAULT_CONFIG_HEADERS)
-    with open(config_path, mode='r') as stream:
+    with open(config_path, mode='r', encoding='utf-8') as stream:
         new_config = tomlkit.parse(stream.read())
     _inplace_update(new_config, partial)
-    with open(config_path, mode='w') as stream:
-        tomlkit.dump(new_config, stream)
+    text = tomlkit.dumps(new_config)
+    with open(config_path, mode='w', encoding='utf-8') as stream:
+        stream.write(text)
 
 
 # Re-implemented from `cmdkit.config.Namespace` (but works with `tomlkit`)
@@ -489,6 +941,17 @@ def __collapse_lists(ns: Namespace) -> Namespace:
 
 
 @functools.cache
-def load_task_env() -> Environ:
-    """Export environment defined in `config.export`."""
-    return __collapse_lists(config.export).to_env().flatten()
+def load_task_env() -> Dict[str, str]:
+    """The variables `config.export` gives every task.
+
+    A configuration file's `[export]` names are upper-cased and its lists joined (tables merge
+    across files as any table does). Each `HYPERSHELL_EXPORT_<NAME>` variable is laid over them as
+    `<NAME>`, name and value as written, so for the same task variable the environment's wins.
+    """
+    files = Namespace()
+    for name, layer in config.namespaces.items():
+        if name != 'env' and isinstance(table := layer.get('export'), dict):
+            files.update(table)
+    table = config.namespaces.get('env', {}).get('export')
+    written = {name: str(value) for name, value in table.items()} if isinstance(table, dict) else {}
+    return {**__collapse_lists(files).to_env().flatten(), **written}

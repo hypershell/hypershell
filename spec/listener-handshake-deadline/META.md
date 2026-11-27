@@ -1,0 +1,99 @@
+# META — TLS handshake deadline on the queue listener
+
+> **Harness feedback log** for this feature — the producer artifact of the factory's self-improvement
+> loop. Written by the lifecycle skills (`hs-feature` / `hs-plan` / `hs-build` / `hs-review`) when the
+> **skillset itself** costs something; read by `hs-publish` (surfaced in the PR) and applied by
+> `/hs-harness`. This file is **orthogonal** to the `GOAL → PLAN → TECH → REVIEW` spine — it is about
+> the *toolchain*, not the feature — and is retained on merge like the rest of `spec/listener-handshake-deadline/`.
+>
+> **Silence is the default.** The bar for a finding is one test: *was this the **skill's** fault — not
+> mine, not the task's?* A merely-hard task, a self-inflicted error, or a one-off content/code issue
+> (that belongs in `GOAL.md` / `REVIEW.md`) is **not** a finding. The blind `hs-review` correctness
+> reviewer never reads this file — it would leak author intent.
+
+- **slug:** listener-handshake-deadline
+
+## What worked well
+
+Brief, optional reinforcement: a part of a skill / the harness that materially helped, so `/hs-harness`
+knows what **not** to change. One line each, naming the skill/step. Skip the section entirely if
+nothing stands out.
+
+- hs-feature Step 4: the `kind: fix` rule (phrase the fixed behaviour, never the mechanism) and the security-lane sentence together made the public GOAL easy to keep at the outcome level.
+
+## Friction findings
+
+Zero or more findings, appended below — each a markdown **section** so appending is a low-corruption
+operation and a stdlib parser reads them (`uv run python .agents/factory/bin/meta_status.py
+spec/listener-handshake-deadline/META.md`). Skills always write `status=open`; only `/hs-harness` flips it. `target` is a
+best-guess file with **no line number** (re-derive the exact edit at apply time to avoid staleness). If
+an equivalent finding already exists, append "· seen again" to its title instead of duplicating —
+recurrence is signal, not bloat.
+
+Field enums — `severity`: `high` (a safety / gate / correctness gap) `| medium | low`; `category`:
+`instruction | steering | tooling | template | missing-guidance`; `status`: `open` (written by skills)
+`| applied | rejected | deferred` (written by `/hs-harness`).
+
+Schema (copy one block per finding, appending it **after** this fence — the fence is illustrative and
+is skipped by the parser):
+
+```markdown
+## F1 — <one-line title of the skillset problem>
+`origin=<skill>:<step> severity=<high|medium|low> category=<instruction|steering|tooling|template|missing-guidance> status=open target=<best-guess file>`
+- **What happened:** <what the skill made you do, or fail to do>.
+- **Skill cause:** <why this is the instructions' fault — not yours, not the task's>.
+- **Recommended fix:** <the concrete change to the skill / template / script>.
+- **Confidence:** <high|med|low> · **Effort:** <small|medium|large>
+```
+
+<!-- Real findings are appended below this line by the lifecycle skills. -->
+
+## F1 — Step 1/3 assume local `develop` in the main checkout; cycles run in worktrees off `origin/develop` · seen again
+`origin=hs-feature:step3 severity=low category=instruction status=open target=.agents/skills/hs-feature/SKILL.md`
+- **What happened:** The foreman cut `fix/listener-handshake-deadline` off `origin/develop` (`6da633d`) in a worktree under `.worktrees/` before this step ran, so Step 1's "on `develop`" check and Step 3's `git switch -c` were bypassed, and Step 2's collision check (branch must not exist) would have stopped the cycle if followed literally.
+- **Skill cause:** The skill knows only the main-checkout flow; the worktree flow every cycle now uses is not described.
+- **Recommended fix:** Add a worktree variant: when invoked in a worktree whose branch matches `{kind}/{slug}` and whose base is `origin/develop`, treat the branch as created and skip Step 3.
+- **Confidence:** high · **Effort:** small
+
+## F2 — No way to promote part of a seed and keep the rest alive · seen again
+`origin=hs-feature:step4 severity=low category=missing-guidance status=open target=.agents/skills/hs-feature/SKILL.md`
+- **What happened:** The private seed bundles four related items; the maintainer scoped this cycle to one. Step 4 only knows `status: adopted:{slug}` for the whole seed, which would retire the other three with it, so the seed was left `unshaped` with a dated note naming what this cycle took.
+- **Skill cause:** Promotion is all-or-nothing; the security lane's README allows partial remediation but the skill gives no form for it.
+- **Recommended fix:** Add a partial-promotion form: the seed keeps its status for the remainder and gains a dated `partly adopted:{slug} (<what>)` note (and the same marker on its ROADMAP entry), in either lane.
+- **Confidence:** med · **Effort:** small
+
+## F3 — Promotion step says to commit the seed's status edit, which is impossible in the security lane · seen again
+`origin=hs-feature:step4 severity=low category=instruction status=open target=.agents/skills/hs-feature/SKILL.md`
+- **What happened:** Steps 4 and 7 say to set the seed's status and commit it with the GOAL. `.security/` is gitignored, so the seed, finding and lane-index edits were made in the main checkout's `.security/`, left uncommitted, and reported instead.
+- **Skill cause:** The promotion and commit steps assume the public `issues/` lane; the security-lane sentence covers the GOAL's content, not the bookkeeping.
+- **Recommended fix:** Add a security-lane variant: edit the `.security/` seed, the finding's front-matter `status:` (`in_progress`) and the lane's index tables per `.security/README.md`, never stage them, and name each edit in the Step 8 report.
+- **Confidence:** high · **Effort:** small
+
+## F4 — No home or path rule for multi-process drive scripts that a `verify:` runs through `temp_site.sh`
+`origin=hs-plan:step6 severity=low category=missing-guidance status=open target=.agents/skills/hs-plan/SKILL.md`
+- **What happened:** The R6/R8 drives (a server, a held connection, a delayed relay launcher, older clients) are too long for an inline `verify:` string, so they went into a script under `research/`. The first dry run failed because `temp_site.sh` runs the command inside the throwaway site, so a repo-relative script path does not resolve; the verify now passes `"$PWD/…"`.
+- **Skill cause:** Step 4/6 and the TECH template show only one-line `uv run hs …` drives; nothing says where a drive script lives or that paths given to `temp_site.sh` must be absolute.
+- **Recommended fix:** In Step 6 (and the TECH template's `verify` note), say that a drive too long for one line goes in `spec/{slug}/research/` as a script, is invoked as `temp_site.sh uv run python "$PWD/spec/{slug}/research/<script>"`, and is dry-run on the base before the plan is committed.
+- **Confidence:** high · **Effort:** small
+
+## F5 — Drives dry-run only on the base leave their passing branch unexercised until build
+`origin=hs-build:P3 severity=medium category=missing-guidance status=open target=.agents/skills/hs-plan/SKILL.md`
+- **What happened:** The P3 verify failed on its first run although the server behaved correctly: `drive.py` required the held connection to be open after `hs server`/`hs cluster` had exited (process exit closes it) and after the relay had stopped its local server. hs-plan dry-ran every drive on develop, where they fail earlier for the intended reason, so the pass path was first run here; the harness had to be fixed mid-build and an attempt recorded.
+- **Skill cause:** hs-plan asks for drives to be dry-run on the base (red), with no step that runs them against the prototype or otherwise exercises the assertions that must hold on a correct build, so a harness bug in the green path reaches hs-build as a misleading red gate.
+- **Recommended fix:** In hs-plan's drive/verify guidance, require each drive (and any verify script) to be dry-run both on the base (expected red, for the right reason) and against the scratch prototype when one exists (expected green), and record both outcomes in the research brief.
+- **Confidence:** high · **Effort:** small
+
+
+## F6 — The blind reviewer's inputs exclude the drive scripts that the phase `verify:` commands run · seen again
+`origin=hs-review:step2 severity=medium category=missing-guidance status=open target=.agents/skills/hs-review/SKILL.md`
+- **What happened:** Step 2 and the rubric deny the reviewer all of `research/`, but this cycle's R6/R8 evidence comes from `research/drive.py` and `research/latency.py`, which the P2/P3 `verify:` commands run. The reviewer saw them only because the foreman added `git diff … -- 'spec/*/research/*.py'` by hand. Grading them turned up a drive that passes against a server with no deadline (REVIEW F3).
+- **Skill cause:** the blindness rule treats `research/` as rationale only. It has no case for executable harness scripts that a `verify:` command depends on, so a weak drive would reach `/hs-publish` as green evidence nobody graded.
+- **Recommended fix:** in Step 2 and in `review-rubric.md` ("What the reviewer sees"), admit the scripts that any phase `verify:` names, as the diff `git diff {base}...HEAD -- 'spec/{slug}/research/*.py'`. Keep `research/*.md`, PLAN, TECH and META excluded. Have the reviewer check that each drive fails against a no-fix mutant.
+- **Confidence:** high · **Effort:** small
+
+## F7 — The approved route leaves the previous cycle's `blocked_reason` in `TECH.md`
+`origin=hs-review:step4 severity=low category=tooling status=open target=.agents/factory/bin/set_phase.py`
+- **What happened:** after cycle 3 approved the branch, `set_phase.py --verdict approved --reviewed-commit … --touch` left cycle 2's `blocked_reason` (the F4 and F5 text) under `verdict: approved`. A second call, `--blocked-reason ''`, cleared it.
+- **Skill cause:** Step 4's clean route names only `--verdict approved --reviewed-commit --touch`. `set_phase.py` changes `blocked_reason` only when it is passed. So every approval after a changes-requested cycle carries a stale blocker into `/hs-publish` unless the orchestrator notices.
+- **Recommended fix:** have `set_phase.py --verdict approved` clear `review.blocked_reason`, or add `--blocked-reason ''` to Step 4's clean-route command.
+- **Confidence:** high · **Effort:** small

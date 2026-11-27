@@ -28,7 +28,7 @@ level margin: \\n[rst2man-indent\\n[rst2man-indent-level]]
 .\" new: \\n[rst2man-indent\\n[rst2man-indent-level]]
 .in \\n[rst2man-indent\\n[rst2man-indent-level]]u
 ..
-.TH "HYPER-SHELL" "1" "Nov 11, 2026" "2.8.7" "hypershell"
+.TH "HYPER-SHELL" "1" "Nov 27, 2026" "2.9.0" "hypershell"
 .SH NAME
 hyper-shell \- Process shell commands over a distributed, asynchronous queue
 .SH SYNOPSIS
@@ -48,6 +48,9 @@ Run stand\-alone server.
 .TP
 .B hs client [\-h] ...
 Run stand\-alone client.
+.TP
+.B hs relay [\-h] [\-H ADDR] [\-p NUM] [\-\-zone NAME] ...
+Run relay for one site.
 .TP
 .B hs submit [\-h] [ARGS... | \-f FILE] ...
 Submit one or more tasks.
@@ -88,12 +91,12 @@ Stand up the \fBserver\fP on its own and scale \fBclients\fP as desired, and \fB
 .SH CLUSTER USAGE
 .INDENT 0.0
 .TP
-.B \fBhs cluster [\-h]\fP \fB[FILE | \-\-restart | \-\-forever]\fP
-\fB[\-N NUM]\fP \fB[\-t CMD]\fP \fB[\-b SIZE]\fP \fB[\-w SEC]\fP \fB[\-Q NUM]\fP
-\fB[\-H ADDR]\fP \fB[\-p PORT]\fP \fB[\-r NUM [\-\-eager]]\fP \fB[\-f PATH]\fP \fB[\-\-capture | [\-o PATH] [\-e PATH]]\fP
+.B \fBhs cluster [\-h]\fP \fB[FILE | \-\-from\-json SPEC | \-\-restart | \-\-forever]\fP \fB[\-\-repeat | \-\-update]\fP
+\fB[\-N NUM]\fP \fB[\-t CMD]\fP \fB[\-b SIZE]\fP \fB[\-w SEC]\fP \fB[\-Q SEC]\fP
+\fB[\-H ADDR]\fP \fB[\-\-advertise ADDR]\fP \fB[\-p PORT]\fP \fB[\-r NUM [\-\-eager]]\fP \fB[\-f PATH]\fP \fB[\-\-capture | [\-o PATH] [\-e PATH]]\fP
 \fB[\-\-ssh [HOST... | \-\-ssh\-group NAME] [\-\-env] | \-\-mpi | \-\-launcher=ARGS...]\fP
 \fB[\-\-no\-db [\-\-no\-confirm] | \-\-initdb]\fP \fB[\-d SEC]\fP \fB[\-T SEC]\fP \fB[\-W SEC]\fP \fB[\-S SEC]\fP \fB[\-R NUM]\fP
-\fB[\-c NUM]\fP \fB[\-m MEM]\fP \fB[\-C NUM]\fP \fB[\-M MEM]\fP \fB[\-\-monitor]\fP
+\fB[\-c NUM]\fP \fB[\-m MEM]\fP \fB[\-C NUM]\fP \fB[\-M MEM]\fP \fB[\-\-monitor]\fP \fB[\-\-zone NAME]\fP
 \fB[\-\-autoscaling [MODE] [\-P SEC] [\-F VALUE] [\-I NUM] [\-X NUM] [\-Y NUM]]\fP
 \fB[\-\-no\-tls | [\-\-tls\-ca PATH] [\-\-tls\-cert PATH] [\-\-tls\-key PATH]]\fP
 .UNINDENT
@@ -106,13 +109,50 @@ The input source for tasks is file\-like, either a local path, or from \fIstdin\
 given. The command\-line tasks are pulled in and either directly published to a distributed queue
 (see \fB\-\-no\-db\fP) or committed to a database first before being scheduled later.
 .sp
+Alternatively, use \fB\-\-from\-json\fP to read tasks from a JSON file (\fBFILE[@path]\fP); each task
+object\(aqs keys become named \fB{key}\fP fields in the \fB\-\-template\fP (and task tags, but for the
+\fBgroup\fP, \fBzone\fP, \fBcores\fP, \fBmemory\fP and \fBtimeout\fP keys, which set those fields). In this mode the
+template is expanded when tasks are ingested rather than by the clients. A JSON source participates
+in the same re\-submission gating as a plain \fIFILE\fP — \fB\-\-restart\fP (idempotent requeue),
+\fB\-\-repeat\fP, and \fB\-\-update \-\-restart\fP all apply — keyed by the file\(aqs absolute path together
+with any \fB@path\fP selector.
+.sp
 For large, long running workflows, it might be a good idea to configure a database and run an
 initial \fBsubmit\fP job to populate the database, and then run the cluster with \fB\-\-restart\fP and no
 input \fIFILE\fP\&. If the cluster is interrupted for whatever reason it can gracefully restart where it
 left off.
 .sp
+Alternatively, pass the \fIFILE\fP directly with \fB\-\-restart\fP: the submission is detected, only tasks
+that never landed are submitted, and interrupted tasks are re\-run — so a requeued
+\fBhsx <FILE> \-\-restart\fP job is safe to run repeatedly. Use \fB\-\-repeat\fP to deliberately submit a
+known file\(aqs tasks again as a new source, or \fB\-\-update \-\-restart\fP to add only the tasks that are
+new since the file was last seen.
+.sp
+De\-dup cost scales with the file\(aqs own source lineage rather than the whole database, so requeues stay
+fast at scale; for very large workflows, a one\-time \fBsubmit\fP followed by a bare \fBhsx \-\-restart\fP (no
+file re\-read) is cheaper than re\-feeding the \fIFILE\fP each run.
+.sp
+Clients launched on other hosts (\fB\-\-ssh\fP, \fB\-\-mpi\fP, \fB\-\-launcher\fP and \fB\-\-autoscaling\fP) are
+told one address to dial in every mode: the bind address (\fB\-H\fP) when the server binds one
+specific address, and this host\(aqs own name when it binds every interface (\fI0.0.0.0\fP, the default
+for remote clients). Use \fB\-\-advertise\fP (or \fBserver.advertise\fP) to tell them another, such as
+a name on the server\(aqs certificate; it must be reachable from wherever the clients run.
+.sp
+A client process the cluster launched that exits with a non\-zero status is warned about when it
+exits, naming it (its host under \fB\-\-ssh\fP). When every process launched with \fB\-\-ssh\fP, \fB\-\-mpi\fP
+or \fB\-\-launcher\fP has exited, at least one of them non\-zero, while tasks remain that no client is
+left to run, the cluster stops its server and exits non\-zero with one error naming each process,
+how it exited, and the address the clients were told to dial. A launcher that exits 0 with tasks
+remaining (one that hands its clients to a scheduler and returns, say) leaves the cluster waiting
+for them to connect.
+.sp
 Use \fB\-\-autoscaling\fP with either \fIfixed\fP or \fIdynamic\fP to run a persistent, elastically scalable
-cluster using an external \fB\-\-launcher\fP to bring up clients as needed.
+cluster using an external \fB\-\-launcher\fP to bring up clients as needed. Clients are scaled per zone:
+each zone with tasks in the active group gets its own clients, and the launcher is told which zone
+each one is for. When \fBautoscale.failed_launches\fP launched clients in a row (3 by default) exit
+non\-zero while no client is registered with the server, the autoscaler launches no more, and the
+cluster stops its server and exits non\-zero with one error naming them and the address the clients
+were told to dial.
 .sp
 Use \fBhsx\fP in place of \fBhs cluster\fP\&.
 .SS Arguments
@@ -138,6 +178,11 @@ Use specific launch interface. This can be any program that handles process mana
 distributed system. For example, on a \fISLURM\fP cluster one might want to use \fBsrun\fP\&. In this
 case you would specify \fB\-\-launcher=srun\fP; however, the \fIARGS\fP are not merely the executable
 but the full listing, e.g., \fB\-\-launcher=\(aqsrun \-\-mpi=pmi2\(aq\fP\&.
+.sp
+With \fB\-\-autoscaling\fP, each launch names the zone of the client it starts: \fB{zone}\fP in
+\fIARGS\fP is replaced by the zone\(aqs name (\fBdefault\fP for the default zone), and the launched
+process has the name in its \fBHYPERSHELL_ZONE\fP environment variable. The client\(aqs own
+\fB\-\-template\fP is never changed. See \fB\-\-autoscaling\fP for an example.
 .UNINDENT
 .SS Options
 .INDENT 0.0
@@ -160,11 +205,39 @@ arguments (e.g., file paths) to be transformed into some common form; such as
 .sp
 See section on \fItemplates\fP\&.
 .TP
+.B \fB\-\-from\-json\fP \fISPEC\fP
+Read tasks from a JSON file (\fBFILE[@path]\fP).
+.sp
+The optional dotted \fBpath\fP after \fB@\fP locates the list of task objects inside the
+document (e.g. \fBplan.json@chunks\fP); with no \fB@\fP the file\(aqs top level must be the
+list. Each task object\(aqs keys become named \fB{key}\fP fields in the \fB\-\-template\fP and
+task tags. In this mode the template is expanded when tasks are ingested (submit\-side),
+not by the clients.
+.sp
+A record\(aqs \fBgroup\fP, \fBzone\fP, \fBcores\fP, \fBmemory\fP and \fBtimeout\fP keys set those fields of
+its task, over the options, and are not stored as tags; a \fBzone\fP must be a JSON string.
+.TP
 .B \fB\-H\fP, \fB\-\-bind\fP \fIADDR\fP
 Bind address (default: localhost, or 0.0.0.0 for remote clients).
 .sp
 Sets the address the server binds to. When launching clients on remote hosts
-(\fB\-\-ssh\fP, \fB\-\-mpi\fP, or \fB\-\-launcher\fP), bind to \fI0.0.0.0\fP so they can connect.
+(\fB\-\-ssh\fP, \fB\-\-mpi\fP, or \fB\-\-launcher\fP, with or without \fB\-\-autoscaling\fP), the default
+\fIlocalhost\fP becomes \fI0.0.0.0\fP so they can connect. The clients are told to dial the bind
+address when it is one specific address, and this host\(aqs own name when it is \fI0.0.0.0\fP,
+unless \fB\-\-advertise\fP names another.
+.TP
+.B \fB\-\-advertise\fP \fIADDR\fP
+Address remote clients dial (default: by \fB\-H\fP, as above).
+.sp
+Tells every launched client to dial \fIADDR\fP, whatever the bind address: a name the clients
+can reach the server by that differs from it, such as the name on the server\(aqs certificate.
+Also set by \fBserver.advertise\fP; this option takes precedence. Not allowed with a local
+cluster, whose clients are not launched.
+.sp
+Under TLS the advertised address must be one the client\(aqs certificate check accepts: with a
+certificate from the system\(aqs trusted authorities (no \fBcafile\fP and no \fBservername\fP),
+clients check it against the address they dial, so advertise a name the certificate carries,
+or set \fBserver.tls.servername\fP\&.
 .TP
 .B \fB\-p\fP, \fB\-\-port\fP \fIPORT\fP
 Port number (default: 50001).
@@ -186,21 +259,35 @@ to coordinate bundle size with the number of executors in use by each client.
 See also \fB\-\-num\-threads\fP and \fB\-\-bundlewait\fP\&.
 .TP
 .B \fB\-w\fP, \fB\-\-bundlewait\fP \fISEC\fP
-Seconds to wait before flushing tasks (default: 5).
+Time to wait before flushing tasks (default: 5).
+.sp
+Specify a number of seconds, units \fBd\fP, \fBh\fP, \fBm\fP and \fBs\fP in that order, whole or
+fractional (e.g., \fB30s\fP, \fB5m\fP, \fB1h30m\fP, \fB1.5h\fP), or a Slurm time \fBMM:SS\fP,
+\fBHH:MM:SS\fP, \fBD\-HH\fP, \fBD\-HH:MM\fP or \fBD\-HH:MM:SS\fP (e.g., \fB1:30\fP). A fraction of a
+second is rounded up to the next whole second.
 .sp
 This is used by both the \fIsubmit\fP thread and forwarded to each \fIclient\fP\&. The \fIclient\fP collector
 thread that accumulates finished task bundles to return to the \fIserver\fP will push out a bundle
 after this period of time regardless of whether it has reached the preferred bundle size.
+A client with nothing left to run returns what it holds at once. The \fIsubmit\fP thread does not:
+it checks this period only when another task arrives, so it holds tasks until a bundle is
+full, a task arrives after the period, or the input ends.
 .sp
 See also \fB\-\-bundlesize\fP\&.
 .TP
-.B \fB\-Q\fP, \fB\-\-poll\fP \fINUM\fP
-Polling interval in seconds between database queries if no tasks are available (default: 5).
+.B \fB\-Q\fP, \fB\-\-poll\fP \fISEC\fP
+Polling interval between database queries if no tasks are available (default: 30).
+.sp
+Specify a number of seconds, units \fBd\fP, \fBh\fP, \fBm\fP and \fBs\fP in that order, whole or
+fractional (e.g., \fB30s\fP, \fB5m\fP, \fB1h30m\fP, \fB1.5h\fP), or a Slurm time \fBMM:SS\fP,
+\fBHH:MM:SS\fP, \fBD\-HH\fP, \fBD\-HH:MM\fP or \fBD\-HH:MM:SS\fP (e.g., \fB1:30\fP). A fraction of a
+second is rounded up to the next whole second.
 .sp
 This controls how frequently the scheduler checks the database for new tasks when idle.
 Lower values (e.g., 1\-2 seconds) provide faster responsiveness but may increase database
 query load. Higher values (e.g., 10\-30 seconds) reduce query frequency, useful for
-workflows with infrequent task submission.
+workflows with infrequent task submission. The result that finishes a run ends the
+scheduler\(aqs wait at once.
 .TP
 .B \fB\-r\fP, \fB\-\-max\-retries\fP \fINUM\fP
 Auto\-retry failed tasks (default: 0).
@@ -209,6 +296,10 @@ If a database is in use, then there is an opportunity to automatically retry fai
 task is considered to have failed if it has a non\-zero exit status. Setting this value greater
 than zero defines the number of attempts for the task. The original is not over\-written, a new
 task is submitted and later scheduled.
+.sp
+A task whose template does not expand (\-1001) or that needs more cores or memory than its
+client has (\-1002) is never retried: it did not run, and its group fails at once.
+A retry keeps its task\(aqs cores, memory and walltime.
 .sp
 See also \fB\-\-eager\fP\&.
 .TP
@@ -222,7 +313,22 @@ Disable database (submit directly to clients).
 .sp
 By default, a scheduler thread selects tasks from a database that were previously submitted.
 With \fB\-\-no\-db\fP enabled, there is no scheduler and instead the \fIsubmit\fP thread publishes
-bundles directly to the queue.
+bundles directly to the queue. The configured database is not opened at all, so it need not
+exist or be initialized.
+.TP
+.B \fB\-\-zone\fP \fINAME\fP
+Zone of the submitted tasks and of every client the cluster launches; the own zone with
+\fB\-\-autoscaling\fP (default: none).
+.sp
+The tasks read from \fIFILE\fP (or \fB\-\-from\-json\fP) are placed in this zone, and each client is
+launched with the same \fB\-\-zone\fP, so it runs them. A zone named in the input (\fBzone:NAME\fP
+or \fBzone=NAME\fP inline, or a record\(aqs \fBzone\fP) wins over \fB\-\-zone\fP for its tasks; without
+\fB\-\-autoscaling\fP, one warning names each such zone the clients do not serve. Zones are recorded in the database, so
+\fB\-\-zone\fP cannot be used with \fB\-\-no\-db\fP\&.
+.sp
+With \fB\-\-autoscaling\fP, this is the cluster\(aqs own zone: the one that \fB\-\-init\-size\fP and
+\fB\-\-min\-size\fP apply to. Any other zone with tasks in the active \fItask group\fP gets clients
+of its own, each launched with \fB\-\-zone\fP set to that zone.
 .TP
 .B \fB\-\-initdb\fP
 Auto\-initialize database.
@@ -249,17 +355,39 @@ no more tasks left to schedule, the \fIcluster\fP will begin its shutdown proced
 Conflicts with \fB\-\-no\-db\fP and mutually exclusive to \fB\-\-restart\fP\&.
 .TP
 .B \fB\-\-restart\fP
-Start scheduling from last completed task.
+Start scheduling from where a prior run left off.
 .sp
-Instead of pulling a new list of tasks from some input \fIFILE\fP, with \fB\-\-restart\fP enabled the
-\fIcluster\fP will restart scheduling tasks where it left off. Any task in the database that was
-previously scheduled but not completed will be reverted.
+With no \fIFILE\fP, \fB\-\-restart\fP resumes purely from the database: any task previously
+scheduled but not completed is reverted, scheduling continues, and the \fIcluster\fP halts when
+nothing is left to do. This is the classic \(dqpopulate with \fBsubmit\fP, then requeue\(dq strategy
+for very large workflows — if the \fIcluster\fP is interrupted it can gracefully continue where
+it left off.
 .sp
-For very large workflows, an effective strategy is to first use the \fBsubmit\fP workflow to
-populate the database, and then to use \fB\-\-restart\fP so that if the \fIcluster\fP is interrupted,
-it can easily continue where it left off, halting if nothing to be done.
+When a \fIFILE\fP is given, \fB\-\-restart\fP becomes file\-aware and idempotent. The file is read
+upfront (a content fingerprint and task count), and only tasks whose identity is not already
+present from a prior submission of that same path are submitted; the revert\-interrupted flow
+re\-runs anything that was mid\-flight. Requeuing the same \fBhsx <FILE> \-\-restart\fP job as many
+times as needed therefore never double\-submits work. If the file\(aqs content has changed since
+it was last seen, the run is refused with a suggestion to use \fB\-\-update \-\-restart\fP\&.
 .sp
-Conflicts with \fB\-\-no\-db\fP and mutually exclusive to \fB\-\-forever\fP\&.
+Conflicts with \fB\-\-no\-db\fP and \fB\-\-repeat\fP, and mutually exclusive to \fB\-\-forever\fP\&.
+.TP
+.B \fB\-\-repeat\fP
+Re\-submit a known file\(aqs tasks again as a new source.
+.sp
+Re\-submitting a file that has already been ingested is normally refused. \fB\-\-repeat\fP
+overrides that: the file is recorded as a brand\-new source and \fIall\fP of its tasks are
+submitted again, even if an identical prior submission exists. Combine with \fB\-t\fP/tags to
+represent a new phase or trial of the same work.
+.TP
+.B \fB\-\-update\fP
+Submit only the tasks that are new since a file was last seen.
+.sp
+Used together with \fB\-\-restart\fP (\fBhsx <FILE> \-\-update \-\-restart\fP): the file is recorded as
+a new source and only tasks whose identity is not already present in the prior same\-path
+lineage are submitted — novel tasks run while previously\-submitted tasks are skipped. On its
+own (without \fB\-\-restart\fP) it is ambiguous and refused; it also cannot be combined with
+\fB\-\-repeat\fP\&.
 .TP
 .B \fB\-\-ssh\-args\fP \fIARGS\fP\&...
 Command\-line arguments for SSH. For example, \fB\-\-ssh\-args \(aq\-i ~/.ssh/my_key\(aq\fP\&.
@@ -284,17 +412,24 @@ By default the executable path used to launch clients is the same as that for th
 This option is necessary for clients with a different install path on client hosts.
 .TP
 .B \fB\-d\fP, \fB\-\-delay\-start\fP \fISEC\fP
-Delay time in seconds for launching clients (default: 0).
+Delay time for launching clients (default: 0).
+.sp
+Specify a number of seconds, units \fBd\fP, \fBh\fP, \fBm\fP and \fBs\fP in that order, whole or
+fractional (e.g., \fB30s\fP, \fB10m\fP, \fB1h30m\fP, \fB1.5h\fP), or a Slurm time \fBMM:SS\fP,
+\fBHH:MM:SS\fP, \fBD\-HH\fP, \fBD\-HH:MM\fP or \fBD\-HH:MM:SS\fP (e.g., \fB1:30\fP). Fractions of a second
+are kept (\fB\-\-delay\-start=1.5s\fP waits one and a half seconds).
 .sp
 At larger scales it can be advantageous to uniformly delay the client launch sequence.
 Hundreds or thousands of clients connecting to the server all at once is a challenge.
 Even if the server could handle the load, your task throughput would be unbalanced,
 coming in waves.
 .sp
-Use \fB\-\-delay\-start\fP with a negative number to impose a uniform random delay up to the
-magnitude specified (e.g., \fB\-\-delay\-start=\-600\fP would delay the client up to ten minutes).
-This also has the effect of staggering the workload. If your tasks take on the order of 30
-minutes and you have 1000 nodes, choose \fB\-\-delay\-start=\-1800\fP\&.
+Write the value with a leading \fB\-\fP to impose a uniform random delay up to the magnitude
+specified (e.g., \fB\-\-delay\-start=\-10m\fP or \fB\-\-delay\-start=\-600\fP would delay the client up to
+ten minutes). This also has the effect of staggering the workload. If your tasks take on the
+order of 30 minutes and you have 1000 nodes, choose \fB\-\-delay\-start=\-30m\fP\&. Attach a value
+with a leading \fB\-\fP to the option with \fB=\fP as shown; given as a separate word, only a plain
+number (e.g., \fB\-d \-600\fP) is read as a value on every version of Python.
 .TP
 .B \fB\-\-capture\fP
 Capture individual task <stdout> and <stderr>.
@@ -391,11 +526,16 @@ Time\-series data is stored in CSV format alongside task outputs.
 See also \fB\-\-capture\fP\&.
 .TP
 .B \fB\-R\fP, \fB\-\-ratelimit\fP \fINUM\fP
-Maximum allowed tasks per second per client. (default: none).
+Maximum allowed tasks per second per client; a number, e.g. 0.5 (default: none).
 Individual tasks are throttled if exceeding this average limit.
 .TP
 .B \fB\-S\fP, \fB\-\-signalwait\fP \fISEC\fP
-Task\-level signal escalation wait period in seconds (default: 10).
+Task\-level signal escalation wait period (default: 10).
+.sp
+Specify a number of seconds, units \fBd\fP, \fBh\fP, \fBm\fP and \fBs\fP in that order, whole or
+fractional (e.g., \fB30s\fP, \fB5m\fP, \fB1h30m\fP, \fB1.5h\fP), or a Slurm time \fBMM:SS\fP,
+\fBHH:MM:SS\fP, \fBD\-HH\fP, \fBD\-HH:MM\fP or \fBD\-HH:MM:SS\fP (e.g., \fB1:30\fP). A fraction of a
+second is rounded up to the next whole second.
 .sp
 When tasks fail to halt following an initial SIGINT, the program waits
 this interval in seconds before escalating to the next level of interrupt.
@@ -403,7 +543,7 @@ this interval in seconds before escalating to the next level of interrupt.
 See also \fB\-\-task\-timeout\fP\&.
 .TP
 .B \fB\-A\fP, \fB\-\-autoscaling\fP [\fIMODE\fP]
-Enable autoscaling (default: disabled). Used with \fB\-\-launcher\fP\&.
+Enable autoscaling per zone (default: disabled). Used with \fB\-\-launcher\fP\&.
 .sp
 Specifying this option on its own triggers the use of the autoscaler, with the default
 \fIpolicy\fP or the configured policy. The \fIpolicy\fP can be specified directly here
@@ -416,10 +556,42 @@ Without this option, clients will simply be run locally.
 .sp
 A \fIfixed\fP policy will seek to maintain a definite size and allows for recovery in the
 event that clients halt for some reason (e.g., due to expected faults or timeouts).
+A launch that keeps failing is not repeated forever, under either policy: once
+\fBautoscale.failed_launches\fP launched clients in a row (default: 3) exit non\-zero while no
+client is registered, the cluster stops and exits non\-zero, naming them.
 .sp
 A \fIdynamic\fP policy maintains a \fB\-\-min\-size\fP (default: 0) and grows up to some
 \fB\-\-max\-size\fP depending on the observed \fItask pressure\fP given the specified scaling
 \fB\-\-factor\fP\&.
+.sp
+Clients are scaled per zone. Each zone with tasks in the active \fItask group\fP has a fleet of
+its own, sized by the same policy and the same values of \fB\-\-factor\fP and \fB\-\-max\-size\fP,
+with its own task pressure. \fB\-\-init\-size\fP and \fB\-\-min\-size\fP apply only to the cluster\(aqs
+own zone (\fB\-\-zone\fP, else the default zone); every other zone gets clients only while it
+has work in the active group, so a zone whose tasks wait in a later group gets none yet.
+Each \fB\-\-period\fP, at most one client is added per zone, so several zones can each add one
+at once. Clients of a zone whose work is done leave by \fB\-\-timeout\fP as usual.
+.sp
+Each launch names its zone to the launcher, as \fB{zone}\fP in the \fB\-\-launcher\fP arguments
+and as \fBHYPERSHELL_ZONE\fP in its environment, so one launcher can send the clients of each
+zone to the resource that serves it. When partitions are named after zones, the launcher
+alone can do it (\fB\-\-launcher=\(aqsrun \-p {zone} \-n1\(aq\fP). Otherwise a small script given as
+\fB\-\-launcher=\(aqsh launch.sh\(aq\fP can choose, for example:
+.INDENT 7.0
+.INDENT 3.5
+.sp
+.EX
+#!/bin/sh
+# Start one client on the partition that serves its zone.
+case \(dq$HYPERSHELL_ZONE\(dq in
+    gpu)   partition=gpu ;;
+    himem) partition=himem ;;
+    *)     partition=cpu ;;
+esac
+exec srun \-p \(dq$partition\(dq \-n1 \(dq$@\(dq
+.EE
+.UNINDENT
+.UNINDENT
 .sp
 See also \fB\-\-factor\fP, \fB\-\-period\fP, \fB\-\-init\-size\fP, \fB\-\-min\-size\fP, and \fB\-\-max\-size\fP\&.
 .TP
@@ -447,7 +619,13 @@ exceeds 1 hour, we will scale up by one unit.
 See also \fB\-\-period\fP\&.  Only valid with \fB\-\-autoscaling\fP\&.
 .TP
 .B \fB\-P\fP, \fB\-\-period\fP \fISEC\fP
-Scaling period in seconds (default: 60).
+Scaling period, greater than zero (default: 60).
+.sp
+Specify a number of seconds, units \fBd\fP, \fBh\fP, \fBm\fP and \fBs\fP in that order, whole or
+fractional (e.g., \fB30s\fP, \fB5m\fP, \fB1h30m\fP, \fB1.5h\fP), or a Slurm time \fBMM:SS\fP,
+\fBHH:MM:SS\fP, \fBD\-HH\fP, \fBD\-HH:MM\fP or \fBD\-HH:MM:SS\fP (e.g., \fB1:30\fP). A fraction of a
+second is rounded up to the next whole second. A period of zero or less, here or in
+\fBautoscale.period\fP, is refused.
 .sp
 The autoscaler waits for this period of time in between checks and scaling events.
 A shorter period makes the scaling behavior more responsive but can effect database
@@ -519,23 +697,42 @@ See the \fIsecurity\fP section for peer verification modes.
 .TP
 .B \fBhs\fP \fBserver\fP \fB[\-h]\fP \fB[FILE | \-\-forever | \-\-restart]\fP
 \fB[\-b NUM]\fP \fB[\-w SEC]\fP \fB[\-r NUM [\-\-eager]]\fP \fB[\-c NUM]\fP \fB[\-m MEM]\fP \fB[\-W SEC]\fP
-\fB[\-H ADDR]\fP \fB[\-p PORT]\fP \fB[\-k KEY]\fP \fB[\-Q NUM]\fP \fB[\-\-no\-db [\-\-no\-confirm] | \-\-initdb]\fP \fB[\-\-print | \-f PATH]\fP
+\fB[\-H ADDR]\fP \fB[\-p PORT]\fP \fB[\-Q SEC]\fP \fB[\-\-no\-db [\-\-no\-confirm] | \-\-initdb]\fP \fB[\-\-print | \-f PATH]\fP
 \fB[\-\-no\-tls | [\-\-tls\-ca PATH] [\-\-tls\-cert PATH] [\-\-tls\-key PATH]]\fP
+\fB[\-\-autoscaling [MODE] [\-F VALUE] [\-P SEC]]\fP
 .UNINDENT
 .sp
 Launch server, schedule directly or asynchronously from database.
 .sp
-The server includes a scheduler component that pulls tasks from the database and offers
-them up on a distributed queue to clients. It also has a receiver that collects the results
+The server includes a scheduler component that pulls tasks from the database and stages them
+for clients, which request bundles of them when they are ready for work. It also has a receiver that collects the results
 of finished tasks. Optionally, the server can submit tasks (\fIFILE\fP). When submitting tasks,
 the \fB\-w\fP/\fB\-\-bundlewait\fP and \fB\-b\fP/\fB\-\-bundlesize\fP options are the same as for the
 \fIsubmit\fP workflow.
 .sp
 With \fB\-\-max\-retries\fP greater than zero, the scheduler will check for a non\-zero exit status
 for tasks and re\-submit them if their previous number of attempts is less.
+A task whose template does not expand (\fB\-1001\fP) or that needs more cores or memory than its
+client has (\fB\-1002\fP) is never retried: it did not run, and its group fails at once.
+A retry keeps its task\(aqs cores, memory and walltime.
 .sp
-Tasks are bundled and clients pull them in these bundles. However, by default the bundle size
-is one, meaning that at small scales there is greater concurrency.
+Tasks are bundled for each client at the size it asks for, or at the server\(aqs \fB\-b\fP/\fB\-\-bundlesize\fP
+when it asks for none. By default the bundle size is one, meaning that at small scales there is
+greater concurrency.
+.sp
+With \fB\-\-autoscaling\fP, the server schedules forever and launches nothing. Relays connected with its
+key advertise the zones they serve and each zone\(aqs \fBmin\fP, \fBmax\fP and \fBinit\fP clients, and the server
+publishes how many clients each relay should run in each zone, for the relay to launch with its own
+launcher (see \fI\%autoscaling with relay sites\fP).
+.sp
+The server takes its key from the \fBHYPERSHELL_SERVER_AUTH\fP environment variable or from
+\fBserver.auth\fP in a configuration file (or its \fBauth_env\fP and \fBauth_eval\fP forms), never from
+the command line. It refuses to start with the built\-in placeholder key, or with a key shorter
+than 16 characters or outside \fB[A\-Za\-z0\-9._+/=\-]\fP\&.
+.sp
+Changed in version 2.9.0: \X'tty: link https://github.com/hypershell/hypershell/pull/104'\fI\%#104\fP\X'tty: link': a key on the command line is refused; the server takes it from the environment or a
+configuration file.
+
 .SS Arguments
 .INDENT 0.0
 .TP
@@ -557,20 +754,14 @@ Port number (default: 50001).
 This is an arbitrary choice and simply must be an available port. The default option chosen
 here is typically available on most platforms and is not expected by any known major software.
 .TP
-.B \fB\-k\fP, \fB\-\-auth\fP \fIKEY\fP
-Cryptographic authentication key to connect with server (default: <not secure>).
-.sp
-The default \fIKEY\fP used by the server and client is not secure and only a place holder.
-It is expected that the user choose a secure \fIKEY\fP\&. The \fIcluster\fP automatically generates
-a secure one\-time \fIKEY\fP\&.
-.TP
 .B \fB\-b\fP, \fB\-\-bundlesize\fP \fINUM\fP
 Size of task bundle (default: 1).
 .sp
 The default value allows for greater concurrency and responsiveness on small scales. This is
 used by the \fIsubmit\fP thread to accumulate bundles for either database commits and/or publishing
 to the queue. If a database is in use, the scheduler thread selects tasks from the database in
-batches of this size.
+batches of this size. It is also the size of the bundle given to a client that advertises no
+size of its own (a client\(aqs \fB\-b\fP is its advertised size).
 .sp
 Using larger bundles is a good idea for large distributed workflows; specifically, it is best
 to coordinate bundle size with the number of executors in use by each client.
@@ -578,7 +769,12 @@ to coordinate bundle size with the number of executors in use by each client.
 See also \fB\-\-num\-threads\fP and \fB\-\-bundlewait\fP\&.
 .TP
 .B \fB\-w\fP, \fB\-\-bundlewait\fP \fISEC\fP
-Seconds to wait before flushing tasks (default: 5).
+Time to wait before flushing tasks (default: 5).
+.sp
+Specify a number of seconds, units \fBd\fP, \fBh\fP, \fBm\fP and \fBs\fP in that order, whole or
+fractional (e.g., \fB30s\fP, \fB5m\fP, \fB1h30m\fP, \fB1.5h\fP), or a Slurm time \fBMM:SS\fP,
+\fBHH:MM:SS\fP, \fBD\-HH\fP, \fBD\-HH:MM\fP or \fBD\-HH:MM:SS\fP (e.g., \fB1:30\fP). A fraction of a
+second is rounded up to the next whole second.
 .sp
 This is used by both the \fIsubmit\fP thread and forwarded to each \fIclient\fP\&. The \fIclient\fP collector
 thread that accumulates finished task bundles to return to the \fIserver\fP will push out a bundle
@@ -586,13 +782,19 @@ after this period of time regardless of whether it has reached the preferred bun
 .sp
 See also \fB\-\-bundlesize\fP\&.
 .TP
-.B \fB\-Q\fP, \fB\-\-poll\fP \fINUM\fP
-Polling interval in seconds between database queries if no tasks are available (default: 5).
+.B \fB\-Q\fP, \fB\-\-poll\fP \fISEC\fP
+Polling interval between database queries if no tasks are available (default: 30).
+.sp
+Specify a number of seconds, units \fBd\fP, \fBh\fP, \fBm\fP and \fBs\fP in that order, whole or
+fractional (e.g., \fB30s\fP, \fB5m\fP, \fB1h30m\fP, \fB1.5h\fP), or a Slurm time \fBMM:SS\fP,
+\fBHH:MM:SS\fP, \fBD\-HH\fP, \fBD\-HH:MM\fP or \fBD\-HH:MM:SS\fP (e.g., \fB1:30\fP). A fraction of a
+second is rounded up to the next whole second.
 .sp
 This controls how frequently the scheduler checks the database for new tasks when idle.
 Lower values (e.g., 1\-2 seconds) provide faster responsiveness but may increase database
 query load. Higher values (e.g., 10\-30 seconds) reduce query frequency, useful for
-workflows with infrequent task submission.
+workflows with infrequent task submission. The result that finishes a run ends the
+scheduler\(aqs wait at once.
 .TP
 .B \fB\-r\fP, \fB\-\-max\-retries\fP \fINUM\fP
 Auto\-retry failed tasks (default: 0).
@@ -601,6 +803,10 @@ If a database is in use, then there is an opportunity to automatically retry fai
 task is considered to have failed if it has a non\-zero exit status. Setting this value greater
 than zero defines the number of attempts for the task. The original is not over\-written, a new
 task is submitted and later scheduled.
+.sp
+A task whose template does not expand (\-1001) or that needs more cores or memory than its
+client has (\-1002) is never retried: it did not run, and its group fails at once.
+A retry keeps its task\(aqs cores, memory and walltime.
 .sp
 See also \fB\-\-eager\fP\&.
 .TP
@@ -649,14 +855,17 @@ Disable database (submit directly to clients).
 .sp
 By default, a scheduler thread selects tasks from a database that were previously submitted.
 With \fB\-\-no\-db\fP enabled, there is no scheduler and instead the \fIsubmit\fP thread publishes
-bundles directly to the queue.
+bundles directly to the queue. The configured database is not opened at all, so it need not
+exist or be initialized.
 .TP
 .B \fB\-\-initdb\fP
 Auto\-initialize database.
 .sp
-If a database is configured for use with the workflow (e.g., PostgreSQL), auto\-initialize
-tables if they don\(aqt already exist. This is a short\-hand for pre\-creating tables with the
-\fBhs initdb\fP command. This happens by default with SQLite databases.
+Initialize the configured database at launch as the \fBhs initdb\fP command does, without
+asking for confirmation: create the tables if they don\(aqt already exist, upgrade existing ones
+in place, and with the \fBtimescale\fP provider check the server and give the \fBtask\fP table its
+hypertable shape. This happens by default with SQLite databases. Without \fB\-\-initdb\fP, a
+PostgreSQL database that was never initialized stops the server.
 .sp
 Mutually exclusive to \fB\-\-no\-db\fP\&. See \fBhs initdb\fP command.
 .TP
@@ -687,6 +896,43 @@ populate the database, and then to use \fB\-\-restart\fP so that if the \fIclust
 it can easily continue where it left off, halting if nothing to be done.
 .sp
 Conflicts with \fB\-\-no\-db\fP and mutually exclusive to \fB\-\-forever\fP\&.
+.TP
+.B \fB\-A\fP, \fB\-\-autoscaling\fP [\fIMODE\fP]
+Publish client targets for relay sites (default: disabled).
+.sp
+The server schedules forever (as with \fB\-\-forever\fP) and launches nothing itself. Each relay
+connected with the server\(aqs key advertises the zones it serves and, for each, its \fBmin\fP,
+\fBmax\fP and \fBinit\fP clients. Each \fB\-\-period\fP the server computes each zone\(aqs demand from
+its tasks in the active \fItask group\fP, splits it over the live sites that serve the zone by
+\fBautoscale.distribution\fP (\fIspread\fP or \fIfill\fP), and publishes the result, which each relay
+fetches and launches with its own launcher.
+.sp
+The \fIpolicy\fP can be specified directly here as either \fIfixed\fP or \fIdynamic\fP (e.g.,
+\fB\-\-autoscaling=dynamic\fP); the default is the configured \fBautoscale.policy\fP\&. Under \fIfixed\fP,
+a zone with work gets one client when none runs, and otherwise keeps the floor its relays
+advertise. Under \fIdynamic\fP, a zone grows by one client per check while its task pressure is
+high, up to the sum of its sites\(aq \fBmax\fP\&. Clients leave only by their idle timeout.
+.sp
+Conflicts with \fIFILE\fP, \fB\-\-restart\fP, \fB\-\-no\-db\fP and \fB\-\-no\-confirm\fP\&.
+.sp
+See also \fB\-\-factor\fP and \fB\-\-period\fP\&.
+.TP
+.B \fB\-F\fP, \fB\-\-factor\fP \fIVALUE\fP
+Scaling factor (default: 1).
+.sp
+The dimensionless multiple of the average task duration that \fB\-\-autoscaling=dynamic\fP compares
+each zone\(aqs estimated time to completion against (its \fItask pressure\fP), as for the \fIcluster\fP\&.
+.TP
+.B \fB\-P\fP, \fB\-\-period\fP \fISEC\fP
+Scaling period, greater than zero (default: 60).
+.sp
+Specify a number of seconds, units \fBd\fP, \fBh\fP, \fBm\fP and \fBs\fP in that order, whole or
+fractional (e.g., \fB30s\fP, \fB5m\fP, \fB1h30m\fP, \fB1.5h\fP), or a Slurm time \fBMM:SS\fP,
+\fBHH:MM:SS\fP, \fBD\-HH\fP, \fBD\-HH:MM\fP or \fBD\-HH:MM:SS\fP (e.g., \fB1:30\fP). A fraction of a
+second is rounded up to the next whole second. A period of zero or less, here or in
+\fBautoscale.period\fP, is refused.
+.sp
+The server waits this long between checks and publishes a new topology only when it changes.
 .TP
 .B \fB\-\-print\fP
 Print failed task args to <stdout>.
@@ -740,20 +986,30 @@ See the \fIsecurity\fP section for peer verification modes.
 .TP
 .B \fBhs\fP \fBclient\fP \fB[\-h]\fP
 \fB[\-N NUM]\fP \fB[\-t TEMPLATE]\fP \fB[\-b SIZE]\fP \fB[\-w SEC]\fP \fB[\-H ADDR]\fP \fB[\-p PORT]\fP
-\fB[\-k KEY]\fP \fB[\-\-capture | [\-o PATH] [\-e PATH]]\fP \fB[\-\-no\-confirm]\fP
+\fB[\-\-capture | [\-o PATH] [\-e PATH]]\fP \fB[\-\-no\-confirm]\fP
 \fB[\-d SEC]\fP \fB[\-T SEC]\fP \fB[\-W SEC]\fP \fB[\-S SEC]\fP \fB[\-R NUM]\fP
-\fB[\-C NUM]\fP \fB[\-M MEM]\fP \fB[\-\-monitor]\fP
+\fB[\-C NUM]\fP \fB[\-M MEM]\fP \fB[\-\-monitor]\fP \fB[\-\-zone NAME]\fP
 \fB[\-\-no\-tls | [\-\-tls\-ca PATH] [\-\-tls\-cert PATH] [\-\-tls\-key PATH]]\fP
 .UNINDENT
 .sp
 Launch client directly, run tasks in parallel.
 .sp
-The client connects to the server and pulls bundles of tasks off the shared queue.
+The client connects to the server and, whenever it is ready for work, requests a bundle of tasks
+of its own size (\fB\-b\fP/\fB\-\-bundlesize\fP; the server\(aqs size when not given).
 These tasks are run locally by some number of a parallel task executors.
 .sp
 The environment for tasks are the same as for the client. Standard output and error
 for tasks are forwarded to that of the client, unless \fB\-\-capture\fP is used, in which
 these are directed to individual files for each task.
+.sp
+The client takes the key to connect to the server from the \fBHYPERSHELL_SERVER_AUTH\fP environment
+variable or from \fBserver.auth\fP in a configuration file (or its \fBauth_env\fP and \fBauth_eval\fP
+forms), never from the command line. A client that \fBhs cluster\fP launches receives its key
+in that environment variable.
+.sp
+Changed in version 2.9.0: \X'tty: link https://github.com/hypershell/hypershell/pull/104'\fI\%#104\fP\X'tty: link': a key on the command line is refused; the client takes it from the environment or a
+configuration file.
+
 .SS Options
 .INDENT 0.0
 .TP
@@ -773,7 +1029,14 @@ arguments (e.g., file paths) to be transformed into some common form; such as
 See section on \fItemplates\fP\&.
 .TP
 .B \fB\-b\fP, \fB\-\-bundlesize\fP \fISIZE\fP
-Size of task bundle (default: 1).
+Size of task bundle to request from the server and to return results in (default: the
+server\(aqs).
+.sp
+When given (on the command line, by \fBHYPERSHELL_CLIENT_BUNDLESIZE\fP, or in a configuration
+file as \fBclient.bundlesize\fP), the client advertises this size and the server replies with
+up to this many tasks, never more than its cap (\fBserver.bundlemax\fP). When not given, the
+client advertises no size and the server uses its own \fB\-\-bundlesize\fP; finished tasks are then
+returned in bundles of the built\-in default (1).
 .sp
 Using larger bundles is a good idea for large distributed workflows; specifically, it is best
 to coordinate bundle size with the number of executors in use by each client.
@@ -781,39 +1044,55 @@ to coordinate bundle size with the number of executors in use by each client.
 See also \fB\-\-num\-threads\fP and \fB\-\-bundlewait\fP\&.
 .TP
 .B \fB\-w\fP, \fB\-\-bundlewait\fP \fISEC\fP
-Seconds to wait before flushing tasks (default: 5).
+Time to wait before flushing tasks (default: 5, or \fBclient.bundlewait\fP).
+.sp
+Specify a number of seconds, units \fBd\fP, \fBh\fP, \fBm\fP and \fBs\fP in that order, whole or
+fractional (e.g., \fB30s\fP, \fB5m\fP, \fB1h30m\fP, \fB1.5h\fP), or a Slurm time \fBMM:SS\fP,
+\fBHH:MM:SS\fP, \fBD\-HH\fP, \fBD\-HH:MM\fP or \fBD\-HH:MM:SS\fP (e.g., \fB1:30\fP). A fraction of a
+second is rounded up to the next whole second.
 .sp
 The \fIclient\fP collector thread that accumulates finished task bundles to return to
 the \fIserver\fP will push out a bundle after this period of time regardless of whether
-it has reached the preferred bundle size.
+it has reached the preferred bundle size. A client with nothing left to run returns what it
+holds at once.
 .sp
 See also \fB\-\-bundlesize\fP\&.
 .TP
+.B \fB\-\-zone\fP \fINAME\fP
+Run only tasks of this zone (default: none, tasks without a zone).
+.sp
+The client names its zone when it requests work, and the server replies with tasks of that
+zone only. A client given no \fB\-\-zone\fP (or \fB\-\-zone default\fP) runs only tasks submitted
+without one. See \fB\-\-zone\fP on \fIsubmit\fP\&.
+.TP
 .B \fB\-H\fP, \fB\-\-host\fP \fIADDR\fP
-Hostname or IP address to connect with server (default: localhost).
+Hostname or IP address to connect with server (default: \fBserver.host\fP).
+.sp
+With no \fB\-H\fP, the client dials \fBserver.host\fP when the configuration gives it, else
+\fBserver.advertise\fP, else \fBserver.bind\fP when it is one specific address, else \fIlocalhost\fP\&.
 .TP
 .B \fB\-p\fP, \fB\-\-port\fP \fINUM\fP
 Port number to connect with server (default: 50001).
 .TP
-.B \fB\-k\fP, \fB\-\-auth\fP \fIKEY\fP
-Cryptographic authentication key to connect with server (default: <not secure>).
-.sp
-The default \fIKEY\fP used by the server and client is not secure and only a place holder.
-It is expected that the user choose a secure \fIKEY\fP\&. The \fIcluster\fP automatically generates
-a secure one\-time \fIKEY\fP\&.
-.TP
 .B \fB\-d\fP, \fB\-\-delay\-start\fP \fISEC\fP
-Delay time in seconds before connecting to server (default: 0).
+Delay time before connecting to server (default: 0).
+.sp
+Specify a number of seconds, units \fBd\fP, \fBh\fP, \fBm\fP and \fBs\fP in that order, whole or
+fractional (e.g., \fB30s\fP, \fB10m\fP, \fB1h30m\fP, \fB1.5h\fP), or a Slurm time \fBMM:SS\fP,
+\fBHH:MM:SS\fP, \fBD\-HH\fP, \fBD\-HH:MM\fP or \fBD\-HH:MM:SS\fP (e.g., \fB1:30\fP). Fractions of a second
+are kept (\fB\-\-delay\-start=1.5s\fP waits one and a half seconds).
 .sp
 At larger scales it can be advantageous to uniformly delay the client launch sequence.
 Hundreds or thousands of clients connecting to the server all at once is a challenge.
 Even if the server could handle the load, your task throughput would be unbalanced,
 coming in waves.
 .sp
-Use \fB\-\-delay\-start\fP with a negative number to impose a uniform random delay up to the
-magnitude specified (e.g., \fB\-\-delay\-start=\-600\fP would delay the client up to ten minutes).
-This also has the effect of staggering the workload. If your tasks take on the order of 30
-minutes and you have 1000 nodes, choose \fB\-\-delay\-start=\-1800\fP\&.
+Write the value with a leading \fB\-\fP to impose a uniform random delay up to the magnitude
+specified (e.g., \fB\-\-delay\-start=\-10m\fP or \fB\-\-delay\-start=\-600\fP would delay the client up to
+ten minutes). This also has the effect of staggering the workload. If your tasks take on the
+order of 30 minutes and you have 1000 nodes, choose \fB\-\-delay\-start=\-30m\fP\&. Attach a value
+with a leading \fB\-\fP to the option with \fB=\fP as shown; given as a separate word, only a plain
+number (e.g., \fB\-d \-600\fP) is read as a value on every version of Python.
 .TP
 .B \fB\-\-no\-confirm\fP
 Disable client confirmation of task bundle received.
@@ -889,11 +1168,16 @@ Time\-series data is stored in CSV format alongside task outputs.
 See also \fB\-\-capture\fP\&.
 .TP
 .B \fB\-R\fP, \fB\-\-ratelimit\fP \fINUM\fP
-Maximum allowed tasks per second per client. (default: none).
+Maximum allowed tasks per second per client; a number, e.g. 0.5 (default: none).
 Individual tasks are throttled if exceeding this average limit.
 .TP
 .B \fB\-S\fP, \fB\-\-signalwait\fP \fISEC\fP
-Task\-level signal escalation wait period in seconds (default: 10).
+Task\-level signal escalation wait period (default: 10).
+.sp
+Specify a number of seconds, units \fBd\fP, \fBh\fP, \fBm\fP and \fBs\fP in that order, whole or
+fractional (e.g., \fB30s\fP, \fB5m\fP, \fB1h30m\fP, \fB1.5h\fP), or a Slurm time \fBMM:SS\fP,
+\fBHH:MM:SS\fP, \fBD\-HH\fP, \fBD\-HH:MM\fP or \fBD\-HH:MM:SS\fP (e.g., \fB1:30\fP). A fraction of a
+second is rounded up to the next whole second.
 .sp
 When tasks fail to halt following an initial SIGINT, the program waits
 this interval in seconds before escalating to the next level of interrupt.
@@ -933,13 +1217,212 @@ verify peers across multiple hosts.
 .sp
 See the \fIsecurity\fP section for peer verification modes.
 .UNINDENT
+.SH RELAY USAGE
+.INDENT 0.0
+.TP
+.B \fBhs\fP \fBrelay\fP \fB[\-h]\fP \fB[\-H ADDR]\fP \fB[\-p NUM]\fP \fB[\-\-no\-tls]\fP \fB[\-\-zone NAME ...]\fP \fB[\-N NUM]\fP
+\fB[\-\-launcher CMD]\fP \fB[\-\-launcher\-args ARGS]\fP \fB[\-\-remote\-exe PATH]\fP \fB[\-\-bind ADDR]\fP \fB[\-\-advertise ADDR]\fP
+\fB[\-\-port NUM]\fP \fB[\-\-database PATH]\fP
+.UNINDENT
+.sp
+Run relay for one site.
+.sp
+A \fIrelay\fP connects a site to an upstream \fIserver\fP\&. Upstream it is an ordinary \fIclient\fP; at
+the site it runs its own \fIserver\fP, scheduling the tasks it receives to \fIclients\fP it launches
+there, and returns their results upstream.
+.sp
+Upstream, the relay requests work for its zone under an identity of its own, derived from the
+relay and the zone name and logged when it starts. It holds at most about two rounds of work for its
+site (twice its connected \fIclients\fP times its bundle size, \fBrelay.bundlesize\fP, which is never
+below a \fIclient\fP\(aqs executor threads), asks for more once half of that is left, and then for the
+whole difference at once. It confirms the tasks it receives only once they are stored in the relay
+database. The upstream key comes from
+\fBrelay.upstream.auth\fP (or its \fB_env\fP and \fB_eval\fP forms), never from the command line.
+The key never reaches the site: before its first \fIclient\fP is launched, the relay removes from its
+own environment, which the site\(aqs \fIclients\fP and their tasks inherit, every relay setting
+(\fBHYPERSHELL_RELAY_*\fP) and any variable holding the key. When \fBHYPERSHELL_CONFIG_FILE\fP names a
+file that holds relay settings or the key, the site is given a copy of it instead, without the
+\fB[relay]\fP section and without any value holding the key, readable by its owner only, and kept
+beside the relay database; the site\(aqs \fIclients\fP keep the file\(aqs other settings, \fB[server.tls]\fP
+among them. (If the file cannot be read, the site gets none.) The copy is removed when the relay
+exits, however it ends: when it finishes, when it fails, and on SIGINT or SIGTERM. Only a relay
+killed outright leaves it behind (by SIGKILL, or by a second SIGTERM while it ends, which ends the
+process at once), and the next relay on the same relay database to need a copy writes over it. The relay refuses to start if the \fIclient\fP command line (launcher, launcher
+arguments or template) or a variable exported to tasks (\fB[export]\fP) would carry the key.
+.sp
+At the site the relay runs its tasks on the \fIclients\fP it launches there, with a key it mints for
+each run. Each \fIclient\fP receives that key in its environment (\fBHYPERSHELL_SERVER_AUTH\fP), never on
+its command line, and passes it to none of its tasks, so the launcher must pass the environment
+through to the \fIclient\fP\&. A site \fIclient\fP that stops sending heartbeats is evicted by the relay
+after \fBserver.evict\fP seconds, and the tasks it held are run again at the site. The site never
+retries a task: one that fails goes back upstream as it
+ended, and the upstream \fIserver\fP decides whether to run it again. Each result goes back attributed to the \fIclient\fP
+at the site that ran it, matched to the assignment the upstream \fIserver\fP made. Results are kept in
+the relay database until they have been handed over, and for a while after (\fBrelay.retention\fP).
+The relay\(aqs heartbeat names its site (\fBrelay.site\fP, by default the relay\(aqs host name) and lists the
+\fIclients\fP connected at the site, by id and host only. The upstream \fIserver\fP records them as its own
+\fIclients\fP, attributed to the site and the relay, and counts them (not the relay) as connected. They
+never heartbeat upstream themselves: they disconnect there when they leave the site, and all at once
+when the relay finishes or is evicted.
+A relay may serve several zones (\fB\-\-zone\fP given more than once, or \fBrelay.zone\fP as a list or as
+one \fB[relay.zone.NAME]\fP table per zone). Upstream it is then one \fIclient\fP per zone, each under its
+own identity, all over the same connection: it takes the zones in turn, and asks for each only as
+much as that zone\(aqs own \fIclients\fP at the site have room for. At the site it keeps one fleet of
+\fIclients\fP per zone, launched alike but each serving its own zone, with that zone\(aqs own launcher,
+launcher arguments, size and client bounds if its table gives them; the one relay\-local \fIserver\fP
+serves them all. Every launch names its zone to the launcher: \fB{zone}\fP in the launcher or its
+arguments is replaced by the zone\(aqs name (\fBdefault\fP for the default zone), and the launched process
+has it in \fBHYPERSHELL_ZONE\fP\&. Each zone advertises its client bounds upstream; against an upstream
+\fIserver\fP autoscaling with relay sites, each fleet follows the topology it publishes (see
+\fI\%Topology\fP). A relay that a newer relay at its site supersedes asks for no
+more work, launches no \fIclient\fP, hands back the tasks no \fIclient\fP has started, lets its \fIclients\fP
+finish, and exits.
+The first zone\(aqs identity lists every \fIclient\fP at the site upstream. Each identity sends its own
+heartbeat, so if the relay fails, the upstream \fIserver\fP evicts each one and puts back what each
+held, in every zone.
+When the upstream \fIserver\fP shuts down, the relay finishes the tasks it holds, returns every result,
+and ends its upstream registration. It hears of the shutdown in reply to a request for work, in each
+of its zones. Once one zone has heard it, a zone with no \fIclient\fP at the site and no task held asks
+for itself too, for one task: it ends with the others if nothing is left for it upstream, and
+otherwise holds what it is sent until its own \fIclients\fP at the site run it, then asks for the rest as
+usual. Under an upstream \fIserver\fP autoscaling with relay sites, a zone it gives no \fIclient\fP at this
+relay does not ask: it ends with the others, and what is staged for it stays upstream for a relay
+that has \fIclients\fP planned in that zone. If that \fIserver\fP stops planning a \fIclient\fP for the zone at
+this relay before one starts, the zone hands back what it took and ends; an upstream \fIserver\fP that
+cannot take it back (one without a database, or a release before 2.9.0a8) is left to put it back
+when it evicts the relay, and a 2.9.0a8 upstream \fIserver\fP puts it back the next time it starts. A relay with no \fIclient\fP at the site in any zone never asks
+for work, so it never hears an upstream shutdown: it waits until it is drained or stopped, and a
+non\-forever upstream \fIserver\fP waits for it too, until the relay is drained or stopped.
+SIGUSR1 or SIGUSR2, sent to the relay process, drain it the same way: the relay stops asking for work, its site finishes every task the relay holds (those not yet started
+too), and the results go back before the registration ends. SIGINT and SIGTERM end the relay at
+once, without draining: it ends the \fIclients\fP it launched and exits (on SIGTERM, by that signal; a
+second SIGTERM ends the process at once). If
+the relay fails (a part of its own \fIserver\fP stops, say, or the upstream \fIserver\fP refuses it), it ends
+the \fIclients\fP it launched and exits with a non\-zero status. Either way the upstream \fIserver\fP puts
+back the tasks the relay held when it evicts the relay.
+.sp
+A lost upstream connection is not a failure. While the upstream \fIserver\fP cannot be reached (a call
+gets no answer within \fBrelay.upstream.deadline\fP), the site keeps running the tasks the relay holds,
+their results are kept in the relay database, and the relay connects again with backoff (at most
+\fBrelay.upstream.backoff\fP seconds apart). It logs the outage when it begins, now and then while it
+lasts, and when it ends. Once connected again it sends a heartbeat first (the upstream \fIserver\fP
+registers it again if it had evicted it), then returns the results it holds, and only then asks for
+more work. An outage shorter than the upstream eviction period (\fBrelay.upstream.evict_hint\fP)
+costs nothing: the results land. After a longer one, or after the upstream \fIserver\fP restarted, the
+upstream \fIserver\fP has put those tasks back for other \fIclients\fP, so their results are refused as
+stale and the tasks run again. A relay that is started while its upstream \fIserver\fP cannot be reached
+waits for it before it starts its site, and a relay restarted on the same relay database returns the
+results its earlier run still held. A relay and an upstream \fIserver\fP that differ on TLS (on at one
+end, \fB\-\-no\-tls\fP at the other) would each wait for the other, so the relay checks for this when it
+first connects: it exits at once with a non\-zero status, before it starts its site, with an error
+that names its own TLS setting.
+.sp
+The relay database is always a private SQLite file, whatever database is configured, and the
+configured database is never opened. One relay runs per process, and a second relay refuses to
+start on the same relay database.
+.SS Options
+.INDENT 0.0
+.TP
+.B \fB\-H\fP, \fB\-\-upstream\-host\fP \fIADDR\fP
+Hostname or IP address of the upstream \fIserver\fP (default: localhost).
+.sp
+See also \fBrelay.upstream.host\fP\&.
+.TP
+.B \fB\-p\fP, \fB\-\-upstream\-port\fP \fINUM\fP
+Port number of the upstream \fIserver\fP (default: 50001).
+.sp
+See also \fBrelay.upstream.port\fP\&.
+.TP
+.B \fB\-\-no\-tls\fP
+Disable TLS on the connection to the upstream \fIserver\fP (not recommended).
+.sp
+This affects only the upstream connection; the relay\-local \fIserver\fP keeps \fB[server.tls]\fP\&.
+See also \fBrelay.upstream.tls.enabled\fP\&.
+.TP
+.B \fB\-\-zone\fP \fINAME\fP
+Zone this relay serves (default: the default zone). Give it more than once to serve several.
+.sp
+The relay asks upstream only for tasks of the zones it serves, and keeps one fleet of
+\fIclients\fP at the site for each zone (\fB\-N\fP \fIclients\fP each, unless the zone gives its own
+\fBsize\fP). Zones named here take the place of \fBrelay.zone\fP; each still takes its own
+settings from \fB[relay.zone.NAME]\fP\&. See also \fBrelay.zone\fP\&.
+.TP
+.B \fB\-N\fP, \fB\-\-size\fP \fINUM\fP
+Number of \fIclients\fP the relay keeps launched at its site (default: 1).
+.sp
+A \fIclient\fP that exits is launched again. The size must be at least 1: with no \fIclient\fP at the
+site the relay would never ask upstream for work. Against an upstream \fIserver\fP autoscaling with
+relay sites, the size is instead the default \fBmax\fP each zone advertises (see \fBrelay.max\fP),
+and \fIclients\fP are launched as the published topology asks. See also \fBrelay.size\fP\&.
+.TP
+.B \fB\-\-launcher\fP \fICMD\fP
+Command prefix used to launch each \fIclient\fP at the site (default: none).
+.sp
+With none, \fIclients\fP run directly on the relay\(aqs host. Otherwise each is launched as
+\fBCMD [ARGS...] HS client ...\fP (e.g., \fBsrun\fP), where \fIHS\fP is the relay\(aqs own program (see
+\fB\-\-remote\-exe\fP). A \fB{zone}\fP in the launcher or its arguments is replaced by the zone the
+\fIclient\fP serves, and the launched process has it in \fBHYPERSHELL_ZONE\fP\&. The \fIclients\fP connect back to the relay at its bind address (\fB\-\-bind\fP),
+or by its host name when it binds every interface (\fI0.0.0.0\fP, the default), unless
+\fB\-\-advertise\fP names another address for them to dial. The launcher must
+pass the environment through: each \fIclient\fP receives the site key there
+(\fBHYPERSHELL_SERVER_AUTH\fP), never on its command line.
+See also \fBrelay.launcher\fP\&.
+.TP
+.B \fB\-\-launcher\-args\fP \fIARGS\fP
+Extra arguments for the launcher, placed after it (quoted as one argument).
+.sp
+See also \fBrelay.launcher_args\fP\&.
+.TP
+.B \fB\-\-remote\-exe\fP \fIPATH\fP
+Program the \fIclients\fP at the site are launched as (default: the \fBhs\fP that runs the relay).
+.sp
+By default the relay launches its \fIclients\fP as the \fBhs\fP it was started as, by its full path
+and as the user ran it (a symlinked \fBbin/hs\fP stays the link), and keeps that program when it
+starts again to bind its database (\fB\-\-database\fP). The path assumes the site\(aqs nodes see this
+installation where this host does; where they see it at another path, or run another
+installation, name the program here. It is one program, not a command line: a wrapper belongs
+in \fB\-\-launcher\fP\&. The value is passed on as given, never resolved or checked. It takes
+precedence over \fBrelay.remote_exe\fP\&. See also \fBrelay.remote_exe\fP\&.
+.TP
+.B \fB\-\-bind\fP \fIADDR\fP
+Bind address of the relay\-local \fIserver\fP (default: 0.0.0.0).
+.sp
+The \fIclients\fP at the site connect to the relay here, so it must be reachable from the
+nodes they run on. \fB\-\-advertise\fP changes only the address they are told to dial.
+See also \fBrelay.bind\fP\&.
+.TP
+.B \fB\-\-advertise\fP \fIADDR\fP
+Address the \fIclients\fP at the site are told to dial (default: by \fB\-\-bind\fP).
+.sp
+By default the \fIclients\fP of every zone dial the relay at its bind address, or by this host\(aqs
+name when it binds every interface (\fI0.0.0.0\fP). Give another address when they must use a
+different name, such as one the site\(aqs compute nodes resolve to this host while the relay
+listens on every interface. It is passed on as given, never resolved or checked, and must be
+reachable from the nodes the \fIclients\fP run on. With TLS verified against the system CA bundle
+(\fB[server.tls] cafile\fP empty) and no \fBservername\fP, it must be a name the relay\-local
+\fIserver\fP\(aqs certificate carries. This is the address the site\(aqs \fIclients\fP dial, not the client
+bounds a zone advertises upstream. It takes precedence over \fBrelay.advertise\fP;
+\fBserver.advertise\fP does not reach a relay. See also \fBrelay.advertise\fP\&.
+.TP
+.B \fB\-\-port\fP \fINUM\fP
+Port of the relay\-local \fIserver\fP (default: 50002).
+.sp
+The default differs from the \fIserver\fP default (50001), so a relay can run beside a
+\fIserver\fP on the same host. See also \fBrelay.port\fP\&.
+.TP
+.B \fB\-\-database\fP \fIPATH\fP
+Path to the relay database (default: <lib>/relay/<host>.db).
+.sp
+The default is named for the host, since a home directory is often shared between hosts.
+A node\-local disk is a good place for it. See also \fBrelay.database\fP\&.
+.UNINDENT
 .SH SUBMIT USAGE
 .INDENT 0.0
 .TP
-.B \fBhs\fP \fBsubmit\fP \fB[\-h]\fP \fB[ARGS... | \-f FILE]\fP
-\fB[\-q [\-H ADDR] [\-p NUM] [\-k KEY] | \-\-initdb]\fP
+.B \fBhs\fP \fBsubmit\fP \fB[\-h]\fP \fB[ARGS... | \-f FILE | \-\-from\-json SPEC]\fP
+\fB[\-q [\-H ADDR] [\-p NUM] | \-\-initdb]\fP
 \fB[\-b NUM]\fP \fB[\-w SEC]\fP \fB[\-c NUM]\fP \fB[\-m MEM]\fP \fB[\-W SEC]\fP \fB[\-g NUM]\fP
-\fB[\-\-template CMD]\fP \fB[\-t TAG...]\fP
+\fB[\-\-repeat | \-\-update]\fP \fB[\-\-template CMD]\fP \fB[\-t TAG...]\fP \fB[\-\-zone NAME]\fP
 \fB[\-\-no\-tls | [\-\-tls\-ca PATH] [\-\-tls\-cert PATH] [\-\-tls\-key PATH]]\fP
 .UNINDENT
 .sp
@@ -950,7 +1433,8 @@ If a single positional argument refers to a non\-executable file path,
 tasks will be read from the file, one per line (use \fB\-f\fP/\fB\-\-task\-file\fP to be explicit).
 .sp
 Tasks are accumulated and published in bundles to the database by default.
-With \fB\-q\fP/\fB\-\-queue\fP, tasks are submitted directly to a live queue, bypassing the database.
+With \fB\-q\fP/\fB\-\-queue\fP, tasks are submitted directly to a live queue, bypassing the database;
+the server must be running without a database (\fB\-\-no\-db\fP).
 The \fB\-b\fP/\fB\-\-bundlesize\fP and \fB\-w\fP/\fB\-\-bundlewait\fP options control the
 size of these bundles and how long to wait before flushing tasks regardless of
 how many have accumulated.
@@ -960,6 +1444,147 @@ Any tags specified with \fB\-t\fP/\fB\-\-tag\fP are applied to all tasks submitt
 .sp
 Use the special comment syntax, \fB# HYPERSHELL: ...\fP, to include resource limits or tags inline.
 If the comment is alone on the line it will be applied to all tasks that follow.
+.sp
+An inline directive and \fB\-t\fP/\fB\-\-tag\fP take each item as \fBKEY:VALUE\fP or \fBKEY=VALUE\fP, split at
+the first \fB:\fP or \fB=\fP; a bare \fBKEY\fP is a tag with no value. The \fIdeclarable fields\fP, \fBgroup\fP,
+\fBzone\fP, \fBcores\fP, \fBmemory\fP and \fBtimeout\fP, set the task\(aqs own field with either separator,
+read as the option that sets it reads it (\fB\-g\fP, \fB\-\-zone\fP, \fB\-c\fP, \fB\-m\fP, \fB\-W\fP), and are never
+stored as tags; \fBcores:4.0\fP is 4. A field with no value is refused, and so is \fBnone\fP for every
+field but \fBzone\fP\&. Any other key is a tag.
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.EX
+hs submit \-t site=lab \-\- stage.sh
+echo \(aqtrain.sh  # HYPERSHELL: zone=gpu cores=8 timeout:2h model:resnet\(aq | hs submit \-
+.EE
+.UNINDENT
+.UNINDENT
+.sp
+\fBKEY=VALUE\fP says that the key names a field, so the key is checked against the task\(aqs columns: a
+key one edit from a column name, letter case aside (\fBgrop=2\fP, \fBCores=4\fP), is refused as a likely
+typo, naming the column it is near; write \fBgrop:2\fP to store a tag by that name. A column that task
+input does not set (\fBexit_status=0\fP, \fBattempt=2\fP, \fBid=...\fP) is refused; \fBexit_status:0\fP is a
+tag. \fBKEY:VALUE\fP is never refused for being near a column name. Every tag is checked by the tag
+rules wherever it stands, so a tag with no value does not end the check: \fBnaked other:a/b\fP is
+refused as \fBother:a/b\fP is.
+.sp
+A \fBzone\fP places the task in that zone, as \fB\-\-zone\fP does: the name is the text as written
+(\fBzone:007\fP is a zone called 007, \fBzone:none\fP a zone called none, \fBzone:default\fP the default
+zone), and the zone is recorded in the database. A \fB\-\-from\-json\fP record\(aqs \fBzone\fP key does the
+same when it is a JSON string; any other JSON value is refused, as a \fBgroup\fP that is not a JSON
+integer is. Zones require the database, so with \fB\-\-queue\fP a zone in the input is refused, as
+\fB\-\-zone\fP is.
+.sp
+When more than one source gives a field, the most specific wins: the line\(aqs own directive (or the
+record\(aqs key), then a tag\-only line before it, then \fB\-t\fP, then the field\(aqs option.
+.sp
+Each of these refusals takes the form a refused group takes (below): input read in full is refused
+whole, with nothing submitted, exit status 5 and an error naming the value and its line or record;
+on a stream only that line is refused, with an error naming it, and a refused tag\-only line sets
+nothing; \fB\-t\fP is refused before any input is read, with exit status 2.
+.sp
+Changed in version 2.9.0: \X'tty: link https://github.com/hypershell/hypershell/pull/128'\fI\%#128\fP\X'tty: link': a directive and \fB\-t\fP take \fBKEY=VALUE\fP as well as \fBKEY:VALUE\fP, with a likely typo
+of a field refused. \fBzone\fP from a directive, \fB\-t\fP or a \fB\-\-from\-json\fP record sets the task\(aqs
+zone; it was stored as a tag. A tag after one with no value is checked. On a stream, a directive
+the tag rules refuse refuses its line alone; it ended the input. \fBcores:none\fP, \fBmemory:none\fP
+and \fBtimeout:none\fP are refused; they cleared the option\(aqs value for that task. A field with no
+value is refused; a bare \fBcores\fP was stored as empty.
+
+.sp
+A line whose first non\-blank character is \fB#\fP is a comment. A \fB#\fP anywhere else is part of the
+command and is submitted and run as written, whether in quotes, in a URL fragment or in \fB$#\fP; a
+trailing \fB# note\fP stays in the command and the shell ignores it. The \fB# HYPERSHELL:\fP marker is
+recognised anywhere on a line, in quotes too, so a command that must contain that text breaks it
+with shell quoting (\fBecho \(aq#\(aq\(aq HYPERSHELL:\(aq\fP). With \fB\-\-template\fP, each line is split before the
+template is applied, so comment, blank and tag\-only lines never become tasks.
+.sp
+Changed in version 2.9.0: \X'tty: link https://github.com/hypershell/hypershell/pull/118'\fI\%#118\fP\X'tty: link': a \fB#\fP after a line\(aqs first non\-blank character is part of the command; earlier
+releases cut the command at the first \fB#\fP\&. Under \fB\-\-template\fP, comment, blank and tag\-only
+lines are no longer submitted as tasks.
+
+.sp
+A task\(aqs group must be a non\-negative integer, as \fB\-g\fP/\fB\-\-group\fP takes it, whether it comes from
+\fB\-t group:N\fP, an inline \fBgroup:\fP tag or a \fB\-\-from\-json\fP record. A task file, a JSON source,
+the arguments or standard input holding any other group value is refused whole, with nothing
+submitted, naming the value and its line (or record); \fB\-t group:x\fP is refused before any input is
+read. With the database, standard input is read in full before anything is submitted, so a pipe
+submits nothing until it ends, and its lines are held in memory meanwhile.
+.sp
+With the database, a task below the group the current run has reached (the \fIreached group\fP, see
+\fITask Groups\fP) is refused: the whole submission is refused with nothing submitted, naming the lowest
+such group and the reached group. Submit at the reached group or higher, wait for the run to finish,
+or use a fresh database. Tasks that \fB\-\-update\fP skips as already present are not checked. A
+submission that names no group (no \fB\-g\fP and no group tag) takes the reached group when the most
+recently scheduled group is below it, so it is never refused.
+.sp
+Changed in version 2.9.0: \X'tty: link https://github.com/hypershell/hypershell/pull/118'\fI\%#118\fP\X'tty: link': a group that is not an integer is refused; a task below the reached group is refused;
+with the database, standard input is read in full before anything is submitted.
+
+.sp
+Changed in version 2.9.0: \X'tty: link https://github.com/hypershell/hypershell/pull/127'\fI\%#127\fP\X'tty: link': a group below 0 is refused, as a group that is not an integer is; earlier releases
+accepted it.
+
+.sp
+The resource tags \fBcores\fP, \fBmemory\fP and \fBtimeout\fP take the ranges of the \fB\-c\fP, \fB\-m\fP and
+\fB\-W\fP options, and are refused as a group is, wherever they come from (an inline tag, \fB\-t\fP or a
+\fB\-\-from\-json\fP record): input read in full is refused whole, with nothing submitted, naming the
+value and its line (or record); on a stream only that line is refused, with an error; \fB\-t\fP is
+refused before any input is read (exit status 2), here and on \fBhs run\fP\&.
+.sp
+A tag is read as its option reads it, with one difference: \fBcores\fP written as a decimal with a
+zero fraction (\fBcores:4.0\fP) is that whole number, while a non\-zero fraction (\fBcores:4.5\fP) is
+refused. A \fBtimeout\fP with a fraction of a second is rounded up to whole seconds, as \fB\-W\fP rounds
+it (\fBtimeout:90.5\fP is 91 seconds), and a \fBmemory\fP with a fraction of a byte is rounded down, as
+\fB\-m\fP rounds it. A \fB\-\-from\-json\fP record\(aqs value, a JSON number or a string, is read the same way
+and stored as a whole number (\fB\(dqcores\(dq: \(dq4.0\(dq\fP and \fB\(dqcores\(dq: 4.0\fP are 4, \fB\(dqtimeout\(dq: 90.5\fP
+is 91); a template still expands the record\(aqs field as written (\fB{memory}\fP of \fB\(dq2G\(dq\fP is
+\fB2G\fP).
+.sp
+Tasks past the advisory limit run as before; one warning for the whole submission gives their
+count and the first such line (or record, or the command line for one task given as arguments).
+.sp
+Changed in version 2.9.0: \X'tty: link https://github.com/hypershell/hypershell/pull/125'\fI\%#125\fP\X'tty: link': a resource tag outside its range, or not of its kind, is refused as a group that is
+not an integer is; before, it was stored as given, or stopped the submission while it was
+written. \fBhs run \-t\fP refuses one the same way. A \fBcores\fP tag of \fB4.0\fP is still read as 4. A
+\fB\-\-from\-json\fP record\(aqs resource value is stored as a whole number: before, a decimal
+\fBtimeout\fP or \fBmemory\fP number was stored as given.
+
+.sp
+With \fB\-\-from\-json\fP, read tasks from a JSON file instead. The value is
+\fBFILE[@path]\fP where the optional dotted \fBpath\fP locates the list of task objects
+within the document (e.g. \fBplan.json@chunks\fP); with no \fB@\fP the file\(aqs top level
+must itself be the list, and a \fBFILE\fP of \fB\-\fP reads from \fB<stdin>\fP\&. Each task
+object\(aqs keys become named \fB{key}\fP template fields (and task tags), and an optional
+\fBargs\fP key provides the base command (reachable as \fB{}\fP). All \fB{key}\fP fields are
+validated against every task object up front, so submission is rejected before any task
+is committed if a field is missing. The \fBargs\fP value is taken as written: \fB#\fP and
+\fB# HYPERSHELL:\fP text in it are part of the command, and a failed task\(aqs retry runs that same
+command in the task\(aqs group, with its tags and its cores, memory and walltime.
+.sp
+Changed in version 2.9.0: \X'tty: link https://github.com/hypershell/hypershell/pull/118'\fI\%#118\fP\X'tty: link': a retry runs its task\(aqs command as stored, in the task\(aqs group and with its tags;
+earlier releases read the command of a \fB\-\-from\-json\fP task again for its retry, cutting it at a
+\fB#\fP\&.
+
+.sp
+Re\-submitting a named task file is guarded to prevent accidental double submission. Each
+named file is recorded as a \fIsource\fP (its absolute path, a content fingerprint, and the
+task count); submitting the same file again with no flag is refused, and if the path was
+seen but the content changed the refusal suggests \fB\-\-update\fP\&. Pass \fB\-\-repeat\fP to
+deliberately submit all tasks again as a new source, or \fB\-\-update\fP to submit only tasks
+not already present from earlier versions of the same file. JSON task files (\fB\-\-from\-json\fP)
+are gated the same way, keyed by their absolute path together with any \fB@path\fP selector.
+Single\-command and \fB<stdin>\fP submissions (including \fB\-\-from\-json \-\fP) are treated as
+explicit intent and are exempt from these checks.
+.sp
+Detection and \fB\-\-update\fP de\-dup are index\-backed on the source lineage, so their cost scales with
+that file\(aqs own size, not the size of the database: re\-submitting a normal file stays fast even against
+a very large database, while \fB\-\-update\fP on a source of millions of tasks pays to re\-read and
+fingerprint the entire file to find what is new.
+.sp
+Changed in version 2.9.0: \X'tty: link https://github.com/hypershell/hypershell/pull/104'\fI\%#104\fP\X'tty: link': a key on the command line is refused; \fB\-\-queue\fP takes it from the environment or a
+configuration file.
+
 .SS Arguments
 .INDENT 0.0
 .TP
@@ -972,6 +1597,36 @@ Command\-line task arguments (for single task submission).
 .B \fB\-f\fP, \fB\-\-task\-file\fP \fIFILE\fP
 Input file containing one task per line.
 .TP
+.B \fB\-\-from\-json\fP \fISPEC\fP
+Read tasks from a JSON file (\fBFILE[@path]\fP).
+.sp
+The optional dotted \fBpath\fP after \fB@\fP locates the list of task objects inside
+the document (e.g. \fBplan.json@chunks\fP); with no \fB@\fP the file\(aqs top level must
+be the list, and a \fBFILE\fP of \fB\-\fP reads from \fB<stdin>\fP\&. Each task object\(aqs keys
+become named \fB{key}\fP template fields and task tags; an optional \fBargs\fP key is the
+base command (reachable as \fB{}\fP). Every \fB{key}\fP is validated against all task
+objects before anything is submitted.
+.sp
+A record\(aqs \fBgroup\fP, \fBzone\fP, \fBcores\fP, \fBmemory\fP and \fBtimeout\fP keys set those fields of
+its task, over \fB\-t\fP and the options; a \fBzone\fP must be a JSON string.
+.TP
+.B \fB\-\-repeat\fP
+Re\-submit a known file\(aqs tasks again as a brand\-new source.
+.sp
+By default, submitting a named file whose path and content match a prior submission is
+refused to guard against accidental double submission. \fB\-\-repeat\fP overrides that: the
+file is ingested as a new source and all of its tasks are submitted again, even if
+identical tasks already exist. May be combined with new \fB\-t\fP/\fB\-\-tag\fP values to mark
+a new phase or trial.
+.TP
+.B \fB\-\-update\fP
+Submit only the tasks in a known file that are not already present.
+.sp
+Creates a new source record and submits only tasks whose identity (a stable hash of the
+pre\-template arguments, group, and tags) is absent from the prior same\-path submissions;
+tasks already submitted are skipped. Use this after editing a task file to add only the
+new work. Cannot be combined with \fB\-\-repeat\fP\&.
+.TP
 .B \fB\-q\fP, \fB\-\-queue\fP
 Submit directly to live queue instead of database.
 .sp
@@ -979,22 +1634,24 @@ When enabled, tasks are sent directly to a running server\(aqs queue for immedia
 scheduling. This bypasses the database entirely, which is useful for transient
 workflows or when a database is not configured.
 .sp
-Requires \fB\-H\fP, \fB\-p\fP, and \fB\-k\fP options to specify the server connection.
+The server must be running without a database (\fB\-\-no\-db\fP). A server with a database
+schedules only from it, so it refuses the submission and the command exits with an error.
+.sp
+Uses \fB\-H\fP and \fB\-p\fP to name the server. The key to connect to it is taken from the
+\fBHYPERSHELL_SERVER_AUTH\fP environment variable or from \fBserver.auth\fP in a configuration
+file, and must match the server\(aqs.
 .TP
 .B \fB\-H\fP, \fB\-\-host\fP \fIADDR\fP
-Hostname or IP address for server (default: localhost).
+Hostname or IP address for server (default: \fBserver.host\fP).
 .sp
-Only used with \fB\-\-queue\fP mode to specify the server to connect to.
+Only used with \fB\-\-queue\fP mode to specify the server to connect to. With no \fB\-H\fP, it is
+\fBserver.host\fP when the configuration gives it, else \fBserver.advertise\fP, else
+\fBserver.bind\fP when it is one specific address, else \fIlocalhost\fP, as for \fIclient\fP\&.
 .TP
 .B \fB\-p\fP, \fB\-\-port\fP \fINUM\fP
 Port number for server (default: 50001).
 .sp
 Only used with \fB\-\-queue\fP mode to specify the server port.
-.TP
-.B \fB\-k\fP, \fB\-\-auth\fP \fIKEY\fP
-Cryptographic authentication key for server.
-.sp
-Only used with \fB\-\-queue\fP mode. The key must match the server\(aqs authentication key.
 .TP
 .B \fB\-\-template\fP \fICMD\fP
 Command\-line template pattern (default: \(dq{}\(dq).
@@ -1017,7 +1674,12 @@ to coordinate bundle size with the number of executors in use by each client.
 See also \fB\-\-bundlewait\fP\&.
 .TP
 .B \fB\-w\fP, \fB\-\-bundlewait\fP \fISEC\fP
-Seconds to wait before flushing tasks (default: 5).
+Time to wait before flushing tasks (default: 5).
+.sp
+Specify a number of seconds, units \fBd\fP, \fBh\fP, \fBm\fP and \fBs\fP in that order, whole or
+fractional (e.g., \fB30s\fP, \fB5m\fP, \fB1h30m\fP, \fB1.5h\fP), or a Slurm time \fBMM:SS\fP,
+\fBHH:MM:SS\fP, \fBD\-HH\fP, \fBD\-HH:MM\fP or \fBD\-HH:MM:SS\fP (e.g., \fB1:30\fP). A fraction of a
+second is rounded up to the next whole second.
 .sp
 If this period of time expires since the previous bundle was pushed to the database,
 The current bundle will be pushed regardless of how many tasks have been accumulated.
@@ -1057,8 +1719,20 @@ Assigns submitted tasks to a specific group. Tasks are executed in ascending gro
 with all tasks in a group completing before the next group begins. This enables simple
 workflow management without requiring explicit DAG\-based definitions.
 .sp
-All tasks default to group 0 for backwards compatibility. Users can organize tasks into
-multiple groups (e.g., 0, 1, 2, ...) where lower\-numbered groups execute first.
+All tasks default to group 0 for backwards compatibility. A group is a non\-negative integer:
+users can organize tasks into multiple groups (e.g., 0, 1, 2, ...) where lower\-numbered groups
+execute first.
+.TP
+.B \fB\-\-zone\fP \fINAME\fP
+Zone of the submitted tasks (default: none, the reserved default zone).
+.sp
+Only a client launched with the same \fB\-\-zone\fP runs these tasks; a client given no
+\fB\-\-zone\fP runs only tasks without one. Zone names are arbitrary text (\fBdefault\fP names the
+default zone). Zones are recorded in the database, so \fB\-\-zone\fP cannot be used with
+\fB\-\-queue\fP\&. Zone is placement only: task groups still run in order across all zones.
+.sp
+A zone named in the input (\fBzone:NAME\fP or \fBzone=NAME\fP inline or with \fB\-t\fP, or a
+\fB\-\-from\-json\fP record\(aqs \fBzone\fP) wins over \fB\-\-zone\fP for its tasks.
 .TP
 .B \fB\-\-initdb\fP
 Auto\-initialize database.
@@ -1076,6 +1750,12 @@ Tags allow for user\-defined tracking of information related to individual tasks
 groups of tasks. They are defined with both a \fIkey\fP and \fIvalue\fP (e.g., \fB\-\-tag file:a\fP).
 The default \fIvalue\fP for tags is blank. When searching with tags, not specifying a \fIvalue\fP
 will return any task with that \fIkey\fP defined regardless of \fIvalue\fP (including blank).
+.sp
+Each item is \fBKEY:VALUE\fP, \fBKEY=VALUE\fP or a bare \fBKEY\fP, read as an inline directive is.
+The declarable fields (\fBgroup\fP, \fBzone\fP, \fBcores\fP, \fBmemory\fP, \fBtimeout\fP) set the task\(aqs
+field with either separator, over its option. With \fB=\fP, a key one edit from a task column is
+refused as a likely typo and a column task input does not set is refused; with \fB:\fP both are
+tags. A refused item exits with status 2 before any input is read.
 .UNINDENT
 .INDENT 0.0
 .TP
@@ -1117,11 +1797,12 @@ See the \fIsecurity\fP section for peer verification modes.
 Initialize database.
 .sp
 For SQLite this happens automatically.
+An existing database from an earlier release is upgraded in place on first use.
 See also \fB\-\-initdb\fP for the \fBhs cluster\fP command.
 .sp
 The available special actions are mutually exclusive.
-The \fB\-\-rotate\fP operation migrates completed tasks to the next database partition,
-and applies a special purpose \fBpart:N\fP tag to the new partition and remaining tasks.
+The \fB\-\-rotate\fP operation migrates completed tasks into the next database partition,
+recording that partition\(aqs index in each moved task\(aqs \fBpart\fP column.
 .SS Actions
 .INDENT 0.0
 .TP
@@ -1168,7 +1849,8 @@ Unique task UUID.
 .INDENT 0.0
 .TP
 .B \fB\-f\fP, \fB\-\-format\fP \fIFORMAT\fP
-Format task info ([normal], json, yaml).
+Format task info ([normal], card, json, yaml). The \fBcard\fP format renders the task as a
+richly\-formatted, bordered panel with a color\-coded status badge (see \fBhs list\fP).
 .TP
 .B \fB\-\-json\fP
 Format metadata output as JSON.
@@ -1221,15 +1903,20 @@ Unique task UUID.
 .INDENT 0.0
 .TP
 .B \fB\-n\fP, \fB\-\-interval\fP \fISEC\fP
-Time in seconds to wait between polling (default: 5).
+Time to wait between polling (default: 5).
+.sp
+Specify a number of seconds, units \fBd\fP, \fBh\fP, \fBm\fP and \fBs\fP in that order, whole or
+fractional (e.g., \fB30s\fP, \fB5m\fP, \fB1h30m\fP, \fB1.5h\fP), or a Slurm time \fBMM:SS\fP,
+\fBHH:MM:SS\fP, \fBD\-HH\fP, \fBD\-HH:MM\fP or \fBD\-HH:MM:SS\fP (e.g., \fB1:30\fP). A fraction of a
+second is rounded up to the next whole second.
 .TP
 .B \fB\-i\fP, \fB\-\-info\fP
 Print task info after completion.
 .sp
-See \fBtask info\fP command.
+See \fBhs info\fP command.
 .TP
 .B \fB\-f\fP, \fB\-\-format\fP \fIFORMAT\fP
-Format task info ([normal], json, yaml).
+Format task info ([normal], card, json, yaml).
 .TP
 .B \fB\-\-json\fP
 Format metadata output as JSON.
@@ -1253,6 +1940,16 @@ A database must be configured. The task will not run until scheduled
 by the server process. The <stdout> and <stderr> are written locally
 as if run locally, requires the client to have \fB\-\-capture\fP enabled.
 .sp
+The resource tags given with \fB\-t\fP/\fB\-\-tag\fP (\fBcores\fP, \fBmemory\fP and \fBtimeout\fP) take their
+ranges as on \fBhs submit\fP: a value outside its range, or not of its kind, is refused before the
+database is opened, with one line naming the tag\(aqs key (e.g., \fBtask.memory\fP), the range and the
+value (exit status 2). A \fBcores\fP tag past its advisory limit runs,
+with one warning.
+.sp
+Tags and fields are given with \fB\-t\fP/\fB\-\-tag\fP or inline (\fB# HYPERSHELL: ...\fP) as \fBKEY:VALUE\fP
+or \fBKEY=VALUE\fP, read as on \fBhs submit\fP\&. A \fBzone\fP places the task in that zone and records the
+zone in the database, as \fBhs submit \-\-zone\fP does; an inline field wins over \fB\-t\fP\&.
+.sp
 See \fBinfo\fP and \fBwait\fP commands.
 .SS Arguments
 .INDENT 0.0
@@ -1267,7 +1964,12 @@ To use options, preface with leading \fB\-\-\fP\&.
 .INDENT 0.0
 .TP
 .B \fB\-n\fP, \fB\-\-interval\fP \fISEC\fP
-Time in seconds to wait between polling (default: 5).
+Time to wait between polling (default: 5).
+.sp
+Specify a number of seconds, units \fBd\fP, \fBh\fP, \fBm\fP and \fBs\fP in that order, whole or
+fractional (e.g., \fB30s\fP, \fB5m\fP, \fB1h30m\fP, \fB1.5h\fP), or a Slurm time \fBMM:SS\fP,
+\fBHH:MM:SS\fP, \fBD\-HH\fP, \fBD\-HH:MM\fP or \fBD\-HH:MM:SS\fP (e.g., \fB1:30\fP). A fraction of a
+second is rounded up to the next whole second.
 .TP
 .B \fB\-t\fP, \fB\-\-tag\fP \fITAG\fP\&...
 Assign one or more tags.
@@ -1276,12 +1978,18 @@ Tags allow for user\-defined tracking of information related to individual tasks
 groups of tasks. They are defined with both a \fIkey\fP and \fIvalue\fP (e.g., \fB\-\-tag file:a\fP).
 The default \fIvalue\fP for tags is blank. When searching with tags, not specifying a \fIvalue\fP
 will return any task with that \fIkey\fP defined regardless of \fIvalue\fP (including blank).
+.sp
+Each item is \fBKEY:VALUE\fP, \fBKEY=VALUE\fP or a bare \fBKEY\fP, read as on \fBhs submit\fP: the
+declarable fields (\fBgroup\fP, \fBzone\fP, \fBcores\fP, \fBmemory\fP, \fBtimeout\fP) set the task\(aqs
+field with either separator, and with \fB=\fP a likely typo of a task column, or a column task
+input does not set, is refused. A refused item exits with status 2 before the database is
+opened.
 .UNINDENT
 .SH LIST USAGE
 .INDENT 0.0
 .TP
 .B \fBhs\fP \fBlist\fP \fB[\-h]\fP
-\fB[FIELD [FIELD ...]]\fP \fB[\-w COND [COND ...]]\fP \fB[\-t TAG [TAG...]]\fP \fB[\-g GROUP]\fP
+\fB[FIELD [FIELD ...]]\fP \fB[\-w COND [COND ...]]\fP \fB[\-t TAG [TAG...]]\fP \fB[\-g GROUP]\fP \fB[\-\-part N]\fP
 \fB[\-\-order\-by FIELD [\-\-desc]]\fP \fB[\-\-count | \-\-limit NUM]\fP
 \fB[\-f FORMAT | \-\-json | \-\-csv]\fP \fB[\-d CHAR]\fP \fB[\-i]\fP
 \fB[\-\-failed | \-\-succeeded | \-\-completed | \-\-remaining]\fP \fB[\-\-retries]\fP
@@ -1299,7 +2007,18 @@ A database must be configured.
 Specifying \fIFIELD\fP names defines what is included in the output
 (by default all fields are included).
 .sp
+As a safeguard against accidentally dumping an entire database, \fBhs list\fP refuses to return
+more than 1,000 tasks unless the intent is made explicit with \fB\-\-all\fP (dump everything),
+\fB\-\-limit\fP \fIN\fP (bound the result), or \fB\-\-count\fP (count only) \- much as \fBhs update\fP confirms
+a bulk change before applying it. A bare \fBhs list\fP with no arguments prints the usage statement.
+.sp
 This command maps directly to underlying SQL queries.
+.sp
+When printing to a terminal, task records are colorized by \fIexit_status\fP: successful tasks
+(0) are green, cancelled tasks (\-1, including those terminated by \fBSIGHUP\fP) are shown faint,
+tasks that terminated abnormally (killed by a signal, or that never ran \- any other negative
+status) are yellow, and tasks that ran and returned a non\-zero code are red. Tasks that have
+not yet run are left uncolored.
 .SS Arguments
 .INDENT 0.0
 .TP
@@ -1309,6 +2028,14 @@ Default is to include all fields.
 .UNINDENT
 .SS Options
 .INDENT 0.0
+.TP
+.B \fB\-\-all\fP
+Dump all matching tasks, imposing no limit.
+.sp
+As a guard against accidentally dumping an entire database, \fBhs list\fP refuses to return
+more than 1,000 results unless the intent is made explicit. \fB\-\-all\fP dumps them all,
+\fB\-\-limit\fP \fIN\fP bounds the result, and \fB\-\-count\fP only counts them; the three are mutually
+exclusive (e.g. \fBhs list \-\-all\fP or \fBhs list \-\-all \-\-csv\fP).
 .TP
 .B \fB\-w\fP, \fB\-\-where\fP \fICOND...\fP
 List of conditional statements to filter results (e.g., \fB\-w \(aqduration >= 600\(aq\fP).
@@ -1324,6 +2051,15 @@ Specifying a full \fIkey\fP:\fIvalue\fP pair will match on both.
 .TP
 .B \fB\-g\fP, \fB\-\-group\fP \fIGROUP\fP
 Filter results to a single task group.
+.TP
+.B \fB\-\-part\fP \fIN\fP
+Filter results to a single database partition.
+.sp
+After \fBhs initdb \-\-rotate\fP, completed tasks are moved into numbered partition files and
+stamped with that partition\(aqs index in their \fBpart\fP column. \fB\-\-part\fP \fIN\fP restricts the
+listing to a single partition (\fB\-\-part 0\fP is the main database). The filter is a plain
+column comparison and works on any backend, though only the SQLite provider populates
+\fBpart\fP via rotation.
 .TP
 .B \fB\-s\fP, \fB\-\-order\-by\fP \fIFIELD\fP \fB[\-\-desc]\fP
 Order results by field. Optionally, in descending order.
@@ -1342,15 +2078,28 @@ For backwards compatibility, \fB\-\-finished\fP is also valid.
 .B \fB\-R\fP, \fB\-\-remaining\fP
 Alias for \fB\-w \(aqexit_status == null\(aq\fP\&.
 .TP
+.B \fB\-X\fP, \fB\-\-cancelled\fP
+Alias for \fB\-w \(aqexit_status == \-1\(aq\fP (tasks that were cancelled).
+.TP
 .B \fB\-\-retries\fP
 Alias for \fB\-w \(aqattempt > 1\(aq\fP (tasks that have been retried).
 .TP
+.B \fB\-\-signal\fP \fINAME\fP
+Match tasks whose process was terminated by signal \fINAME\fP (e.g. \fBTERM\fP, \fBKILL\fP, \fBHUP\fP).
+.sp
+A task killed by signal \fIN\fP is recorded with \fBexit_status = \-N\fP (the convention used by
+Python\(aqs subprocess module). The \fBSIG\fP prefix is optional and the name is case\-insensitive.
+A task terminated by \fBHUP\fP lands on \-1 and is therefore treated as cancelled
+(see \fB\-\-cancelled\fP).
+.TP
 .B \fB\-f\fP, \fB\-\-format\fP \fIFORMAT\fP
-Specify output format (either \fBnormal\fP, \fBplain\fP, \fBtable\fP, \fBcsv\fP, \fBjson\fP).
+Specify output format (either \fBnormal\fP, \fBcard\fP, \fBplain\fP, \fBtable\fP, \fBcsv\fP, \fBjson\fP).
 .sp
 Default is \fBnormal\fP for whole\-task output. If any \fIFIELD\fP names are given, output is
 formatted in simple \fBplain\fP text; use \fBcsv\fP for compliant output. The pretty\-printed
-\fBtable\fP formatting is good for presentation on wide screens.
+\fBtable\fP formatting is good for presentation on wide screens. The \fBcard\fP format renders
+each task as a richly\-formatted, bordered panel that adapts to the terminal width and shows a
+color\-coded status badge; like \fBnormal\fP it needs the whole task (not a subset of \fIFIELD\fP s).
 .sp
 See \fB\-\-csv\fP, \fB\-\-json\fP, and \fB\-\-delimiter\fP\&.
 .TP
@@ -1399,8 +2148,94 @@ and used within a temporary view, making full task history searchable.
 Update tasks in the database.
 .sp
 Include any number of \fIFIELD=VALUE\fP or tag \fIKEY:VALUE\fP positional arguments.
+Each argument is split at its first \fB=\fP or \fB:\fP (so \fBnote:a=b\fP is the tag \fBnote\fP).
+.sp
+Any key that is not a column is a tag: \fBcolor=blue\fP sets the tag \fBcolor\fP, as \fBcolor:blue\fP does,
+and so does \fBhs update ID color blue\fP\&. A misspelled column therefore becomes a tag; without
+\fB\-f\fP the prompt lists each change as a column, a tag or a removal before anything is written, so
+it shows there. A key one edit from a column (a letter added, dropped, changed or two swapped,
+letter case aside, as in \fBexit_stauts\fP, \fBExit_Status\fP, \fBCores\fP, \fBtags\fP or \fBip\fP) is refused
+with exit status 2, naming the column it is near, and nothing is written. \fBKEY:VALUE\fP always sets a
+tag, even when the key is close to or equal to a column\(aqs name: it is the way to set a tag named
+like a column (\fBhs update ID tag KEY:VALUE\fP in the single\-task form). \fBtag=VALUE\fP, which would
+replace every tag at once, is refused: change one tag with \fBKEY=VALUE\fP or \fBKEY:VALUE\fP, and remove
+one with \fB\-\-remove\-tag\fP\&. Every tag is checked by the tag rules (as \fBhs submit \-t\fP checks it), and
+one that breaks them exits with status 2 before anything is counted, asked or written.
+.sp
+Every column is read by its kind, in both forms and on every database, within its range, as listed
+below. Any other value exits with status 2, naming the column, the range or form and the value,
+before anything is counted, asked or written, and no other change given with it is written.
+\fBnone\fP or \fBnull\fP, in any case, clears a column that may be empty; for \fBattempt\fP, \fBpart\fP,
+\fBretried\fP, \fBsubmit_id\fP, \fBsubmit_time\fP and \fBargs\fP it is refused. A change to \fBid\fP is
+refused in both forms.
+.INDENT 0.0
+.IP \(bu 2
+\fBcores\fP: a whole number, as \fBhs submit \-c\fP reads it.
+.IP \(bu 2
+\fBmemory\fP: a size, as \fBhs submit \-m\fP reads it (e.g., \fB4G\fP, \fB512MB\fP, \fB1.5GiB\fP, or a number of bytes).
+.IP \(bu 2
+\fBtimeout\fP: a duration, as \fBhs submit \-W\fP reads it (e.g., \fB90m\fP, \fB1h30m\fP, \fB1:30:00\fP, \fB1\-12\fP, or a number of seconds), rounded up to whole seconds.
+.IP \(bu 2
+\fBwaited\fP: a duration in seconds, read as \fBtimeout\fP is.
+.IP \(bu 2
+\fBduration\fP: a duration in seconds, read as \fBtimeout\fP is.
+.IP \(bu 2
+\fBexit_status\fP: a whole number.
+.IP \(bu 2
+\fBattempt\fP: a whole number; not \fBnone\fP\&.
+.IP \(bu 2
+\fBpart\fP: a whole number; not \fBnone\fP\&.
+.IP \(bu 2
+\fBcores_max\fP: a number, the peak cores measured.
+.IP \(bu 2
+\fBmemory_max\fP: a number of bytes, the peak memory measured.
+.IP \(bu 2
+\fBretried\fP: a boolean, true/false, yes/no, on/off or 1/0 in any case; not \fBnone\fP\&.
+.IP \(bu 2
+\fBsubmit_id\fP, \fBserver_id\fP, \fBclient_id\fP, \fBprevious_id\fP, \fBnext_id\fP and \fBsource\fP: a uuid,
+the 8\-4\-4\-4\-12 hexadecimal form in any case, stored in lower case (e.g.,
+\fB0198f3a2\-1b2c\-7d3e\-8f40\-0123456789ab\fP); \fBsubmit_id\fP not \fBnone\fP\&. A \fBsource\fP is the id of
+a source as \fBhs info\fP shows it in parentheses; the value is not checked against the sources.
+.IP \(bu 2
+\fBzone\fP: a zone name, read as \fBhs submit \-\-zone\fP reads it; \fBdefault\fP or \fBnone\fP puts the task in
+the default zone, so a zone named \fBnone\fP or \fBnull\fP cannot be set by \fBhs update\fP\&. A new name
+is recorded once the change is written, as \fBhs submit \-\-zone\fP records it.
+.IP \(bu 2
+\fBsubmit_time\fP, \fBschedule_time\fP, \fBstart_time\fP and \fBcompletion_time\fP: ISO 8601 only, a date
+(\fB2026\-01\-01\fP, midnight) or a date and a time joined by \fBT\fP or a space, with optional seconds
+and fraction (up to six digits) and an optional offset or \fBZ\fP (e.g., \fB2026\-01\-01T09:00\fP,
+\fB2026\-01\-01 09:00:00.5\fP, \fB2026\-01\-01T09:00:00\-05:00\fP); \fBsubmit_time\fP not \fBnone\fP\&. A value
+without an offset is local time, the zone \fBhs info\fP and \fBhs list\fP show times in; a local time
+that does not exist, in the hour skipped by a change to daylight\-saving time, is refused, and one
+that occurs twice is the first. An instant on or near the first or last day of the calendar (years 1
+and 9999) is refused. A value is the same instant on SQLite and PostgreSQL. \fBnow\fP,
+\fBtoday\fP, \fBepoch\fP and other words are refused; for the time now, use \fB$(date \-Iseconds)\fP\&.
+.IP \(bu 2
+\fBargs\fP: any text, as given; not \fBnone\fP\&. The other text columns (\fBcommand\fP, \fBoutpath\fP,
+\fBerrpath\fP, \fBcsvpath\fP, \fBsubmit_host\fP, \fBserver_host\fP, \fBclient_host\fP, \fBfingerprint\fP) take
+any text, and \fBnone\fP clears them.
+.UNINDENT
+.sp
+A group change (\fBgroup=VALUE\fP, or \fBID group VALUE\fP in the single\-task form) takes a non\-negative
+integer as \fBhs submit \-g\fP does; any other value exits with status 2 before anything is
+counted, asked or written, and no other change given with it is written.
 .sp
 The \fB\-w\fP/\fB\-\-where\fP and \fB\-t\fP/\fB\-\-with\-tag\fP operate just as in the search command.
+Each takes the words that follow it up to the next option, so the changes go before them
+(e.g., \fBhs update group=7 color:red \-t color:blue\fP).
+.sp
+Every change given is written together, onto each task that matches the filter at the time
+it is written: a task another process changed so that it no longer matches is left as it is.
+The \fIUpdated N tasks\fP (or \fIDeleted N tasks\fP) line counts the tasks actually written; when
+that is fewer than the count taken at the prompt, a warning says how many tasks
+no longer matched and were left as they are, and the exit status is still 0.
+.sp
+If another writer holds a task through every retry, the update writes nothing at all, logs
+an error naming the task, and exits with status 5, so running the same command again is safe.
+With \fB\-\-limit\fP, each task written stays locked until the whole update finishes; on SQLite the
+database is locked for writing that long, and another writer that waits past its busy timeout
+fails. On PostgreSQL, an update without \fB\-\-limit\fP holds the ids of the tasks it wrote in
+memory (about 100 bytes each) to find any it missed.
 .sp
 Using \fB\-\-cancel\fP marks tasks as cancelled: \fIschedule_time\fP and \fIcompletion_time\fP
 are set to now and \fIexit_status\fP to \-1. A cancelled task is terminal \- it will not be
@@ -1409,14 +2244,48 @@ scheduled, retried, or reverted on \fB\-\-restart\fP\&.
 Using \fB\-\-revert\fP reverts everything as if the task was new again.
 .sp
 Using \fB\-\-delete\fP drops the row from the database entirely.
+\fB\-\-delete\fP takes no change: given a \fBFIELD=VALUE\fP, a \fBKEY:VALUE\fP or \fB\-\-remove\-tag\fP,
+\fBhs update\fP exits with status 2 before it counts or asks, and deletes nothing.
 .sp
 The legacy interface for updating a single task with the \fIID\fP, \fIFIELD\fP,
 and \fIVALUE\fP as positional arguments remains valid.
+The single\-task form takes no \fB\-\-cancel\fP, \fB\-\-revert\fP, \fB\-\-delete\fP or \fB\-\-remove\-tag\fP;
+given one, it exits with status 2 and writes nothing.
+The single\-task form takes no option that selects tasks (\fB\-w\fP, \fB\-t\fP, \fB\-g\fP, \fB\-l\fP, \fB\-s\fP,
+\fB\-\-desc\fP, \fB\-F\fP, \fB\-S\fP, \fB\-C\fP, \fB\-R\fP, \fB\-X\fP, \fB\-\-retries\fP, \fB\-\-signal\fP); given one, it exits
+with status 2 and writes nothing. To write a task only if it matches, use the filtered form:
+\fBhs update FIELD=VALUE \-w \(dqid == ID\(dq \-F\fP\&.
 .SS Arguments
 .INDENT 0.0
 .TP
 .B \fIARGS\fP\&...
 Assignment pairs for update.
+.sp
+Any key that is not a column is a tag (\fBcolor=blue\fP is \fBcolor:blue\fP), so a misspelled column
+becomes a tag; the prompt lists each change as a column, a tag or a removal. A key one edit from
+a column (\fBexit_stauts\fP, \fBCores\fP, \fBtags\fP) exits with status 2, naming the column;
+\fBKEY:VALUE\fP always sets a tag. \fBtag=VALUE\fP is refused. An argument is split at its first
+\fB=\fP or \fB:\fP\&.
+.sp
+Every column is read by its kind, in both forms, within the range the description lists:
+\fBcores\fP, \fBexit_status\fP, \fBattempt\fP and \fBpart\fP take a whole number; \fBmemory\fP a size, as
+\fBhs submit \-m\fP reads it (\fB4G\fP, \fB512MB\fP, \fB1.5GiB\fP, or bytes); \fBtimeout\fP, \fBwaited\fP and
+\fBduration\fP a duration, as \fBhs submit \-W\fP reads it (\fB90m\fP, \fB1h30m\fP, \fB1:30:00\fP, \fB1\-12\fP,
+or seconds); \fBcores_max\fP and \fBmemory_max\fP a number. \fBnone\fP or \fBnull\fP clears a column that
+may be empty (not \fBattempt\fP, \fBpart\fP, \fBretried\fP, \fBsubmit_id\fP, \fBsubmit_time\fP or \fBargs\fP).
+\fBretried\fP takes true/false, yes/no, on/off or 1/0, in any case. The uuid columns
+(\fBsubmit_id\fP, \fBserver_id\fP, \fBclient_id\fP, \fBprevious_id\fP, \fBnext_id\fP, \fBsource\fP) take the
+8\-4\-4\-4\-12 hexadecimal form, stored in lower case. \fBzone\fP takes a zone name as \fBhs submit \-\-zone\fP
+reads it, \fBdefault\fP or \fBnone\fP being the default zone. The datetime columns (\fBsubmit_time\fP,
+\fBschedule_time\fP, \fBstart_time\fP, \fBcompletion_time\fP) take ISO 8601 only (e.g., \fB2026\-01\-01\fP,
+\fB2026\-01\-01T09:00\fP, \fB2026\-01\-01T09:00:00\-05:00\fP), a value without an offset being local time;
+\fBnow\fP, \fBtoday\fP and \fBepoch\fP are refused (use \fB$(date \-Iseconds)\fP). Any other value exits with status 2 before anything
+is counted, asked or written, and no other change given with it is written. \fBid\fP is never
+written.
+.sp
+A group change (\fBgroup=VALUE\fP, or \fBID group VALUE\fP in the single\-task form) takes a non\-negative
+integer as \fBhs submit \-g\fP does; any other value exits with status 2 before anything
+is counted, asked or written, and no other change given with it is written.
 .UNINDENT
 .SS Options
 .INDENT 0.0
@@ -1428,6 +2297,12 @@ Cancelling a task means it will no longer be scheduled. This is done by setting 
 \fIschedule_time\fP and \fIcompletion_time\fP to \fInow\fP and the \fIexit_status\fP to \-1. The task
 becomes terminal: it will not be scheduled, retried, or reverted on \fB\-\-restart\fP\&.
 A task cannot be cancelled after it is sent to remote clients.
+.sp
+A running task can also be cancelled \fIin flight\fP on the client by terminating its
+process with \fBSIGHUP\fP (e.g. \fBkill \-HUP\fP). Because a process killed by signal \fIN\fP is
+recorded with \fBexit_status = \-N\fP, a \fBSIGHUP\fP (signal 1) death lands on \-1 \- the same
+cancelled state \- so such a task is likewise not retried. See \fBhs list \-\-cancelled\fP and
+\fBhs list \-\-signal HUP\fP\&.
 .TP
 .B \fB\-\-revert\fP
 Revert specified tasks.
@@ -1440,6 +2315,9 @@ Delete specified tasks.
 .sp
 Deleting a task fully drops the record from the database.
 All task information will be lost and not recoverable.
+.sp
+\fB\-\-delete\fP takes no change: given a \fBFIELD=VALUE\fP, a \fBKEY:VALUE\fP or \fB\-\-remove\-tag\fP,
+\fBhs update\fP exits with status 2 before it counts or asks, and deletes nothing.
 .TP
 .B \fB\-\-remove\-tag\fP \fITAG...\fP
 Strip the specified \fItag\fP from task records.
@@ -1481,8 +2359,19 @@ Alias for \fB\-w \(aqexit_status != null\(aq\fP\&.
 .B \fB\-R\fP, \fB\-\-remaining\fP
 Alias for \fB\-w \(aqexit_status == null\(aq\fP\&.
 .TP
+.B \fB\-X\fP, \fB\-\-cancelled\fP
+Alias for \fB\-w \(aqexit_status == \-1\(aq\fP (tasks that were cancelled).
+.TP
 .B \fB\-\-retries\fP
 Alias for \fB\-w \(aqattempt > 1\(aq\fP (tasks that have been retried).
+.TP
+.B \fB\-\-signal\fP \fINAME\fP
+Match tasks whose process was terminated by signal \fINAME\fP (e.g. \fBTERM\fP, \fBKILL\fP, \fBHUP\fP).
+.sp
+A task killed by signal \fIN\fP is recorded with \fBexit_status = \-N\fP (the convention used by
+Python\(aqs subprocess module). The \fBSIG\fP prefix is optional and the name is case\-insensitive.
+A task terminated by \fBHUP\fP lands on \-1 and is therefore treated as cancelled
+(see \fB\-\-cancelled\fP).
 .TP
 .B \fB\-f\fP, \fB\-\-no\-confirm\fP
 Do not ask for confirmation.
@@ -1495,6 +2384,12 @@ The user must confirm the update interactively unless provided with
 .sp
 In previous releases of the software the update command had the following signature.
 Executing the command with these three positional arguments is still valid.
+The single\-task form takes no \fB\-\-cancel\fP, \fB\-\-revert\fP, \fB\-\-delete\fP or \fB\-\-remove\-tag\fP;
+given one, it exits with status 2 and writes nothing.
+The single\-task form takes no option that selects tasks (\fB\-w\fP, \fB\-t\fP, \fB\-g\fP, \fB\-l\fP, \fB\-s\fP,
+\fB\-\-desc\fP, \fB\-F\fP, \fB\-S\fP, \fB\-C\fP, \fB\-R\fP, \fB\-X\fP, \fB\-\-retries\fP, \fB\-\-signal\fP); given one, it exits
+with status 2 and writes nothing. To write a task only if it matches, use the filtered form:
+\fBhs update FIELD=VALUE \-w \(dqid == ID\(dq \-F\fP\&.
 .INDENT 0.0
 .TP
 .B ID
@@ -1603,6 +2498,25 @@ Disable formatting on single value output.
 .UNINDENT
 .sp
 Set configuration option.
+.sp
+The value is written \fI\%by the key\(aqs type\fP, the rule an environment variable
+for the key is read by. A key that takes text holds the value as written, \fBtrue\fP, \fBnull\fP,
+\fB007\fP and an empty value included. A whole number, a number or a boolean is converted, a boolean
+from \fBtrue\fP/\fBfalse\fP, \fByes\fP/\fBno\fP, \fBon\fP/\fBoff\fP or \fB1\fP/\fB0\fP in any letter case; a value
+that does not convert is refused with exit status 2, and nothing is written. A duration or a size
+is written as a number when the value is one and as the text otherwise. A numeric key (a whole
+number, a number, a duration or a size, a zone key\(aqs included) is held to the key\(aqs range, given
+with each key in the \fI\%parameter reference\fP: a value outside it, or not a
+number of the key\(aqs kind (\fBnan\fP, \fBinf\fP, a boolean), is refused with exit status 2, and nothing
+is written. A value inside the range but past the key\(aqs advisory limit is written, with a warning.
+A key with no type of its own (an entry of \fBdatabase.connect_args\fP or \fBdatabase.pragmas\fP, a
+\fB[database]\fP provider argument, or a path that names no documented key) holds a TOML integer,
+float or boolean when the value is exactly one (\fB5\fP, \fB2.5\fP, \fBtrue\fP), and the text otherwise;
+an integer outside 64 bits, which TOML cannot hold, is refused with exit status 2, and nothing is written. An empty value for a
+key that takes text is written as \fB\(dq\(dq\fP and overrides the key in a lower file. For an optional text
+key, such as \fBdatabase.user\fP or \fBserver.bind\fP, an empty variable would not: it is read as not
+given. The file is written as UTF\-8, whatever the locale; a path or value that cannot be is refused
+with exit status 2, and nothing is written.
 .SS Arguments
 .INDENT 0.0
 .TP
@@ -1610,7 +2524,7 @@ Set configuration option.
 Path to variable.
 .TP
 .B VALUE
-Value to be set.
+Value to be set, written by the key\(aqs type.
 .UNINDENT
 .SS Options
 .INDENT 0.0
@@ -1682,6 +2596,47 @@ argument to all clients.
 .sp
 In some situations it may be useful to expand a template with the \fBsubmit\fP command.
 These are expanded \fIprior\fP to scheduling as the actual \fIargs\fP for the task.
+.SS Named Fields
+.sp
+When tasks are submitted from a JSON file with \fB\-\-from\-json\fP (see the \fBsubmit\fP
+command), each task object\(aqs keys become available as named template fields. A
+\fB{key}\fP pattern expands to that key\(aqs value for the given task, and the keys also
+become task tags.
+.sp
+For a task object \fB{\(dqseqid\(dq: \(dqChr1\(dq, \(dqstart\(dq: 1, \(dqend\(dq: 5000000}\fP the template
+\fBprocess \-\-region {seqid}:{start}\-{end}\fP expands to
+\fBprocess \-\-region Chr1:1\-5000000\fP\&.
+.sp
+Values are stringified: booleans render as \fBtrue\fP/\fBfalse\fP, \fBnull\fP as an empty
+string, and nested objects/arrays as compact JSON. A built\-in pattern (below) takes
+precedence over a task key of the same name. Named fields are resolved at submit time,
+and every \fB{key}\fP must be present in each task object or the submission is rejected.
+.SS Execution Slot
+.sp
+Each client runs \fBN\fP task executors (set with \fB\-N\fP/\fB\-\-num\-threads\fP); every executor owns
+a fixed \fBslot\fP for its lifetime, a zero\-based index in \fB0 .. N\-1\fP\&. Two patterns expose it so a
+task can claim a non\-overlapping share of the node\(aqs cores, memory, or GPUs without colliding with
+its siblings.
+.INDENT 0.0
+.TP
+.B \fB{slot}\fP
+The executor\(aqs zero\-based slot index (\fB0 .. N\-1\fP).
+.TP
+.B \fB{slot_count}\fP
+The number of executors on this client (\fBN\fP).
+.TP
+.B \fBtaskset \-c {slot} ./sim {}\fP
+Pin each task to a distinct CPU core.
+.TP
+.B \fBCUDA_VISIBLE_DEVICES={slot} python train.py {}\fP
+Assign a distinct GPU per task.
+.UNINDENT
+.sp
+These fields are resolved at execution time, when the \fBclient\fP expands the template — the normal
+line\-input path, whether database\-backed or \fB\-\-no\-db\fP\&. They are \fInot\fP available when the template
+is instead expanded at submit time (JSON mode via \fB\-\-from\-json\fP, or the \fBsubmit\fP command); use
+the equivalent \fBTASK_SLOT\fP and \fBTASK_SLOT_COUNT\fP environment variables there, which are always
+defined.
 .SS Filepath Operations
 .sp
 Shell commands often operate on filepaths. In such cases, it may be useful to manipulate
@@ -1795,7 +2750,7 @@ Convert incoming POSIX timestamp to ISO format.
 .UNINDENT
 .SH TASK GROUPS
 .sp
-Tasks may be assigned to an integer \fIgroup\fP for simple dependency management. Groups are
+Tasks may be assigned to a non\-negative integer \fIgroup\fP for simple dependency management. Groups are
 scheduled in ascending order: every task in the active group must reach a terminal state before
 any task in the next group is scheduled. Within a group there is no ordering and all tasks may
 run concurrently. Tasks default to group \fB0\fP\&.
@@ -1805,11 +2760,36 @@ Assign a group at submit time with \fB\-g\fP/\fB\-\-group\fP, or per task with a
 .INDENT 3.5
 .sp
 .EX
-echo \(aqstage\-one.sh  # HYPERSHELL: group:0\(aq | hs submit
-echo \(aqstage\-two.sh  # HYPERSHELL: group:1\(aq | hs submit
+echo \(aqstage\-one.sh  # HYPERSHELL: group:0\(aq | hs submit \-
+echo \(aqstage\-two.sh  # HYPERSHELL: group:1\(aq | hs submit \-
 .EE
 .UNINDENT
 .UNINDENT
+.sp
+The directive takes \fBgroup=1\fP as well as \fBgroup:1\fP: either separator sets the group, never a tag
+(see \fBhs submit\fP). With \fB=\fP, a likely typo such as \fBgrop=1\fP is refused, naming \fBgroup\fP\&.
+.sp
+Changed in version 2.9.0: \X'tty: link https://github.com/hypershell/hypershell/pull/128'\fI\%#128\fP\X'tty: link': \fBgroup=N\fP sets the group, as \fBgroup:N\fP does; it was refused as a malformed tag.
+
+.sp
+A group is a non\-negative integer, written as \fB\-g\fP/\fB\-\-group\fP takes it (\fB7\fP, \fB+5\fP and
+\fB07\fP are accepted). Any other value, including a group below 0, is refused wherever it arrives: an
+inline \fBgroup:\fP tag, \fB\-t group:...\fP or the \fBgroup\fP key of a \fB\-\-from\-json\fP record, which must
+be a JSON integer (\fB\(dq7\(dq\fP, \fB3.0\fP, \fBtrue\fP and \fBnull\fP are refused). Input read in full (a task
+file given to \fBhs submit\fP, \fBhs cluster\fP or \fBhs server\fP, a \fB\-\-from\-json\fP source, a command given
+as arguments, and standard input to \fBhs submit\fP with the database) is refused whole, with nothing
+submitted or run, exit status 5 and an error naming the value and its line or record. On a stream
+into \fBhs cluster\fP, \fBhs server\fP or \fBhs submit \-\-queue\fP, only the offending line is refused, with
+an error naming its value and line; the lines after it run as they would without it, so a refused
+tag\-only line sets nothing. \fB\-t group:x\fP exits with status 2 before any input is read.
+.sp
+Changed in version 2.9.0: \X'tty: link https://github.com/hypershell/hypershell/pull/118'\fI\%#118\fP\X'tty: link': a group that is not an integer is refused. Earlier releases stored such values as
+given on SQLite and ran them in an undocumented order, and \fBgroup:nan\fP hung the run.
+
+.sp
+Changed in version 2.9.0: \X'tty: link https://github.com/hypershell/hypershell/pull/127'\fI\%#127\fP\X'tty: link': a group below 0 is refused, as any other value outside the range is. Earlier releases
+accepted a negative group; a database that already holds one still runs it first.
+
 .sp
 The server advances through groups automatically as each one completes. If a group cannot be
 completed because it still holds failed tasks (after any \fB\-\-max\-retries\fP attempts are
@@ -1825,6 +2805,43 @@ naming both groups. The clients that \fBhs cluster\fP launches start once the fi
 their \fB\-T\fP/\fB\-\-timeout\fP clock does not run while it is read. A client connected to
 \fBhs server\fP whose \fB\-T\fP/\fB\-\-timeout\fP is shorter than the time to read the file reaches that
 timeout and exits before any task is scheduled, and the server then waits for new clients.
+A run fed by a stream keeps scheduling until that input ends, so a stream with long pauses wants
+clients with no \fB\-T\fP/\fB\-\-timeout\fP (or autoscaling): a client that times out during a pause is
+not there to run the lines that follow it.
+.sp
+The \fIreached group\fP is the highest group the current run has started, read from the tasks in the
+database: a run is the work since the database last held no unfinished task, so once every task has
+finished there is no reached group and any group is accepted. Cancelled tasks do not count, and a
+failure counts as finished unless its retry has been created. With the database, \fBhs submit\fP
+refuses a submission holding a task below the reached group, all or nothing, with exit status 2 and
+an error naming the lowest such group and the reached group; it reads standard input in full first.
+A submission that names no group takes the reached group when the most recently scheduled group is
+below it. \fBhs cluster\fP and \fBhs server\fP refuse a task file the same way when the database has a
+reached group (with \fB\-\-restart\fP, \fB\-\-update\fP or \fB\-\-repeat\fP, or a database kept from an earlier
+run), before anything is submitted or run. For them, tasks still in flight from an interrupted run
+do not count, because the server returns them to the queue when it starts, and tasks the
+re\-submission gate skips as already present are not checked, so a same\-file \fB\-\-restart\fP of a run
+that was interrupted is never refused. A stream is not refused: its late lower group runs, with the
+warning above. To go on, submit at the reached group or higher, wait for the run to finish, or use a
+fresh database.
+.sp
+The reached group is read from the tasks\(aq own times, so it can fall short of the group a live server
+has truly started (for example when every task of a higher group finished before the oldest task
+still open was submitted, or while a failure waits for its retry to be created); a lower group
+accepted then runs late, with the warning above. It can overshoot only when those times mislead:
+after \fBhs update \-\-revert\fP of a finished task, across clocks that disagree between hosts, or on
+SQLite across the hour a daylight\-saving change repeats.
+.sp
+A line holding a \fB#\fP after its first non\-blank character is a different task in 2.9.0 than it was
+before (earlier releases cut the command there), so \fB\-\-restart\fP or \fB\-\-update\fP of a file first
+submitted by an earlier release submits such lines again, and on a database with a reached group a
+file whose such line is in a lower group is refused. An old task stored cut that failed keeps its
+group failed until it is cancelled or updated with \fBhs update\fP\&.
+.sp
+Changed in version 2.9.0: \X'tty: link https://github.com/hypershell/hypershell/pull/118'\fI\%#118\fP\X'tty: link': a task below the reached group is refused by \fBhs submit\fP, and a task file holding
+one by \fBhs cluster\fP and \fBhs server\fP; \fBhs submit\fP reads standard input in full before
+submitting.
+
 .sp
 Filter or update tasks by group with the \fB\-g\fP/\fB\-\-group\fP option of \fBhs list\fP and
 \fBhs update\fP\&.
@@ -1879,8 +2896,15 @@ T}
 The \X'tty: link https://toml.io'\fI\%TOML\fP\X'tty: link' format is modern and minimal.
 .sp
 Every configurable option can be set in one of these files. Further, every option can
-also be set by an environment variable, where the name aligns to the path
-to that option, delimited by underscores.
+also be set by an environment variable: \fBHYPERSHELL_\fP followed by the option\(aqs path, with each
+\fB\&.\fP written as \fB_\fP (see \fIEnvironment Variables\fP below).
+.sp
+Every numeric option has a range, given in the parameter reference. A value from a file, or from
+an environment variable, is held to its key\(aqs range when the configuration loads, for every
+command: a value outside it stops the command before it starts, naming the key, the range, the
+value and the file or variable it came from (exit status 3). A numeric key\(aqs \fB_env\fP or \fB_eval\fP
+form that cannot resolve (a variable that is not set, a command that fails) stops it the same way.
+\fBhs config\fP still runs on a file holding either, so it can be shown and set right.
 .sp
 For example, set the logging level at the user level with a command:
 .INDENT 0.0
@@ -1918,9 +2942,9 @@ $ export HYPERSHELL_LOGGING_LEVEL=INFO
 .UNINDENT
 .sp
 Finally, any option defined within a configuration file that ends with \fB_env\fP or \fB_eval\fP
-is automatically expanded by the given environment variable or shell expression,
-respectively. This is useful as both a dynamic feature but also as a means to
-obfuscate sensitive information, such as database connection details.
+(or by a variable that ends with \fB_ENV\fP or \fB_EVAL\fP) is automatically expanded by the given
+environment variable or shell expression, respectively. This is useful as both a dynamic feature
+but also as a means to obfuscate sensitive information, such as database connection details.
 .INDENT 0.0
 .INDENT 3.5
 .sp
@@ -1997,7 +3021,10 @@ See the \fI\%logging\fP section for full details on rotation and compression.
 .sp
 As a shorthand, \fBlogging.file\fP may be set directly to \fB\(dqenabled\(dq\fP (or \fBtrue\fP) to
 log to the default per\-process file, or to a path to log there; both forms disable
-rotation and compression.
+rotation and compression. From the environment, \fBHYPERSHELL_LOGGING_FILE\fP takes
+\fBenabled\fP, \fBtrue\fP, \fByes\fP, \fBon\fP or \fB1\fP, in any letter case, for the default file;
+\fBfalse\fP, \fBno\fP, \fBoff\fP and \fB0\fP are refused, since there is no form that disables it;
+any other text is a path.
 .INDENT 7.0
 .TP
 .B \fB\&.path\fP
@@ -2044,8 +3071,10 @@ When provided, this takes precedence over and short\-circuits the individual
 .TP
 .B \fB\&.provider\fP
 Database provider (default: \(aqsqlite\(aq). Supported alternatives include
-\(aqpostgres\(aq (or compatible). Support for other providers may be considered in
-the future.
+\(aqpostgres\(aq (or compatible) and \(aqtimescale\(aq (alias \(aqtimescaledb\(aq), which is PostgreSQL
+with the TimescaleDB extension: \fBhs initdb\fP makes the task table a hypertable
+(requires the \fBuuid7\fP extra; see the TimescaleDB section of \fI\%database\fP).
+Support for other providers may be considered in the future.
 .TP
 .B \fB\&.file\fP
 Only applicable for SQLite provider.
@@ -2089,6 +3118,14 @@ e.g., \fBsqlite3\fP or \fBpsycopg\fP\&.
 Specify one or more pragmas to apply to database connections (SQLite only).
 For example \fBpragmas = { journal_mode = \(dqwal\(dq }\fP to enable WAL\-mode.
 .TP
+.B \fB[timescale]\fP
+Settings for the TimescaleDB shape \fBhs initdb\fP gives the task table (\fBtimescale\fP
+provider only; never forwarded to the connection). Keys: \fBchunk_interval\fP
+(default \fB\(dq1 week\(dq\fP), \fBcolumnstore\fP (\fBtrue\fP), \fBsegmentby\fP (\fB\(dqclient_id\(dq\fP),
+\fBorderby\fP (\fB\(dqid DESC\(dq\fP), \fBpolicy\fP (\fBtrue\fP), and \fBcompress_after\fP
+(\fB\(dq4 weeks\(dq\fP). For example \fBtimescale = { chunk_interval = \(dq1 day\(dq }\fP\&.
+See the TimescaleDB section of \fI\%database\fP\&.
+.TP
 .B \fB*\fP
 Any additional arguments are forwarded to the provider, e.g., \fBencoding = \(aqutf\-8\(aq\fP\&.
 .UNINDENT
@@ -2101,15 +3138,37 @@ Section for \fIserver\fP workflow parameters.
 Bind address (default: \fIlocalhost\fP).
 .sp
 When running locally, the default is recommended. To allow remote \fIclients\fP to connect
-over the network, bind the server to \fI0.0.0.0\fP\&.
+over the network, bind the server to \fI0.0.0.0\fP\&. A \fIcluster\fP tells the clients it launches
+to dial the bind address when it is one specific address, and this host\(aqs own name when
+it is \fI0.0.0.0\fP, unless \fB\&.advertise\fP names another.
+.sp
+A \fIclient\fP, or \fBsubmit \-\-queue\fP, given no \fB\-H\fP dials \fB\&.host\fP, else \fB\&.advertise\fP\&.
+When neither is given, it dials the bind address if it is one specific address, else
+\fIlocalhost\fP\&.
 .TP
 .B \fB\&.host\fP
-Host address that clients connect to (default: \fIlocalhost\fP).
+Address that \fIclients\fP dial (default: by \fB\&.advertise\fP or \fB\&.bind\fP).
 .sp
 Counterpart to \fB\&.bind\fP: where \fB\&.bind\fP is the local address the server listens on,
 \fB\&.host\fP is the address that \fIclient\fP instances and queue\-direct \fBsubmit \-\-queue\fP
-dial to reach the server. Set this to the server\(aqs reachable hostname or address
-when running clients on other machines.
+dial when given no \fB\-H\fP\&. Set it to the server\(aqs reachable name when clients run on
+other machines, so one shared file serves both, e.g. \fBbind = \(dq0.0.0.0\(dq\fP with
+\fBhost = \(dqlogin00.example.edu\(dq\fP\&.
+.sp
+It counts as given when any configuration file or \fBHYPERSHELL_SERVER_HOST\fP gives it,
+even as \fIlocalhost\fP\&. When none does, they dial \fB\&.advertise\fP if given, else \fB\&.bind\fP
+when it is one specific address, else \fIlocalhost\fP\&. The \fB\-H\fP option takes precedence.
+.TP
+.B \fB\&.advertise\fP
+Address the clients a \fIcluster\fP launches are told to dial (default: by \fB\&.bind\fP).
+.sp
+Overrides the rule under \fB\&.bind\fP in every remote \fIcluster\fP mode (\fB\-\-ssh\fP, \fB\-\-mpi\fP,
+\fB\-\-launcher\fP and \fB\-\-autoscaling\fP), for a name the clients must use that differs from
+the bind address, such as the name on the server\(aqs certificate. The \fB\-\-advertise\fP
+option takes precedence. A local \fIcluster\fP, whose clients are not launched, ignores it,
+and so does a relay: its site \fIclients\fP are told \fBrelay.advertise\fP instead. A \fIclient\fP
+or \fBsubmit \-\-queue\fP given no \fB\-H\fP also dials it when \fB\&.host\fP is not given. Its
+environment form is \fBHYPERSHELL_SERVER_ADVERTISE\fP\&.
 .TP
 .B \fB\&.port\fP
 Port number (default: \fI50001\fP).
@@ -2146,7 +3205,16 @@ batches of this size.
 Using larger bundles is a good idea for large distributed workflows; specifically, it is best
 to coordinate bundle size with the number of executors in use by each client.
 .sp
+It is also the size of the bundle given to a client that advertises no size of its own.
+.sp
 See also \fB\-b\fP/\fB\-\-bundlesize\fP command\-line option.
+.TP
+.B \fB\&.bundlemax\fP
+Most tasks the server hands a client in one reply (default: \fI1000\fP).
+.sp
+A client advertises its own bundle size (its \fB\-b\fP); the server never replies with more
+than this many tasks, whatever a client asks for. The effective cap is never smaller than
+the server\(aqs own \fB\&.bundlesize\fP\&. There is no command\-line option.
 .TP
 .B \fB\&.attempts\fP
 Attempts for auto\-retry on failed tasks (default: \fI1\fP).
@@ -2155,8 +3223,16 @@ If a database is in use, then there is an opportunity to automatically retry fai
 task is considered to have failed if it has a non\-zero exit status. The original is not over\-written,
 a new task is submitted and later scheduled.
 .sp
-Counterpart to the \fB\-r\fP/\fB\-\-max\-retries\fP command\-line option. Setting \fB\-\-max\-retries 1\fP
-is equivalent to setting \fB\&.attempts\fP to 2.
+A task whose template does not expand (\fB\-1001\fP) or that needs more cores or memory than its
+client has (\fB\-1002\fP) is never retried: it did not run. Its group fails at once, as for a task
+with no retries left.
+A retry keeps its task\(aqs cores, memory and walltime.
+.sp
+Read by \fBhs server\fP and \fBhs cluster\fP, as the counterpart to the \fB\-r\fP/\fB\-\-max\-retries\fP
+command\-line option. Setting \fB\-\-max\-retries 1\fP is equivalent to setting \fB\&.attempts\fP to 2.
+Also read by the Python API\(aqs entry points (\fBServerThread\fP, \fBserve_from\fP, \fBserve_file\fP,
+\fBserve_forever\fP, the cluster classes and \fBrun_local\fP, \fBrun_cluster\fP, \fBrun_ssh\fP) when
+they are not given \fBmax_retries\fP\&.
 .sp
 See also \fB\&.eager\fP\&.
 .TP
@@ -2166,6 +3242,11 @@ Schedule failed tasks before new tasks (default: \fIfalse\fP).
 If \fB\&.attempts\fP is greater than one, this option defines the appetite for re\-submitting
 failed tasks. By default, failed tasks will only be scheduled when there are no more
 remaining novel tasks.
+.sp
+Read by \fBhs server\fP and \fBhs cluster\fP; \fB\-\-eager\fP turns it on for one run. A value in a
+file other than \fBtrue\fP or \fBfalse\fP takes the boolean words: \fB\(dqyes\(dq\fP/\fB\(dqno\(dq\fP,
+\fB\(dqon\(dq\fP/\fB\(dqoff\(dq\fP, \fB\(dqtrue\(dq\fP/\fB\(dqfalse\(dq\fP in any letter case, or \fB1\fP/\fB0\fP as a number or as
+text. Any other value stops the command before it starts.
 .TP
 .B \fB\&.poll\fP
 Maximum polling interval in seconds between database queries when no tasks are
@@ -2173,22 +3254,32 @@ available (default: \fI30\fP).
 .sp
 The scheduler backs off exponentially from a small floor, doubling the wait after
 each empty query up to this ceiling. This waiting only occurs when no tasks are
-returned by the query.
+returned by the query. The result that finishes a run ends the scheduler\(aqs wait at once.
+A string takes the same forms as \fB\-Q\fP/\fB\-\-poll\fP: units \fBd\fP, \fBh\fP, \fBm\fP and \fBs\fP
+(e.g., \fB\(dq30s\(dq\fP, \fB\(dq5m\(dq\fP, \fB\(dq1h30m\(dq\fP) or a Slurm time (e.g., \fB\(dq1:30\(dq\fP); a number is
+seconds.
 .sp
 See also \fB\-Q\fP/\fB\-\-poll\fP command\-line option.
 .TP
 .B \fB\&.evict\fP
 Eviction period in seconds for clients (default: \fI600\fP).
 .sp
-If a client fails to register a heartbeat after this period of time it is considered
-defunct and is evicted. When there are no more tasks to schedule the server sends a
+If the server receives no heartbeat from a client for this period of time, by its own
+clock, the client is considered defunct and is evicted. The time a client stamps on its
+heartbeat plays no part, so a client whose clock differs from the server\(aqs is not evicted
+while it keeps sending them. When there are no more tasks to schedule the server sends a
 disconnect request to all registered clients, and waits until a confirmation is
 returned for each. If a client is defunct, this will hang the shutdown process.
+Takes a number of seconds or a string in the duration forms: units \fBd\fP, \fBh\fP, \fBm\fP
+and \fBs\fP (e.g., \fB\(dq30s\(dq\fP, \fB\(dq5m\(dq\fP, \fB\(dq1h30m\(dq\fP) or a Slurm time (e.g., \fB\(dq1:30\(dq\fP);
+fractions are kept. Every command stops before it starts if the value is not a duration or
+is under 10 seconds.
 .TP
 .B \fB[tls]\fP
 Transport\-layer security for queue connections. Enabled by default; every key below
-is also exposed as an environment variable (e.g., \fBHYPERSHELL_SERVER_TLS_ENABLED\fP)
-with the usual precedence. See the \fI\%built\-in TLS\fP section for the
+is also exposed as an environment variable (e.g., \fBHYPERSHELL_SERVER_TLS_ENABLED\fP,
+\fBHYPERSHELL_SERVER_TLS_MIN_VERSION\fP) with the usual precedence (see
+\fI\%Environment Variables\fP). See the \fI\%built\-in TLS\fP section for the
 full model, including peer verification modes and limitations.
 .INDENT 7.0
 .TP
@@ -2243,6 +3334,17 @@ Expected server name for identity verification / SNI override (default: none).
 Required alongside \fB\&.cafile\fP for true server\-identity verification: with a trust
 anchor set but no \fB\&.servername\fP, the client checks only that the certificate
 chains to the anchor, not which host presented it.
+.TP
+.B \fB\&.handshake\fP
+Seconds a connection has to complete its TLS handshake with a server (default: \fI30\fP).
+.sp
+Counted from when the server accepts the connection; data the peer sends meanwhile
+does not extend it. A connection that misses it is closed, and the server keeps
+accepting other clients while handshakes are pending. Takes a number of seconds or
+any duration form (e.g., \fB30\fP, \fB\(dq30s\(dq\fP, \fB\(dq1m\(dq\fP), rounded up to whole seconds;
+it must be greater than 0 and at most one day (\fB1d\fP), or every command stops before
+it starts. Also set with \fBHYPERSHELL_SERVER_TLS_HANDSHAKE\fP\&. A server without TLS, by
+\fB\-\-no\-tls\fP or \fB\&.enabled\fP set to \fIfalse\fP, ignores it; clients never read it.
 .UNINDENT
 .UNINDENT
 .TP
@@ -2260,6 +3362,13 @@ to coordinate bundle size with the number of executors in use by each client. It
 idea to coordinate bundle size between the client and server so that the client returns the
 same sized bundles that it receives.
 .sp
+Read by \fBhs client\fP for its \fB\-b\fP/\fB\-\-bundlesize\fP default. When it is set (here, by
+\fBHYPERSHELL_CLIENT_BUNDLESIZE\fP, or by its \fBbundlesize_env\fP or \fBbundlesize_eval\fP
+forms), a client advertises it as the size of bundle it requests and returns finished tasks
+in bundles of that size; when it is left at the built\-in default, a client advertises no
+size and the server uses its own. \fBhs client\fP stops before it starts if the value is not
+a whole number.
+.sp
 See also \fB\-b\fP/\fB\-\-bundlesize\fP command\-line option.
 .TP
 .B \fB\&.bundlewait\fP
@@ -2267,9 +3376,14 @@ Seconds to wait before flushing task bundle (default: \fI5\fP).
 .sp
 If this period of time expires since the previous bundle was returned to the server,
 the current group of finished tasks will be pushed regardless of \fIbundlesize\fP\&.
+A client with nothing left to run returns what it holds at once.
 .sp
 For larger distributed workflows it is a good idea to make this waiting period sufficiently
 long so that most bundles are returned whole.
+.sp
+Read by \fBhs client\fP for its \fB\-w\fP/\fB\-\-bundlewait\fP default. A string takes the same
+forms as \fB\-w\fP/\fB\-\-bundlewait\fP: units \fBd\fP, \fBh\fP, \fBm\fP and \fBs\fP (e.g., \fB\(dq30s\(dq\fP,
+\fB\(dq5m\(dq\fP, \fB\(dq1h30m\(dq\fP) or a Slurm time (e.g., \fB\(dq1:30\(dq\fP); a number is seconds.
 .sp
 See also \fB\-w\fP/\fB\-\-bundlewait\fP command\-line option.
 .TP
@@ -2277,6 +3391,9 @@ See also \fB\-w\fP/\fB\-\-bundlewait\fP command\-line option.
 Interval in seconds between heartbeats sent to server (default \fI10\fP).
 .sp
 Even on the largest scales the default interval should be fine.
+Takes a number of seconds or a string in the duration forms: units \fBd\fP, \fBh\fP, \fBm\fP
+and \fBs\fP (e.g., \fB\(dq30s\(dq\fP, \fB\(dq5m\(dq\fP, \fB\(dq1h30m\(dq\fP) or a Slurm time (e.g., \fB\(dq1:30\(dq\fP);
+fractions are kept. \fBhs client\fP stops before it starts if the value is not a duration.
 .TP
 .B \fB\&.timeout\fP
 Timeout in seconds for client. Automatically shutdown if no tasks received (default: never).
@@ -2305,8 +3422,11 @@ See also \fB\-M\fP/\fB\-\-client\-memory\fP command\-line option.
 .B \fB\&.ratelimit\fP
 Maximum number of tasks started per second (default: no limit).
 .sp
-A value of \fB0\fP disables rate limiting. Useful to throttle very short tasks so that
-task launch does not overwhelm a shared resource.
+A number (e.g., \fB0.5\fP, one task every two seconds), read by \fBhs client\fP and by
+\fBhs cluster\fP for each of its clients. A value of \fB0\fP disables rate limiting. Useful to
+throttle very short tasks so that task launch does not overwhelm a shared resource.
+A rate other than \fB0\fP below the range is refused, from \fB\-R\fP and from the configuration
+alike.
 .sp
 See also \fB\-R\fP/\fB\-\-ratelimit\fP command\-line option.
 .UNINDENT
@@ -2322,6 +3442,8 @@ The default value allows for greater concurrency and responsiveness on small sca
 Using larger bundles is a good idea for large distributed workflows; specifically, it is best
 to coordinate bundle size with the number of executors in use by each client.
 .sp
+Read by \fBhs submit\fP only.
+.sp
 See also \fB\-b\fP/\fB\-\-bundlesize\fP command\-line option.
 .TP
 .B \fB\&.bundlewait\fP
@@ -2329,6 +3451,12 @@ Seconds to wait before flushing tasks (default: \fI5\fP).
 .sp
 If this period of time expires since the previous bundle was pushed to the database,
 the current bundle will be pushed regardless of how many tasks have been accumulated.
+A string takes the same forms as \fB\-w\fP/\fB\-\-bundlewait\fP: units \fBd\fP, \fBh\fP, \fBm\fP and
+\fBs\fP (e.g., \fB\(dq30s\(dq\fP, \fB\(dq5m\(dq\fP, \fB\(dq1h30m\(dq\fP) or a Slurm time (e.g., \fB\(dq1:30\(dq\fP); a number
+is seconds.
+.sp
+Read by \fBhs submit\fP, \fBhs server\fP and \fBhs cluster\fP (which hands it to its clients as \fB\-w\fP).
+\fBhs client\fP reads \fBclient.bundlewait\fP\&.
 .sp
 See also \fB\-w\fP/\fB\-\-bundlewait\fP command\-line option.
 .UNINDENT
@@ -2370,6 +3498,10 @@ tasks may override this inline in the same forms (e.g., \fB# HYPERSHELL: timeout
 .B \fB\&.signalwait\fP
 Wait period in seconds between signal escalation on task cancellation (default: 10).
 .sp
+A string takes the same forms as \fB\-S\fP/\fB\-\-signalwait\fP: units \fBd\fP, \fBh\fP, \fBm\fP and
+\fBs\fP (e.g., \fB\(dq30s\(dq\fP, \fB\(dq5m\(dq\fP, \fB\(dq1h30m\(dq\fP) or a Slurm time (e.g., \fB\(dq1:30\(dq\fP); a number
+is seconds.
+.sp
 See also \fB\-S\fP, \fB\-\-signalwait\fP command\-line option.
 .UNINDENT
 .TP
@@ -2409,6 +3541,12 @@ A \fIdynamic\fP policy maintains a minimum size and grows up to some maximum siz
 depending on the observed \fItask pressure\fP given the specified scaling factor.
 .sp
 See also \fB\&.factor\fP, \fB\&.period\fP, \fB\&.size.init\fP, \fB\&.size.min\fP, and \fB\&.size.max\fP\&.
+.sp
+A server autoscaling with relay sites (\fBhs server \-\-autoscaling\fP) applies the policy to
+each zone\(aqs demand alone: under \fIfixed\fP, a zone with work gets one client when none runs,
+and its size otherwise comes from the relays\(aq \fBmin\fP and \fBinit\fP; under \fIdynamic\fP, a zone
+grows by one client per check while its pressure is high, up to the sum of its live sites\(aq
+\fBmax\fP\&.
 .TP
 .B \fB\&.factor\fP
 Scaling factor (default: 1).
@@ -2429,11 +3567,18 @@ exceeds 1 hour, we will scale up by one unit.
 See also \fB\&.period\fP\&.
 .TP
 .B \fB\&.period\fP
-Scaling period in seconds (default: 60).
+Scaling period in seconds, greater than zero (default: 60).
 .sp
 The autoscaler waits for this period of time in between checks and scaling events.
 A shorter period makes the scaling behavior more responsive but can effect database
 performance if checks happen too rapidly.
+A string takes the same forms as \fB\-P\fP/\fB\-\-period\fP: units \fBd\fP, \fBh\fP, \fBm\fP and \fBs\fP
+(e.g., \fB\(dq30s\(dq\fP, \fB\(dq5m\(dq\fP, \fB\(dq1h30m\(dq\fP) or a Slurm time (e.g., \fB\(dq1:30\(dq\fP); a number is
+seconds. \fBhs relay\fP reads it in the same forms as the period of its site\(aqs clients, and
+stops before it starts if the value is not a duration.
+The period must be greater than zero: \fBhs cluster\fP, \fBhs server\fP and \fBhs relay\fP each
+refuse zero or a negative value at start\-up. A period below one second, in any form, is one
+second.
 .TP
 .B \fB\&.launcher\fP
 Command prefix used to launch each client as a scaling unit (default: none).
@@ -2441,6 +3586,52 @@ Command prefix used to launch each client as a scaling unit (default: none).
 An empty value launches clients directly as \fBhs client ...\fP\&. Set a launcher such as
 an MPI or SLURM command (e.g., \fBsrun\fP) to bring up each client through your resource
 manager. Counterpart to the cluster \fB\-\-launcher\fP option used with \fB\-\-autoscaling\fP\&.
+.sp
+Each launch names the zone of its client: \fB{zone}\fP in the launcher is replaced by the
+zone\(aqs name (\fBdefault\fP for the default zone), and the launched process has the name
+in its \fBHYPERSHELL_ZONE\fP environment variable.
+.sp
+A server autoscaling with relay sites launches nothing and ignores this setting: each
+relay launches its own site clients with its own launcher.
+.TP
+.B \fB\&.distribution\fP
+How a zone\(aqs clients are split over the relay sites that serve it (default: \fIspread\fP).
+.sp
+Only a server autoscaling with relay sites (\fBhs server \-\-autoscaling\fP) reads it. With
+\fIspread\fP, each new client of a zone goes to the live site serving it that runs the
+fewest, as peers. With \fIfill\fP, each new client goes to the first site in preference
+order that has room below its \fBmax\fP, so a site is saturated before the next one gets
+any: use it to prefer the cheaper site. Every site stays within the \fBmin\fP/\fBmax\fP its
+relay advertises for the zone.
+.sp
+Its environment form is \fBHYPERSHELL_AUTOSCALE_DISTRIBUTION\fP\&.
+.TP
+.B \fB\&.sites\fP
+Preferred site order for the \fIfill\fP distribution (default: none).
+.sp
+A list of site names, or one comma\-separated string (the environment form,
+\fBHYPERSHELL_AUTOSCALE_SITES=east,west\fP). Under \fIfill\fP, the listed live sites come first in
+the listed order, and live sites not listed follow in the order they first registered.
+Any relay connected with the server\(aqs key takes part whether or not it is listed, and
+\fIspread\fP ignores the list.
+.TP
+.B \fB\&.failed_launches\fP
+Launched clients in a row that may exit non\-zero, with no client registered, before an
+autoscaling cluster stops (default: 3).
+.sp
+Under \fBhs cluster \-\-autoscaling\fP, a run of launched clients that exit non\-zero while no
+client of the cluster is registered with its server means the launch itself is failing
+(a bad launcher, an address the clients cannot reach, a TLS setting they do not share).
+Once the run reaches this number, the autoscaler launches no more, and the cluster stops
+its server and exits non\-zero with one error naming the failed launches, their exit
+statuses and the address the clients were told to dial. A launched client that exits 0,
+or any client registering with the server, ends the run. Set \fB0\fP to relaunch without
+end, as before, for a cluster that must outlast an outage of its launcher.
+.sp
+A relay\(aqs site fleets (\fBhs relay\fP) and a server autoscaling with relay sites ignore this
+setting: a relay keeps relaunching its failing site clients, warning at each one.
+.sp
+Its environment form is \fBHYPERSHELL_AUTOSCALE_FAILED_LAUNCHES\fP\&.
 .TP
 .B \fB[size]\fP
 .INDENT 7.0
@@ -2465,6 +3656,298 @@ Maximum size of cluster (default: 1).
 For a \fIdynamic\fP autoscaling policy, this sets an upper limit on the number of launched
 clients. When this number is reached, scaling stops regardless of task pressure.
 .UNINDENT
+.sp
+A server autoscaling with relay sites ignores \fB[size]\fP: each relay advertises the
+\fBmin\fP, \fBmax\fP and \fBinit\fP of each zone it serves, and the server plans within those.
+.INDENT 7.0
+.INDENT 3.5
+.UNINDENT
+.UNINDENT
+.UNINDENT
+.TP
+.B \fB[relay]\fP
+Section for the \fIrelay\fP workflow, which connects a site to an upstream \fIserver\fP\&.
+.INDENT 7.0
+.TP
+.B \fB\&.database\fP
+Path to the relay database (default: <lib>/relay/<host>.db).
+.sp
+The relay database is always a private SQLite file, whatever \fB[database]\fP names; a relay
+never opens the configured database. The default is named for the host, since a home
+directory is often shared between hosts. A node\-local disk is a good place for it.
+.sp
+See also \fB\-\-database\fP command\-line option.
+.TP
+.B \fB\&.bind\fP
+Bind address of the relay\-local \fIserver\fP (default: \fI0.0.0.0\fP).
+.sp
+The \fIclients\fP at the site connect here. See also \fB\-\-bind\fP command\-line option.
+.TP
+.B \fB\&.advertise\fP
+Address the \fIclients\fP at the site are told to dial (default: by \fB\&.bind\fP).
+.sp
+A relay tells its site \fIclients\fP, of every zone it serves, to dial its bind address when
+it is one specific address, and this host\(aqs own name when it is \fI0.0.0.0\fP, unless
+\fB\&.advertise\fP names another: a name the \fIclients\fP must use that differs from the bind
+address, such as one the site\(aqs compute nodes resolve to this host. The value is passed on
+as given, never resolved or checked. The \fB\-\-advertise\fP option takes precedence;
+\fBserver.advertise\fP does not reach a relay. With TLS verified against the system CA
+bundle (\fB[server.tls] cafile\fP empty) and no \fBservername\fP, it must be a name the
+relay\-local \fIserver\fP\(aqs certificate carries. It is the address the site\(aqs \fIclients\fP dial,
+not the client bounds a zone advertises upstream. Its environment form is
+\fBHYPERSHELL_RELAY_ADVERTISE\fP\&.
+.sp
+See also \fB\-\-advertise\fP command\-line option.
+.TP
+.B \fB\&.port\fP
+Port of the relay\-local \fIserver\fP (default: \fI50002\fP).
+.sp
+See also \fB\-\-port\fP command\-line option.
+.TP
+.B \fB\&.bundlesize\fP
+Size of task bundle for the relay\-local \fIserver\fP and the \fIclients\fP at its site
+(default: \fI1\fP).
+.sp
+It is never smaller than \fBrelay.num_threads\fP: a \fIclient\fP asks for one bundle at a time,
+so a smaller bundle would leave its executors idle between requests.
+.TP
+.B \fB\&.bundlewait\fP
+Seconds the relay waits before returning finished tasks upstream regardless of
+\fIbundlesize\fP (default: \fI5\fP). Once nothing is left to run at the site, it returns what it
+holds at once. The \fIclients\fP at the site are given it as \fB\-w\fP; each of them too, with
+nothing left to run, returns what it holds at once.
+Takes a number of seconds or a string in the duration forms: units \fBd\fP, \fBh\fP, \fBm\fP
+and \fBs\fP (e.g., \fB\(dq30s\(dq\fP, \fB\(dq5m\(dq\fP, \fB\(dq1h30m\(dq\fP) or a Slurm time (e.g., \fB\(dq1:30\(dq\fP);
+fractions are kept. \fBhs relay\fP stops before it starts if the value is not a duration.
+.TP
+.B \fB\&.poll\fP
+Maximum polling interval of the relay\-local scheduler in seconds (default: \fI0.1\fP).
+.sp
+Received tasks wait at most this long before the relay\-local \fIserver\fP hands them out.
+Takes a number of seconds or a string in the duration forms: units \fBd\fP, \fBh\fP, \fBm\fP
+and \fBs\fP (e.g., \fB\(dq30s\(dq\fP, \fB\(dq5m\(dq\fP, \fB\(dq1h30m\(dq\fP) or a Slurm time (e.g., \fB\(dq1:30\(dq\fP);
+fractions are kept. \fBhs relay\fP stops before it starts if the value is not a duration.
+.TP
+.B \fB\&.retention\fP
+Seconds a result is kept in the relay database after it has been returned upstream
+(default: \fI300\fP). Results not yet returned are always kept.
+Takes a number of seconds or a string in the duration forms: units \fBd\fP, \fBh\fP, \fBm\fP
+and \fBs\fP (e.g., \fB\(dq30s\(dq\fP, \fB\(dq5m\(dq\fP, \fB\(dq1h30m\(dq\fP) or a Slurm time (e.g., \fB\(dq1:30\(dq\fP);
+fractions are kept. \fBhs relay\fP stops before it starts if the value is not a duration.
+.TP
+.B \fB\&.zone\fP
+Zone or zones the relay serves (default: none, the default zone).
+.sp
+One zone name, a list of names, or one table per zone, \fB[relay.zone.NAME]\fP, which may
+give that zone\(aqs own \fBlauncher\fP, \fBlauncher_args\fP, \fBsize\fP, \fBmin\fP, \fBmax\fP and
+\fBinit\fP (each in place of the relay\(aqs, for that zone\(aqs \fIclients\fP only); an empty table
+serves the zone with the relay\(aqs.
+Upstream the relay is one \fIclient\fP per zone, each with its own identity; at the site it
+keeps one fleet of \fIclients\fP per zone, all served by the relay\-local \fIserver\fP\&. The first
+zone\(aqs identity lists the site\(aqs \fIclients\fP upstream.
+.INDENT 7.0
+.INDENT 3.5
+.sp
+.EX
+[relay.zone.cpu]
+
+[relay.zone.gpu]
+size = 2
+max = 4
+launcher = \(dqsrun\(dq
+launcher_args = \(dq\-\-gres=gpu:1\(dq
+.EE
+.UNINDENT
+.UNINDENT
+.sp
+See also \fB\-\-zone\fP command\-line option, which names the zones in place of this one.
+.TP
+.B \fB\&.site\fP
+Name of the relay\(aqs site (default: none, the relay\(aqs host name).
+.sp
+The upstream \fIserver\fP records the relay, and the \fIclients\fP at its site, under this name.
+.TP
+.B \fB\&.size\fP
+Number of \fIclients\fP the relay keeps launched at its site (default: \fI1\fP, at least \fI1\fP).
+.sp
+Against an upstream \fIserver\fP autoscaling with relay sites it is the default \fB\&.max\fP\&.
+See also \fB\-N\fP, \fB\-\-size\fP command\-line option.
+.TP
+.B \fB\&.min\fP
+Fewest \fIclients\fP of each zone an upstream topology assigns this site (default: \fI0\fP).
+.sp
+Held even while the zone\(aqs tasks wait in a later \fItask group\fP\&. A zone\(aqs own
+\fB[relay.zone.NAME]\fP table may set its own. Without a topology, a zone\(aqs fleet keeps at
+least this many \fIclients\fP launched (at least \fI1\fP, by default the size). Each zone
+advertises its bounds upstream; see \fI\%Topology\fP\&.
+.INDENT 7.0
+.INDENT 3.5
+Changed in version 2.9.0: \X'tty: link https://github.com/hypershell/hypershell/pull/125'\fI\%#125\fP\X'tty: link': the range is checked when the configuration loads, for every command: a
+value outside it, or not a number of the key\(aqs kind, stops the command before it
+starts (exit status 3), naming the key, the range and the file or variable it came
+from.
+
+.UNINDENT
+.UNINDENT
+.TP
+.B \fB\&.max\fP
+Most \fIclients\fP of each zone an upstream topology assigns this site (default: the size).
+.sp
+Lowering it never ends a running \fIclient\fP: the zone launches no more, and its \fIclients\fP
+exit when idle. A zone\(aqs own \fB[relay.zone.NAME]\fP table may set its own.
+.INDENT 7.0
+.INDENT 3.5
+Changed in version 2.9.0: \X'tty: link https://github.com/hypershell/hypershell/pull/125'\fI\%#125\fP\X'tty: link': the range is checked when the configuration loads, for every command: a
+value outside it, or not a number of the key\(aqs kind, stops the command before it
+starts (exit status 3), naming the key, the range and the file or variable it came
+from.
+
+.UNINDENT
+.UNINDENT
+.TP
+.B \fB\&.init\fP
+\fIClients\fP of each zone an upstream topology assigns this site when the relay starts
+(default: \fB\&.min\fP).
+.sp
+Without a topology, the \fIclients\fP each zone\(aqs fleet starts with (by default the size).
+Bounds must satisfy \fBmin <= init <= max\fP, with \fBmax\fP at least \fI1\fP\&.
+.INDENT 7.0
+.INDENT 3.5
+Changed in version 2.9.0: \X'tty: link https://github.com/hypershell/hypershell/pull/125'\fI\%#125\fP\X'tty: link': the range is checked when the configuration loads, for every command: a
+value outside it, or not a number of the key\(aqs kind, stops the command before it
+starts (exit status 3), naming the key, the range and the file or variable it came
+from.
+
+.UNINDENT
+.UNINDENT
+.TP
+.B \fB\&.launcher\fP
+Command prefix used to launch each \fIclient\fP at the site (default: none).
+.sp
+An empty value launches clients directly as \fBHS client ...\fP, where \fIHS\fP is the
+relay\(aqs own program (see \fB\&.remote_exe\fP).
+See also \fB\-\-launcher\fP command\-line option.
+.TP
+.B \fB\&.launcher_args\fP
+Extra arguments for the launcher (default: none).
+.sp
+See also \fB\-\-launcher\-args\fP command\-line option.
+.TP
+.B \fB\&.remote_exe\fP
+Program the \fIclients\fP at the site are launched as (default: the relay\(aqs own program).
+.sp
+By default it is the \fBhs\fP that runs the relay, by its full path and as the user ran it,
+kept when the relay starts again to bind its database. The path assumes the site\(aqs nodes
+see this installation where this host does; where they do not, name the program here. It
+is one program, not a command line: a wrapper belongs in \fB\&.launcher\fP\&. The value is
+passed on as given, never resolved or checked. The \fB\-\-remote\-exe\fP option takes
+precedence. Its environment form is \fBHYPERSHELL_RELAY_REMOTE_EXE\fP; empty, it is not
+given.
+.sp
+See also \fB\-\-remote\-exe\fP command\-line option.
+.TP
+.B \fB\&.num_threads\fP
+Executor threads for each \fIclient\fP at the site (default: \fI1\fP).
+.TP
+.B \fB\&.template\fP
+Command template for the \fIclients\fP at the site (default: \fI{}\fP).
+.TP
+.B \fB\&.timeout\fP
+Seconds a \fIclient\fP at the site waits for tasks before it exits (default: \fI0\fP, never).
+Takes a number of seconds or a string in the duration forms: units \fBd\fP, \fBh\fP, \fBm\fP
+and \fBs\fP (e.g., \fB\(dq30s\(dq\fP, \fB\(dq5m\(dq\fP, \fB\(dq1h30m\(dq\fP) or a Slurm time (e.g., \fB\(dq1:30\(dq\fP);
+rounded up to whole seconds, since each \fIclient\fP is given it as \fB\-T\fP\&. \fBhs relay\fP stops
+before it starts if the value is not a duration.
+.TP
+.B \fB[upstream]\fP
+Connection to the upstream \fIserver\fP\&. These settings are never read from \fB[server]\fP,
+so the \fIclients\fP at the site keep using the relay\(aqs own \fB[server.tls]\fP\&.
+.INDENT 7.0
+.TP
+.B \fB\&.host\fP
+Hostname of the upstream \fIserver\fP (default: \fIlocalhost\fP).
+.sp
+See also \fB\-\-upstream\-host\fP command\-line option.
+.TP
+.B \fB\&.port\fP
+Port of the upstream \fIserver\fP (default: \fI50001\fP).
+.sp
+See also \fB\-\-upstream\-port\fP command\-line option.
+.TP
+.B \fB\&.auth\fP
+Cryptographic key for the upstream \fIserver\fP\&.
+.sp
+Use \fB\&.auth_env\fP or \fB\&.auth_eval\fP to keep it out of the file; whichever form is set
+in the highest\-precedence place is used (two forms in one place are refused). The
+upstream key stays in the relay: the \fIclients\fP at the site use a key the relay mints for
+each run.
+.TP
+.B \fB\&.bundlesize\fP
+Bundle size the relay advertises upstream (default: \fI1000\fP).
+.sp
+The relay holds at most twice its connected \fIclients\fP times \fBrelay.bundlesize\fP in
+unfinished tasks. It asks for more only once half of that is left, and then for the
+whole difference (never more than this size at once), so the site has a second round
+of work ready while the first runs.
+.TP
+.B \fB\&.heartrate\fP
+Seconds between heartbeats to the upstream \fIserver\fP (default: \fI10\fP).
+Takes a number of seconds or a string in the duration forms: units \fBd\fP, \fBh\fP, \fBm\fP
+and \fBs\fP (e.g., \fB\(dq30s\(dq\fP, \fB\(dq5m\(dq\fP, \fB\(dq1h30m\(dq\fP) or a Slurm time (e.g., \fB\(dq1:30\(dq\fP);
+fractions are kept. \fBhs relay\fP stops before it starts if the value is not a duration.
+.TP
+.B \fB\&.deadline\fP
+Seconds a call to the upstream \fIserver\fP may take before the relay takes the connection
+as lost (default: \fI30\fP).
+.sp
+While the upstream \fIserver\fP cannot be reached, the site keeps running and finished
+tasks are kept in the relay database; the relay connects again, with backoff, and then
+returns them before it asks for more work.
+Takes a number of seconds or a string in the duration forms: units \fBd\fP, \fBh\fP, \fBm\fP
+and \fBs\fP (e.g., \fB\(dq30s\(dq\fP, \fB\(dq5m\(dq\fP, \fB\(dq1h30m\(dq\fP) or a Slurm time (e.g., \fB\(dq1:30\(dq\fP);
+fractions are kept. \fBhs relay\fP stops before it starts if the value is not a duration.
+.TP
+.B \fB\&.backoff\fP
+Longest wait in seconds between attempts to reach the upstream \fIserver\fP again
+(default: \fI60\fP).
+.sp
+Each wait is drawn at random up to a bound that starts at one second and doubles with
+each failed attempt, up to this value.
+Takes a number of seconds or a string in the duration forms: units \fBd\fP, \fBh\fP, \fBm\fP
+and \fBs\fP (e.g., \fB\(dq30s\(dq\fP, \fB\(dq5m\(dq\fP, \fB\(dq1h30m\(dq\fP) or a Slurm time (e.g., \fB\(dq1:30\(dq\fP);
+fractions are kept. \fBhs relay\fP stops before it starts if the value is not a duration.
+.TP
+.B \fB\&.evict_hint\fP
+Seconds of lost contact after which the relay takes the upstream \fIserver\fP to have
+evicted it (default: \fI600\fP, the \fIserver\fP\(aqs own default \fBserver.evict\fP).
+.sp
+Set it to the upstream \fBserver.evict\fP\&. Past it, the relay warns that the results it
+holds will likely be refused as stale (the upstream \fIserver\fP has put those tasks back
+for other \fIclients\fP), and it does not repeat a confirmation the outage cut off. The
+results are still returned when the connection comes back.
+Takes a number of seconds or a string in the duration forms: units \fBd\fP, \fBh\fP, \fBm\fP
+and \fBs\fP (e.g., \fB\(dq30s\(dq\fP, \fB\(dq5m\(dq\fP, \fB\(dq1h30m\(dq\fP) or a Slurm time (e.g., \fB\(dq1:30\(dq\fP);
+fractions are kept. \fBhs relay\fP stops before it starts if the value is not a duration.
+.TP
+.B \fB[tls]\fP
+.INDENT 7.0
+.TP
+.B \fB\&.enabled\fP
+Use TLS on the upstream connection (default: \fItrue\fP).
+.sp
+See also \fB\-\-no\-tls\fP command\-line option.
+.TP
+.B \fB\&.cert\fP
+Upstream server certificate (default: \fI<auto>\fP).
+.TP
+.B \fB\&.cafile\fP
+Trust anchor for the upstream server (default: \fI<auto>\fP).
+.TP
+.B \fB\&.fingerprint\fP
+Pin the upstream server certificate fingerprint, e.g. \fBSHA256:AB:CD:...\fP
+(default: none).
+.UNINDENT
+.UNINDENT
 .UNINDENT
 .TP
 .B \fB[console]\fP
@@ -2473,7 +3956,7 @@ Rich text display and output parameters.
 .TP
 .B \fB\&.theme\fP
 Color scheme to use by default in output (default: \fImonokai\fP), such as with
-\fBhs info\fP and \fBhs search\fP\&.
+\fBhs info\fP and \fBhs list\fP\&.
 .sp
 This option is passed to the \X'tty: link https://rich.readthedocs.io/en/latest/'\fI\%rich\fP\X'tty: link' library.
 .UNINDENT
@@ -2498,8 +3981,18 @@ However, some capabilities are only possible when a database is active
 Connection details must to be specified by your configuration.
 This can be entirely through environment variables or within files.
 SQLite is automatically initialized upon opening the connection but
-Postgres must be explicitly initialized via \fBhs initdb\fP or at launch with
-the \fB\-\-initdb\fP command\-line option.
+Postgres must be explicitly initialized via \fBhs initdb\fP, or by launching \fBhs server\fP,
+\fBhs submit\fP, or \fBhs cluster\fP with the \fB\-\-initdb\fP command\-line option.
+An existing database created by an earlier release is upgraded in place on first use,
+for both SQLite and Postgres. The upgrade only adds missing tables, columns, and indexes and never
+changes existing tasks; on Postgres it also drops the \fBUNIQUE\fP constraints on the retry\-chain
+columns, and widens \fBtask.memory\fP to 64 bits (so a task can declare more than 2 GiB) by
+rewriting the \fBtask\fP table, every task kept, announced in the log before it starts. It holds an exclusive lock while it runs (minutes, on a large database), and processes
+started meanwhile wait for it. A SQLite database created by an
+earlier release (2.8, or the 2.9.0a1 pre\-release) keeps those constraints, with no effect on
+behaviour in normal operation. Only in the rare case where a failed task could be retried twice
+(a task\(aqs \fBretried\fP flag reset after the fact) does it reject the second retry with an error,
+where a newer database records it.
 .sp
 SQLite only needs the local file path.
 .INDENT 0.0
@@ -2527,6 +4020,12 @@ database = \(dqhypershell\(dq
 .UNINDENT
 .UNINDENT
 .sp
+With the \fBtimescale\fP provider (alias \fBtimescaledb\fP) the database is PostgreSQL with the
+TimescaleDB extension, and \fBhs initdb\fP also makes the \fBtask\fP table a hypertable partitioned by
+its UUIDv7 \fBid\fP, with columnstore compression and a policy where the server\(aqs TimescaleDB edition
+and version support them. Every process that submits tasks then needs the \fBuuid7\fP extra.
+See the TimescaleDB section of the database documentation.
+.sp
 The \fBport\fP is assumed to be 5432 but can be specified. If a \fBuser\fP is given then so too must
 a \fBpassword\fP\&. The default \fIpublic\fP schema is assumed but can also be specified. Anything else
 is forwarded to the database as a connection parameter; e.g., \fBencoding = \(dqutf\-8\(dq\fP\&.
@@ -2551,11 +4050,15 @@ with TLS enabled it generates a self\-signed certificate and private key under \
 cluster, and autoscaling launchers each generate a fresh one\-time authentication key per
 invocation, which the operator never configures.
 .sp
-Standalone \fBhs server\fP and \fBhs client\fP instead require an explicit key, supplied with
-\fB\-k\fP/\fB\-\-auth\fP, the \fBHYPERSHELL_SERVER_AUTH\fP environment variable, or \fBserver.auth\fP in the
-configuration. The server refuses to start with the built\-in placeholder key and requires a key of
-at least 16 characters drawn from \fB[A\-Za\-z0\-9._+/=\-]\fP\&. The key is never transmitted over the
-queue socket; even so, treat every host that holds it as inside the trust boundary.
+Standalone \fBhs server\fP and \fBhs client\fP instead require an explicit key, supplied in the
+\fBHYPERSHELL_SERVER_AUTH\fP environment variable or as \fBserver.auth\fP in the configuration, never
+on the command line, where every user on the host could see it; a key given there is refused. The
+server refuses to start with the built\-in placeholder key and requires a key of at least 16
+characters drawn from \fB[A\-Za\-z0\-9._+/=\-]\fP\&. The key is never transmitted over the queue socket;
+even so, treat every host that holds it as inside the trust boundary.
+.sp
+Changed in version 2.9.0: \X'tty: link https://github.com/hypershell/hypershell/pull/104'\fI\%#104\fP\X'tty: link': a key on the command line is refused.
+
 .sp
 Disable TLS per invocation with \fB\-\-no\-tls\fP, or permanently with \fBserver.tls.enabled = false\fP
 (not recommended; a warning is logged). The client verifies the server certificate in one of four
@@ -2583,13 +4086,21 @@ independently (for example, PostgreSQL \fBsslmode\fP), and rely on SSH host\-key
 deployment guides.
 .SH ENVIRONMENT VARIABLES
 .sp
-As stated for configuration, any environment variable prefixed as \fBHYPERSHELL_\fP
-where the name aligns to the path to some option, delimited by underscores,
-will set that option. Example, \fBHYPERSHELL_CLIENT_TIMEOUT\fP maps to the
-corresponding configuration option.
+As stated for configuration, an environment variable named \fBHYPERSHELL_\fP followed by an
+option\(aqs path, with each \fB\&.\fP written as \fB_\fP, sets that option; the rest of the name may be in
+any letter case. Example, \fBHYPERSHELL_CLIENT_TIMEOUT\fP sets \fBclient.timeout\fP and
+\fBHYPERSHELL_SERVER_TLS_MIN_VERSION\fP sets \fBserver.tls.min_version\fP\&. Past a table whose entries
+are named by the user (\fBdatabase.connect_args\fP, \fBdatabase.pragmas\fP, \fBssh.nodelist\fP,
+\fBexport\fP), the rest of the name is one entry; a relay zone is set by
+\fBHYPERSHELL_RELAY_ZONE_<ZONE>_<KEY>\fP\&. \fB_ENV\fP and \fB_EVAL\fP work as \fB_env\fP and \fB_eval\fP do
+in a file. A value is kept as written for an option that takes text, except that an empty value
+for an optional one (or a bind address, the database host or the task directory) is not given,
+so its default applies; a whole number, a number or a boolean that does not convert stops the
+command with a configuration error naming the variable.
+The configuration guide gives the full rule and what cannot be reached from the environment.
 .sp
 The following environment variables must be specified as such and cannot be configurable
-within files.
+within files; neither can \fBHYPERSHELL_ZONE\fP, which a launched client is given.
 .INDENT 0.0
 .TP
 .B \fBHYPERSHELL_SITE\fP
@@ -2680,12 +4191,23 @@ Absolute file path where standard output is directed (if defined).
 .TP
 .B \fBTASK_ERRPATH\fP
 Absolute file path where standard error is directed (if defined).
+.TP
+.B \fBTASK_SLOT\fP
+Zero\-based execution slot of the task\(aqs executor (\fB0 .. N\-1\fP for a client
+running \fBN\fP tasks in parallel). Stable for the executor\(aqs lifetime; use it to
+pin resources (cores, GPUs) without colliding with sibling tasks. Defaults to \fB0\fP\&.
+.TP
+.B \fBTASK_SLOT_COUNT\fP
+Number of concurrent executors on the client (\fBN\fP). Defaults to \fB1\fP\&.
 .UNINDENT
 .sp
 Further, any environment variable starting with \fBHYPERSHELL_EXPORT_\fP will be injected
-into the task environment sans prefix; e.g., \fBHYPERSHELL_EXPORT_FOO\fP would define
-\fBFOO\fP in the task environment. You can also define such variables in the \fBexport\fP
-section of your configuration file(s); e.g.,
+into the task environment sans prefix, its name and value as written; e.g.,
+\fBHYPERSHELL_EXPORT_FOO\fP would define \fBFOO\fP, and \fBHYPERSHELL_EXPORT_RunId=007\fP would define
+\fBRunId=007\fP, in the task environment. You can also define such variables in the \fBexport\fP
+section of your configuration file(s), whose names are upper\-cased (as below). For the same task
+variable name, the environment\(aqs value wins over a file\(aqs; \fBHYPERSHELL_EXPORT_foo\fP beside a
+file\(aqs \fBfoo\fP gives a task both \fBfoo\fP and \fBFOO\fP\&. For example,
 .INDENT 0.0
 .INDENT 3.5
 .sp

@@ -1,0 +1,63 @@
+# R6 regression tests that must fail on f00f853 (the base of fix/hs-update-contended-writes), checked with
+#   RED_BASE_REV=f00f853 RED_LIST="$PWD/spec/hs-update-contended-writes/red.txt" sh spec/relay-hardening/drive/red_check.sh
+# One pytest node id per line; ` raises=NAME` = red by the defect's own error; `pg:` = needs
+# HS_TEST_POSTGRES (red on plain PostgreSQL and every TimescaleDB version). Tests red only on CI's
+# TimescaleDB 2.31 jobs (the real race) are in ci-red.txt, not here: they pass locally before the fix.
+# Guards (green before and after) are in neither list. A phase may rename a node here, never drop one
+# without a PLAN note.
+
+# R1/R4: the legacy form, its write by id lost at the driver (SQLite)
+tests/test_contended_recovery.py::test_update_legacy_contended_lands_on_rerun
+tests/test_contended_recovery.py::test_update_legacy_contended_exhausted_writes_nothing
+
+# R2/R3/R4/R5: --limit, its writes by id lost or made to wait at the driver (SQLite)
+tests/test_contended_recovery.py::test_update_limit_contended_lands_on_rerun
+tests/test_contended_recovery.py::test_update_limit_contended_exhausted_writes_nothing
+tests/test_contended_recovery.py::test_update_limit_skips_task_changed_out_of_filter
+tests/test_contended_recovery.py::test_update_limit_cancel_keeps_result_landed_meanwhile
+
+# R2/R4: --delete --limit (SQLite; the base's ORM delete only warns on a short count)
+tests/test_contended_recovery.py::test_update_delete_limit_contended_lands_on_rerun
+tests/test_contended_recovery.py::test_update_delete_limit_contended_exhausted_deletes_nothing
+
+# R5 and the set-based pin: one UPDATE for a field, a tag set and a tag removal (SQLite)
+tests/test_contended_recovery.py::test_update_filtered_uncontended_is_one_statement
+
+# R5 by the command line, SQLite (the keys and removals cases are guards: one json_set/json_remove)
+tests/test_update.py::test_update_limit_applies_every_change
+tests/test_update.py::test_update_tag_reaches_rows_moved_out_of_filter
+tests/test_update.py::test_update_cancel_and_tag_together
+tests/test_update.py::test_update_tag_keys_and_removals[set_and_remove]
+
+# Plan-gate ruling D2: two name-only tag filters check both, in hs update and hs list (SQLite)
+tests/test_update.py::test_update_name_only_tags_check_every_tag
+tests/test_list.py::test_list_name_only_tags_check_every_tag
+
+# R2/R3/R4: the filtered form's miss, forced by a row trigger on the server
+pg:tests/test_contended_write.py::test_update_filtered_skipped_row_written
+pg:tests/test_contended_write.py::test_update_filtered_skipped_row_exhausted_writes_nothing
+pg:tests/test_contended_write.py::test_update_delete_filtered_skipped_row_deleted
+
+# Review cycle 1, F1: the set-based statement is a missed row's first attempt, so the bound is the same
+# as by id (red on f00f853, and on ee5fcd4, which gave the row one attempt more)
+pg:tests/test_contended_write.py::test_update_filtered_skipped_row_lands_at_bound[update]
+pg:tests/test_contended_write.py::test_update_filtered_skipped_row_lands_at_bound[delete]
+pg:tests/test_contended_write.py::test_update_filtered_skipped_row_past_bound_writes_nothing[update]
+pg:tests/test_contended_write.py::test_update_filtered_skipped_row_past_bound_writes_nothing[delete]
+
+# R5 on PostgreSQL, by the command line
+pg:tests/test_contended_write.py::test_update_combined_changes_pg[limit]
+pg:tests/test_contended_write.py::test_update_combined_changes_pg[moved]
+pg:tests/test_contended_write.py::test_update_combined_changes_pg[cancel]
+pg:tests/test_contended_write.py::test_update_tag_keys_and_removals_pg[keys]
+pg:tests/test_contended_write.py::test_update_tag_keys_and_removals_pg[removals]
+pg:tests/test_contended_write.py::test_update_tag_keys_and_removals_pg[set_and_remove]
+
+# R2/R3: the real race, a holder that takes its row out of the filter (red by the count everywhere)
+pg:tests/test_contended_write.py::test_contended_update_leaves_row_moved_out_of_filter
+
+# Review cycle 1, F3: --delete, with and without --limit, leaves a row taken out of the filter, counts
+# the rows deleted, and warns (SQLite by the driver; the real race on the server)
+tests/test_contended_recovery.py::test_update_delete_limit_skips_task_changed_out_of_filter
+pg:tests/test_contended_write.py::test_contended_update_delete_leaves_row_moved_out_of_filter[filtered]
+pg:tests/test_contended_write.py::test_contended_update_delete_leaves_row_moved_out_of_filter[limit]

@@ -83,7 +83,6 @@ def test_server_multiple_arguments() -> None:
 OPTION_PAIR: Final[Dict[str, str]] = {
     '-H': '-H/--bind', '--bind': '-H/--bind',
     '-p': '-p/--port', '--port': '-p/--port',
-    '-k': '-k/--auth', '--auth': '-k/--auth',
     '-b': '-b/--bundlesize', '--bundlesize': '-b/--bundlesize',
     '-w': '-w/--bundlewait', '--bundlewait': '-w/--bundlewait',
     '-Q': '-Q/--poll', '--poll': '-Q/--poll',
@@ -99,5 +98,34 @@ def test_submit_missing_option_value(opt: str) -> None:
     assert main_lines(['hs', 'server', '-', opt]) == (
         exit_status.bad_argument, NO_OUTPUT, [
             f'CRITICAL [hypershell] argument {OPTION_PAIR[opt]}: expected one argument',
+        ]
+    )
+
+
+@mark.integration
+@mark.parametrize('argv, message', [
+    (['--autoscaling', '--restart'], 'Using --autoscaling with --restart is invalid'),
+    (['tasks.in', '--autoscaling'], 'Cannot specify both FILE and --autoscaling'),
+    (['--autoscaling', '--no-db'], 'Cannot use --autoscaling with --no-db'),
+    (['--autoscaling', '--no-confirm'], 'Cannot use --autoscaling with --no-confirm'),
+    (['--autoscaling=sometimes'], "Autoscaling mode must be 'fixed' or 'dynamic' (given 'sometimes')"),
+])
+def test_server_autoscaling_refusals(argv: list, message: str) -> None:
+    """Autoscaling with relay sites runs forever on the database with confirmation; anything else is refused."""
+    assert main_lines(['hs', 'server', *argv]) == (
+        exit_status.bad_argument, NO_OUTPUT, [
+            f'CRITICAL [hypershell] {message}',
+        ]
+    )
+
+
+@mark.integration
+@mark.parametrize('opt, pair', [('-F', '-F/--factor'), ('--factor', '-F/--factor'),
+                                ('-P', '-P/--period'), ('--period', '-P/--period')])
+def test_server_autoscaling_missing_option_value(opt: str, pair: str) -> None:
+    """Error on a missing value for the autoscaling options."""
+    assert main_lines(['hs', 'server', '--autoscaling', opt]) == (
+        exit_status.bad_argument, NO_OUTPUT, [
+            f'CRITICAL [hypershell] argument {pair}: expected one argument',
         ]
     )

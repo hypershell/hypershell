@@ -1,0 +1,48 @@
+# topology_drive stall-min2: launches (epoch, launcher label, pid, {zone} word, HYPERSHELL_ZONE, client --zone)
+launch t=1794585607 site=A pid=22418 word=cpu env=cpu client=cpu
+launch t=1794585607 site=A pid=22419 word=cpu env=cpu client=cpu
+launch t=1794585607 site=A pid=22420 word=cpu env=cpu client=cpu
+launch t=1794585615 site=A pid=22494 word=cpu env=cpu client=cpu
+launch t=1794585624 site=A pid=22566 word=cpu env=cpu client=cpu
+# server: registrations, versions, duplicates, departures, evictions
+2026-11-13 11:00:02.705 <host>     INFO [01a1d5a3-2946-7711-835a-1696b8ddc8e5] [hypershell.cluster] Topology 01a1d5a3-2946-7711-835a-1696b8ddc8e5:1 published (0 relay identities)
+2026-11-13 11:00:02.774 <host>     INFO [01a1d5a3-2946-7711-835a-1696b8ddc8e5] [hypershell.server] Relay site registered (site: A, zone: cpu, min: 3, init: 3, max: 3, clients: 0) (<host>: 650d8700-327d-5372-ba61-445f21e3c870)
+2026-11-13 11:00:06.731 <host>     INFO [01a1d5a3-2946-7711-835a-1696b8ddc8e5] [hypershell.cluster] Topology 01a1d5a3-2946-7711-835a-1696b8ddc8e5:2 published (1 relay identities)
+2026-11-13 11:00:06.731 <host>     INFO [01a1d5a3-2946-7711-835a-1696b8ddc8e5] [hypershell.cluster] Topology 01a1d5a3-2946-7711-835a-1696b8ddc8e5:2 (site: A, zone: cpu, target: 3, launched: 0)
+2026-11-13 11:00:10.767 <host>     INFO [01a1d5a3-2946-7711-835a-1696b8ddc8e5] [hypershell.cluster] Topology 01a1d5a3-2946-7711-835a-1696b8ddc8e5:3 published (1 relay identities)
+2026-11-13 11:00:10.767 <host>     INFO [01a1d5a3-2946-7711-835a-1696b8ddc8e5] [hypershell.cluster] Topology 01a1d5a3-2946-7711-835a-1696b8ddc8e5:3 (site: A, zone: cpu, target: 3, launched: 3)
+2026-11-13 11:00:14.805 <host>     INFO [01a1d5a3-2946-7711-835a-1696b8ddc8e5] [hypershell.cluster] Topology 01a1d5a3-2946-7711-835a-1696b8ddc8e5:4 published (1 relay identities)
+2026-11-13 11:00:14.805 <host>     INFO [01a1d5a3-2946-7711-835a-1696b8ddc8e5] [hypershell.cluster] Topology 01a1d5a3-2946-7711-835a-1696b8ddc8e5:4 (site: A, zone: cpu, target: 3, launched: 2)
+2026-11-13 11:00:26.902 <host>     INFO [01a1d5a3-2946-7711-835a-1696b8ddc8e5] [hypershell.cluster] Topology 01a1d5a3-2946-7711-835a-1696b8ddc8e5:5 published (1 relay identities)
+2026-11-13 11:00:26.902 <host>     INFO [01a1d5a3-2946-7711-835a-1696b8ddc8e5] [hypershell.cluster] Topology 01a1d5a3-2946-7711-835a-1696b8ddc8e5:5 (site: A, zone: cpu, target: 3, launched: 3)
+2026-11-13 11:01:14.692 <host>     INFO [01a1d5a3-2946-7711-835a-1696b8ddc8e5] [hypershell.server] Relay site left (site: A, zone: cpu) (<host>: 650d8700-327d-5372-ba61-445f21e3c870)
+2026-11-13 11:01:15.351 <host>  WARNING [01a1d5a3-2946-7711-835a-1696b8ddc8e5] [hypershell.cluster] Site A left the topology (no live relay) - its share is planned over the remaining sites
+2026-11-13 11:01:15.352 <host>     INFO [01a1d5a3-2946-7711-835a-1696b8ddc8e5] [hypershell.cluster] Topology 01a1d5a3-2946-7711-835a-1696b8ddc8e5:6 published (0 relay identities)
+# relay-A: topology reads and applications, idle exits
+    INFO [hypershell.relay.upstream] Upstream server publishes a topology - site clients follow it
+    INFO [hypershell.relay.site] Topology 01a1d5a3-2946-7711-835a-1696b8ddc8e5:0 (zone: cpu, target: 0, seen: 0, launched: 0) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a3-2946-7711-835a-1696b8ddc8e5:1 (zone: cpu, target: 0, seen: 0, launched: 0) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a3-2946-7711-835a-1696b8ddc8e5:2 (zone: cpu, target: 3, seen: 0, launched: 0) - launching 3
+    INFO [hypershell.relay.site] Topology 01a1d5a3-2946-7711-835a-1696b8ddc8e5:3 (zone: cpu, target: 3, seen: 3, launched: 2) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a3-2946-7711-835a-1696b8ddc8e5:4 (zone: cpu, target: 3, seen: 2, launched: 1) - launching 1
+    INFO [hypershell.relay.site] Topology 01a1d5a3-2946-7711-835a-1696b8ddc8e5:4 (zone: cpu, target: 3, launched: 2): the server planned again on 2 running - applying again, launching 1
+    INFO [hypershell.relay.site] Topology 01a1d5a3-2946-7711-835a-1696b8ddc8e5:5 (zone: cpu, target: 3, seen: 3, launched: 3) - launching 0
+# topology_drive stall-min2: checks
+killed one of A's clients at 1794585610, the server having seen 3
+killed one of A's clients at 1794585614, as the server published target 3, seen 2
+PASS no launch after every client left
+PASS every live relay still runs after its clients left
+PASS no relay identity left or was evicted while running
+PASS every live relay drained and exited 0
+PASS every task completed (60)
+PASS no task failed
+PASS some client was launched
+PASS every launch names one zone in {zone}, HYPERSHELL_ZONE and --zone
+PASS no relay terminated a site client
+peak A cpu 3 (max 3)
+PASS no site-zone ran more clients than its max
+PASS a client the server counted was killed as it published target 3, seen 2
+PASS A read that plan with one client running (the race happened)
+A ran 3 cpu clients again at 1794585624; plans applied again: 1
+PASS A ran its target (3) again within 30 s of the kill
+# topology_drive stall-min2: PASS
