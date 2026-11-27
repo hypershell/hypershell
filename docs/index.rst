@@ -52,7 +52,7 @@ Design elements include but are not limited to:
 .. admonition:: What's new
     :class: tip
 
-    *HyperShell* 2.9 is in pre-release. Highlights so far:
+    *HyperShell* 2.9 is released. Highlights:
 
     * **Zones and relays:** place tasks and clients by name, and run one campaign across several
       sites. With ``--autoscaling``, ``hs cluster`` scales each zone on its own, and ``hs server``
@@ -64,9 +64,10 @@ Design elements include but are not limited to:
       and pin each task to its own core or GPU. A task file can set each task's group, zone, cores,
       memory and timeout inline, as ``KEY:VALUE`` or ``KEY=VALUE``. Every numeric option and setting
       is checked before a command starts, and ``hs update`` reads each value by its column's kind.
-    * **Installing 2.9:** it is a pre-release, so use ``pip install --pre hypershell``. Upgrade the
-      server and every client together, and back up the database first: 2.9.0a10 and later cannot
-      connect to 2.9.0a9 or earlier.
+    * **Task times:** ``hs info``, ``hs list`` and ``hs wait`` show every task time in the local time
+      zone with its UTC offset, the same on SQLite and PostgreSQL.
+    * **Upgrading to 2.9:** upgrade the server and every client together, and back up the database
+      first. 2.9.0 cannot connect to 2.8 or to 2.9.0a9 or earlier.
     * **2.8.1 to 2.8.7:** fixes for cancelled tasks, retries, and stranded task groups, and the run
       key kept off command lines. If you run 2.8, upgrade to 2.8.7.
 
