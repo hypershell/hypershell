@@ -323,17 +323,6 @@ research.
 (`quote_arg`, `direct_args`), `data/model.py` (`split_argline`)*
 **Seed:** [`issues/submit-args-quote-directive.md`](issues/submit-args-quote-directive.md) · *status: unshaped*
 
-## `hs info` and `hs list` show a timestamp's offset differently on each backend
-
-PostgreSQL prints a stored time with an offset, in the server session's time zone; SQLite prints
-none. The instant and the local wall time agree. One display rule for every timestamp on both
-backends would end the split, without touching the wire format. Deferred from `update-typed-columns`'
-plan gate (Q1).
-
-*Target: 2.9.0 · Horizon: near-term, small · Depends on: — · Refs:
-`spec/update-typed-columns/research/03-datetime.md` (§4)*
-**Seed:** [`issues/timestamp-display-offsets.md`](issues/timestamp-display-offsets.md) · *status: adopted:timestamp-display-offsets*
-
 ## The queue-server hand-back test fails once with "handle is closed"
 
 `test_handback_over_a_queue_server_requeues_only_the_relays_assignments` failed once on CI (Python
