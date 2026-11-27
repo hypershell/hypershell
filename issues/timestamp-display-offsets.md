@@ -1,8 +1,8 @@
 ---
-status: unshaped
+status: adopted:timestamp-display-offsets
 kind: fix
 appetite: small
-target: 2.9.x
+target: 2.9.0
 lane: public
 ---
 
