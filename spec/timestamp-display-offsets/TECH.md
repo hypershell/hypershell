@@ -3,7 +3,7 @@ slug: timestamp-display-offsets
 title: One display rule for task timestamps on every backend
 kind: fix
 appetite: small
-status: in_review
+status: done
 branch: fix/timestamp-display-offsets
 base: develop
 current_phase: done
@@ -36,10 +36,10 @@ phases:
   hill: downhill
   verify: uv run pytest -q tests/test_timestamp_display.py -k docs
 review:
-  last_reviewed_commit: ''
-  verdict: none
+  last_reviewed_commit: f93e96eb9f8c39476cc8d4694ea137b7d354e129
+  verdict: approved
   blocked_reason: ''
-  cycle: 0
+  cycle: 1
 ---
 # TECH.md — One display rule for task timestamps on every backend
 
