@@ -330,9 +330,9 @@ none. The instant and the local wall time agree. One display rule for every time
 backends would end the split, without touching the wire format. Deferred from `update-typed-columns`'
 plan gate (Q1).
 
-*Target: 2.9.x · Horizon: near-term, small · Depends on: — · Refs:
+*Target: 2.9.0 · Horizon: near-term, small · Depends on: — · Refs:
 `spec/update-typed-columns/research/03-datetime.md` (§4)*
-**Seed:** [`issues/timestamp-display-offsets.md`](issues/timestamp-display-offsets.md) · *status: unshaped*
+**Seed:** [`issues/timestamp-display-offsets.md`](issues/timestamp-display-offsets.md) · *status: adopted:timestamp-display-offsets*
 
 ## The queue-server hand-back test fails once with "handle is closed"
 

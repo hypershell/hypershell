@@ -46,9 +46,9 @@ from hypershell.core.exceptions import (handle_exception, handle_exception_silen
 from hypershell.core.logging import Logger, HOSTNAME
 from hypershell.core.remote import SSHConnection
 from hypershell.core.signal import exit_status_for_signal
-from hypershell.core.types import smart_coerce, JSONData, to_json_type, ranged
+from hypershell.core.types import smart_coerce, JSONData, ranged
 from hypershell.core.config_schema import parse_setting, SettingError, advise, shown, read_value, Kind, FORMS
-from hypershell.core.pretty_print import format_tag, format_json, format_bytes, format_source
+from hypershell.core.pretty_print import format_tag, format_json, format_bytes, format_source, to_display_type
 from hypershell.core.tag import Tag, TagError, split_token, near_names, read_token, check_tag as check_tag_rules
 from hypershell.data.core import Session
 from hypershell.data.model import (Task, Source, Zone, JSON, CANCEL_STATUS, zone_name, zone_id, DEFAULT_ZONE_NAME,
@@ -230,7 +230,7 @@ class TaskInfoApp(ReadingMixin, Application):
         if self.extract_field == 'zone':
             print(resolve_zone(self.task.zone))
         elif self.extract_field != 'tag':
-            print(json.dumps(self.task.to_json().get(self.extract_field)).strip('"'))
+            print(json.dumps(display_json(self.task).get(self.extract_field)).strip('"'))
         elif self.output_format == 'normal':
             print(', '.join(f'{k}:{v}' if v else k for k, v in self.task.tag.items()))
         else:
@@ -246,7 +246,7 @@ class TaskInfoApp(ReadingMixin, Application):
     def print_formatted(self: TaskInfoApp) -> None:
         """Format and print task metadata to console."""
         formatter = self.format_method[self.output_format]
-        data = self.task.to_json()  # NOTE: to_json() just means dict with converted value types
+        data = display_json(self.task)
         data['zone'] = resolve_zone(self.task.zone)
         output = formatter(data)
         if sys.stdout.isatty():
@@ -402,7 +402,7 @@ class TaskWaitApp(ReadingMixin, Application):
                 continue
             if task.exit_status != 0:
                 log.warning(f'Non-zero exit status ({task.exit_status}) for task ({task.id})')
-            log.info(f'Task completed ({task.completion_time})')
+            log.info(f'Task completed ({to_display_type(task.completion_time)})')
             break
 
 
@@ -866,7 +866,7 @@ class TaskSearchApp(ReadingMixin, Application, SearchableMixin):
 
     def print_json(self: TaskSearchApp, results: List[Tuple]) -> None:
         """Print in output in JSON format."""
-        data = [{field: to_json_type(value) for field, value in zip(self.field_names, record)}
+        data = [{field: to_display_type(value) for field, value in zip(self.field_names, record)}
                 for record in results]
         if sys.stdout.isatty():
             Console().print(Syntax(json.dumps(data, indent=4, sort_keys=False), 'json',
@@ -880,7 +880,7 @@ class TaskSearchApp(ReadingMixin, Application, SearchableMixin):
         writer = csv.writer(sys.stdout, delimiter=self.output_delimiter)
         writer.writerow(self.field_names)
         for record in results:
-            data = [to_json_type(value) for value in record]
+            data = [to_display_type(value) for value in record]
             data = [value if isinstance(value, str) else json.dumps(value) for value in data]
             writer.writerow(data)
 
@@ -1769,6 +1769,11 @@ def resolve_source(source: Optional[str], source_map: Optional[Dict[str, str]] =
         except Source.NotFound:
             path = None
     return format_source(path) if path else source
+
+
+def display_json(task: Task) -> Dict[str, JSONData]:
+    """A task's columns as JSON values for display, each time in the local zone (see `to_display_type`)."""
+    return {key: to_display_type(value) for key, value in task.to_dict().items()}
 
 
 def resolve_zone(zone: Optional[str], zone_map: Optional[Dict[str, str]] = None) -> str:
