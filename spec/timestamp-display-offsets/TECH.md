@@ -3,10 +3,10 @@ slug: timestamp-display-offsets
 title: One display rule for task timestamps on every backend
 kind: fix
 appetite: small
-status: in_progress
+status: in_review
 branch: fix/timestamp-display-offsets
 base: develop
-current_phase: P2
+current_phase: done
 last_updated: '2026-11-27'
 phases:
 - id: P1
@@ -26,7 +26,7 @@ phases:
   verify: uv run pytest -q tests/test_timestamp_display.py
 - id: P2
   name: 'Docs: state the rule under versionchanged 2.9.0'
-  status: pending
+  status: done
   satisfies:
   - R7
   depends_on:
@@ -57,6 +57,6 @@ review:
 
 ## P2 — Docs
 
-- [ ] `docs/cli/task_info.rst` and `docs/cli/task_search.rst`: the rule under
+- [x] `docs/cli/task_info.rst` and `docs/cli/task_search.rst`: the rule under
       `.. versionchanged:: 2.9.0`.
-- [ ] A docs test that reads the marker; the docs build passes with `-W`.
+- [x] A docs test that reads the marker; the docs build passes with `-W`.

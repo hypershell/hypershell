@@ -178,3 +178,19 @@ def test_wait_logs_local_completion_time(one_task: Tuple[Path, Engine, str]) -> 
     hs(site, 'update', task_id, 'completion_time', INSTANT, '-f')
     _, stderr = hs(site, 'wait', task_id)
     assert f'Task completed ({LOCAL})' in stderr
+
+
+DOCS: Path = Path(__file__).parent.parent / 'docs' / 'cli'
+"""The command pages."""
+
+MARKER: str = r'\.\. versionchanged:: 2\.9\.0\n(?:   :pr:`\d+`: )?'
+"""A 2.9.0 change marker, with or without the pull request link added at release."""
+
+
+@mark.unit
+@mark.parametrize('page', ['task_info.rst', 'task_search.rst'])
+def test_docs_state_rule(page: str) -> None:
+    """Each command page states the rule under a 2.9.0 change marker."""
+    text = (DOCS / page).read_text(encoding='utf-8')
+    assert re.search(MARKER + r'\s*Times \(``submit_time``.*?local time zone \(``TZ``\) with their UTC offset',
+                     text, re.DOTALL)
