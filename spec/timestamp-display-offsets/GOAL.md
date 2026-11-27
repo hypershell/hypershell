@@ -40,8 +40,8 @@ reads `2026-01-01 14:00:00+00:00` on both backends.
   `start_time`, `completion_time`) as ISO 8601 with a space separator, in the reading process's local
   time zone, with its UTC offset (`YYYY-MM-DD HH:MM:SS[.ffffff]±HH:MM`), identically on SQLite and
   PostgreSQL whatever the PostgreSQL session time zone.
-- **R2** — The rule SHALL apply in every output format: `hs info` in its normal, card, json, yaml and
-  toml formats and with `-x FIELD`; `hs list` in its table, plain, normal, card, json and csv
+- **R2** — The rule SHALL apply in every output format: `hs info` in its normal, card, json and yaml
+  formats and with `-x FIELD`; `hs list` in its table, plain, normal, card, json and csv
   formats; and the completion time `hs wait` logs.
 - **R3** — WHEN the reader's time zone is set by `TZ`, the display SHALL follow it.
 - **R4** — A stamp stored without an offset (SQLite) SHALL be read as local wall time, the time its
@@ -67,6 +67,8 @@ reads `2026-01-01 14:00:00+00:00` on both backends.
   json and csv output machine-readable, and matches what a PostgreSQL site in the local zone shows
   today. Chosen by the foreman under the maintainer's go to run this cycle before 2.9.0 (2026-11-27);
   the alternative (local zone, no offset) was rejected because it is ambiguous in the repeated hour.
+- **Q:** R2 named a toml format for `hs info`; it has none (`-f` takes normal, card, json, yaml). —
+  **A:** Dropped from R2; no other change (foreman, 2026-11-27, at build).
 - **Q:** Release? — **A:** 2.9.0, ahead of the release, so the output change is not made in a patch
   (maintainer, 2026-11-27).
 
