@@ -11,12 +11,13 @@ from __future__ import annotations
 import os
 import re
 import json
+from datetime import datetime
 
 # Internal libs
-from hypershell.core.types import JSONData, to_json_type
+from hypershell.core.types import JSONData, ExtendedValue, to_json_type
 
 # Public interface
-__all__ = ['format_bytes', 'format_tag', 'format_json', 'format_source']
+__all__ = ['format_bytes', 'format_tag', 'format_json', 'format_source', 'to_display_type']
 
 
 def format_bytes(size: float) -> str:
@@ -41,9 +42,26 @@ def format_tag(key: str, value: JSONData) -> str:
         return f'{key}:{value}'
 
 
+def to_display_type(value: ExtendedValue) -> JSONData:
+    """Convert `value` for display, as `to_json_type` does, but with a time in the local zone.
+
+    A time is shown in the reader's local time zone with its UTC offset, whichever backend it came
+    from: SQLite returns the writer's local wall time without an offset, which is taken as local
+    time, and PostgreSQL returns an aware time in its session zone, which is converted. An instant
+    the local zone cannot hold (at either end of the calendar) is shown as stored. Display only:
+    `to_json_type` is also the wire format and stays as it is.
+    """
+    if isinstance(value, datetime):
+        try:
+            return value.astimezone().isoformat(sep=' ')
+        except (OverflowError, ValueError, OSError):
+            return value.isoformat(sep=' ')
+    return to_json_type(value)
+
+
 def format_json(value: JSONData) -> str:
     """Pretty-print value as JSON like while handling quoted arguments."""
-    result = json.dumps(to_json_type(value))
+    result = json.dumps(to_display_type(value))
     if result.startswith('"') and result.endswith('"'):
         result = result[1:-1]
     return result.replace('\\"', '"')
